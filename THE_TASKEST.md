@@ -1,0 +1,30 @@
+According to a document from 2026-03-26, a mostani rendszer fő baja nem az, hogy “még kevés a tréning”, hanem az, hogy több helyen hibás vagy félrekötött a tanulási jel. A 0.713 explained variance tényleg nagy előrelépés a critic oldalán, de a te futásodban a Sharpe még mindig negatív, az equity pedig 1000 alá esett, tehát a policy továbbra sem profitábilis. Ezt a saját deploy-gate logikád is alátámasztja: live-ra csak pozitívabb replay metrikákkal menne át.
+
+A legsúlyosabb, konkrét kódszintű hiba a pnl_sign state feature-ben van. A runtime_common.py előbb már irányhelyesen számolja az unrealised_pips értéket, utána viszont ezt még egyszer megszorozza position.direction-nel. Ennek az az eredménye, hogy short pozíciónál a nyerő trade negatív pnl_sign-t, a vesztes pedig pozitívat kap. Magyarul: a short oldal állapotjele fordítva van bekötve. Ez önmagában képes szétverni a short-policy tanulását, mert a state egyik kulcsjele ellentmond a valóságnak.
+
+A második kritikus hiba, hogy runtime tréningnél nincs valódi random episode start. A train_agent.py ugyan random_start=True paraméterrel hívja a runtime envet, de a RuntimeGymEnv ezt nem kapja meg és nem is használja; a reset() minden alkalommal fixen WARMUP_BARS-ról indul. Vagyis a PPO újra és újra ugyanarról a korai szeletéről kezdi a foldot. Ez túl könnyű overfitet okoz, rossz piaci lefedettséget ad, és magyarázza, miért tud a critic javulni anélkül, hogy a policy stabil edge-et tanulna.
+
+A feature_engine.py-ben a legfontosabb probléma nem az, hogy “rosszak a feature-ök”, hanem hogy a scaler-útvonal gyakorlatilag nem hat a tényleges observationre. A scaler csak az avg_spread-et tanulja és avg_spread_z-t képez, viszont a live/RL FEATURE_COLS nem ezt használja, hanem a rollingból számolt spread_z-t. A latest_observation kizárólag a FEATURE_COLS-t adja vissza, ezért a per-fold StandardScaler a döntési bemenetre érdemben nem jut el. A train script fold-scalerje így nagyrészt díszlet.
+
+Ugyanitt van egy másik, inkább tervezési szintű gond: a kód kiszámolja az időalapú ciklikus feature-öket (hour_sin, hour_cos, day_sin, day_cos), plusz RSI/MACD/ADX/Hurst/fractional-diff indikátorokat, de ezek nincsenek benne a tényleges FEATURE_COLS-ban. A live agent valójában csak 8 feature-t lát. FX-ben a session-idő, rollover, London/NY overlap gyakran sokkal fontosabb, mint még egy rövidtávú candle-transform. Tehát a rendszer pont olyan regime-információkat számol ki, amelyeket végül eldob.
+
+A reward sem ugyanazt optimalizálja, amit üzletileg szeretnél. A RuntimeEngine rewardja skálázott log-equity változás mínusz drawdown-penalty mínusz transaction-penalty, és ráadásul klippelve van. Emiatt könnyen előállhat az a helyzet, hogy a critic egyre jobban megtanulja ezt a proxy rewardot, miközben a stratégia továbbra is negatív Sharpe-ot és csökkenő equity-t termel. Ez teljesen összhangban van azzal, amit nálad látunk: “jobb EV, de még mindig veszteséges tradelés”.
+
+Az értékelési/logikai láncban is van torzítás. Foldonként kiszámolod a holdout_sharpe, holdout_max_drawdown és holdout_final_equity értékeket, de a deploy_ready mégis csak a tréning-gate-re és a validációs drawdownra épül, és a deployment candidate kiválasztása validációs Sharpe alapján történik. Vagyis a holdoutot méred, de az artifact-kiválasztásban nem használod döntő feltételként. Ez klasszikus “jól néz ki validáción, de OOS nem elég erős” csapda.
+
+Van még egy komoly konfigurációs drift is. A train_agent.py fejléc még 0.0→2.0 pip curriculumról és 19-feature engine-ről beszél, miközben a tényleges konstansok 0.2→0.5 pipet használnak, a feature set pedig 8 elemű. Emellett a tréning script default learning rate-je 0.001, target KL-je 0.015, míg a trading_config.py defaultjai 1e-4 és 0.03. Ez nem kozmetikai eltérés: 10x agresszívebb actor-frissítést és más PPO-viselkedést jelent. Ilyen drift mellett könnyű rossz következtetést levonni abból, hogy “mi működött”.
+
+Az adatmennyiség is karcsú. A saját minimumaid 5000 train bar, 200 validation bar és 500 holdout bar. Ez még hagyományos modelleknél is sovány, PPO-nál pedig különösen, főleg ilyen akciótér és költségmodell mellett. Ha a futásod csak picivel van e küszöbök fölött, akkor a rendszer inkább megtanul “nem teljesen szétesni”, mint valódi, stabil edge-et.
+
+Nálam a javítási sorrend ez lenne:
+
+Azonnal javítani: pnl_sign short-bug.
+A helyes sor gyakorlatilag ez lenne: pnl_sign = np.sign(unrealised_pips(...)). A * position.direction részt ki kell venni.
+Azonnal javítani: valódi random start runtime tréningben.
+Ne mindig WARMUP_BARS-ról induljon az epizód; válassz véletlen start indexet, és ahhoz prependelj warmup contextet.
+Feature-engine rendbetétele: vagy használd ténylegesen az avg_spread_z-t a FEATURE_COLS-ban, vagy szedd ki a scaler-utat. Emellé tegyél vissza legalább session/regime feature-öket a tényleges observationbe.
+Reward egyszerűsítése: először nettó equity/PnL változásra taníts, komponens-logolással (raw_pnl, cost_penalty, drawdown_penalty). Amíg nincs pozitív OOS Sharpe, addig ne büntetett-proxy rewardot finomhangolj.
+Kiválasztási logika: deployment candidate csak akkor legyen candidate, ha a holdout metrikák is teljesítik a küszöböt, ne csak a validation Sharpe.
+Konfig-egységesítés: egyetlen source of truth legyen slippage-re, feature count-ra, LR-re és KL-re. A mostani állapot túl sok rejtett driftet enged be.
+
+A rövid, őszinte összegzés: a feature_engine.py önmagában nem magyarázza a rossz eredményt, de benne van két fontos strukturális hiba: a scaler nem a valódi observationt táplálja, és a hasznos session/regime feature-ök nincsenek kitéve az agentnek. A rendszer viszont főleg azért nem tud jól tradelni, mert a short-state hibás, az epizódok fixen ugyanonnan indulnak, és a PPO jelenleg inkább egy torz reward-proxy-t tanul meg, nem stabil piaci edge-et.

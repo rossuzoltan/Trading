@@ -1,0 +1,1594 @@
+"""
+train_agent.py  –  Phase 11 Production Training Script
+=======================================================
+Phase 11 additions over Phase 10
+---------------------------------
+* Curriculum Learning: CurriculumCallback linearly anneals max_slippage_pips
+  from 0.0 -> 2.0 over total_timesteps. The agent first learns to be profitable
+  in a zero-friction world, then progressively adapts to real execution costs.
+* Purged Walk-Forward Validation: a 200-bar 'gap' is inserted between every
+  train/val window to prevent indicator leakage. Multiple folds are used to
+  detect strategy decay across time.
+* Sortino reward (asymmetric downturn penalty) already in trading_env.py.
+* 19-feature FeatureEngine (Hurst, Z-spread, vol_norm_atr, log_return_std).
+* Per-symbol StandardScaler fitted on training fold only.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from interpreter_guard import ensure_project_venv, project_venv_python
+
+ensure_project_venv(project_root=Path(__file__).resolve().parent, script_path=__file__)
+
+import os
+import copy
+import importlib.util
+import json
+import multiprocessing as mp
+import shutil
+import sys
+from datetime import datetime, timezone
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from typing import Any, Callable
+
+import torch
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover
+    load_dotenv = None
+from sb3_contrib import MaskablePPO
+from sb3_contrib.common.wrappers import ActionMasker
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
+from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.monitor import Monitor
+
+from artifact_manifest import DEFAULT_MANIFEST_NAME, create_manifest, save_manifest
+from device_utils import configure_training_runtime
+from feature_engine import FEATURE_COLS, WARMUP_BARS, _compute_raw, SCALER_PATH
+from masking_utils import action_mask_fn
+from runtime_common import STATE_FEATURE_COUNT, build_action_map
+from project_paths import ensure_runtime_dirs, resolve_dataset_path
+from trading_env import ForexTradingEnv
+from trading_config import (
+    ACTION_SL_MULTS,
+    ACTION_TP_MULTS,
+    DEFAULT_BAR_CONSTRUCTION_TICKS_PER_BAR,
+    DEFAULT_LEARNING_RATE,
+    DEFAULT_MIN_LEARNING_RATE,
+    DEFAULT_SLIPPAGE_END_PIPS,
+    DEFAULT_SLIPPAGE_START_PIPS,
+    DEFAULT_TARGET_KL,
+    DEPLOY_TIMED_SHARPE_MIN,
+    deployment_paths,
+    resolve_bar_construction_ticks_per_bar,
+)
+from validation_metrics import (
+    assess_training_data_sufficiency,
+    compute_max_drawdown,
+    compute_timed_sharpe,
+    save_json_report,
+    summarize_training_diagnostics,
+    training_data_minimums,
+)
+from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.linear_model import Ridge
+from sklearn.metrics import r2_score
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+import joblib
+
+if load_dotenv is not None:
+    load_dotenv()
+
+# ── Reproducibility ───────────────────────────────────────────────────────────
+SEED = 42
+torch.manual_seed(SEED)
+np.random.seed(SEED)
+
+# ── Curriculum config ─────────────────────────────────────────────────────────
+SLIPPAGE_START   = DEFAULT_SLIPPAGE_START_PIPS
+SLIPPAGE_END     = DEFAULT_SLIPPAGE_END_PIPS
+TOTAL_TIMESTEPS  = int(os.environ.get("TRAIN_TOTAL_TIMESTEPS", "3000000"))
+TRAIN_SYMBOL     = os.environ.get("TRAIN_SYMBOL", os.environ.get("TRADING_SYMBOL", "EURUSD")).strip().upper()
+TRAIN_ENV_MODE = os.environ.get("TRAIN_ENV_MODE", "runtime").strip().lower()
+PPO_LEARNING_RATE = float(os.environ.get("TRAIN_PPO_LEARNING_RATE", str(DEFAULT_LEARNING_RATE)))
+PPO_MIN_LEARNING_RATE = float(os.environ.get("TRAIN_PPO_MIN_LEARNING_RATE", str(DEFAULT_MIN_LEARNING_RATE)))
+PPO_TARGET_KL = float(os.environ.get("TRAIN_PPO_TARGET_KL", str(DEFAULT_TARGET_KL)))
+MIN_EXPLAINED_VARIANCE = float(os.environ.get("TRAIN_MIN_EXPLAINED_VARIANCE", "0.30"))
+KL_MIN = float(os.environ.get("TRAIN_KL_MIN", "0.01"))
+KL_MAX = float(os.environ.get("TRAIN_KL_MAX", "0.05"))
+DEPLOY_DD_MAX = float(os.environ.get("TRAIN_DEPLOY_DD_MAX", "0.30"))
+HOLDOUT_FRAC = float(os.environ.get("TRAIN_HOLDOUT_FRAC", "0.15"))
+POLICY_WIDTH = int(os.environ.get("TRAIN_POLICY_WIDTH", "128"))
+BAR_CONSTRUCTION_TICKS_PER_BAR = resolve_bar_construction_ticks_per_bar(
+    "TRAIN_BAR_TICKS",
+    "BAR_SPEC_TICKS_PER_BAR",
+    "TRAIN_TICKS_PER_BAR",
+    "TRADING_TICKS_PER_BAR",
+)
+TRAIN_POINT_IN_TIME_VERIFIED = os.environ.get("TRAIN_POINT_IN_TIME_VERIFIED", "0") == "1"
+TRAIN_DATASET_INTEGRITY_VERIFIED = os.environ.get("TRAIN_DATASET_INTEGRITY_VERIFIED", "0") == "1"
+PPO_N_STEPS = int(os.environ.get("TRAIN_PPO_N_STEPS", "2048"))
+PPO_BATCH_SIZE = int(os.environ.get("TRAIN_PPO_BATCH_SIZE", "1024"))
+PPO_N_EPOCHS = int(os.environ.get("TRAIN_PPO_N_EPOCHS", "10"))
+TRAIN_EVAL_FREQ = int(os.environ.get("TRAIN_EVAL_FREQ", "20000"))
+TRAIN_LOG_INTERVAL = int(os.environ.get("TRAIN_LOG_INTERVAL", "5"))
+PPO_ENT_COEF = float(os.environ.get("TRAIN_PPO_ENT_COEF", "0.015"))
+TRAIN_REQUIRE_BASELINE_GATE = os.environ.get("TRAIN_REQUIRE_BASELINE_GATE", "1") != "0"
+TRAIN_STARTUP_SMOKE_ONLY = os.environ.get("TRAIN_STARTUP_SMOKE_ONLY", "0") == "1"
+BASELINE_TARGET_HORIZON_BARS = int(os.environ.get("TRAIN_BASELINE_TARGET_HORIZON_BARS", "5"))
+BASELINE_R2_MIN = float(os.environ.get("TRAIN_BASELINE_R2_MIN", "0.0"))
+BASELINE_CORR_MIN = float(os.environ.get("TRAIN_BASELINE_CORR_MIN", "0.05"))
+BASELINE_SIGN_ACC_MIN = float(os.environ.get("TRAIN_BASELINE_SIGN_ACC_MIN", "0.52"))
+BASELINE_TREE_MAX_DEPTH = int(os.environ.get("TRAIN_BASELINE_TREE_MAX_DEPTH", "3"))
+BASELINE_TREE_MAX_ITER = int(os.environ.get("TRAIN_BASELINE_TREE_MAX_ITER", "100"))
+HEARTBEAT_SCHEMA_VERSION = 2
+PROCESS_STARTED_UTC = datetime.now(timezone.utc).isoformat()
+
+# ── Purged walk-forward config ────────────────────────────────────────────────
+PURGE_GAP_BARS   = int(os.environ.get("TRAIN_PURGE_GAP_BARS", "200"))
+N_FOLDS          = int(os.environ.get("TRAIN_N_FOLDS", "3"))
+FOLD_TEST_FRAC   = float(os.environ.get("TRAIN_FOLD_TEST_FRAC", "0.10"))
+BEST_VECNORMALIZE_NAME = "best_vecnormalize.pkl"
+CURRENT_TRAINING_RUN_PATH = Path("checkpoints") / "current_training_run.json"
+
+
+def _json_default(value: Any) -> Any:
+    if isinstance(value, (np.bool_,)):
+        return bool(value)
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating,)):
+        return float(value)
+    raise TypeError(f"Object of type {value.__class__.__name__} is not JSON serializable")
+
+
+def resolve_train_vec_env_type(
+    *,
+    requested_envs: int | None,
+    effective_envs: int,
+    force_dummy: bool,
+) -> tuple[str, list[str]]:
+    warnings: list[str] = []
+    if force_dummy:
+        warnings.append("TRAIN_FORCE_DUMMY_VEC=1 forces DummyVecEnv for training; use this only for debug or profiling.")
+    if requested_envs == 1:
+        warnings.append("TRAIN_NUM_ENVS=1 disables parallel experience collection; use this only for debug or profiling.")
+    vec_env_type = "dummy" if force_dummy or effective_envs <= 1 else "subproc"
+    if vec_env_type == "dummy" and effective_envs <= 1:
+        warnings.append("Training is running with a single environment worker; expect lower throughput and noisier PPO updates.")
+    return vec_env_type, warnings
+
+
+# ── Curriculum Learning Callback ──────────────────────────────────────────────
+
+class CurriculumCallback(BaseCallback):
+    """
+    Linearly anneals max_slippage_pips in the training environments
+    from SLIPPAGE_START to SLIPPAGE_END over total_timesteps.
+
+    Phase 1 (0–33%)  : 0.0 pip slippage — agent learns basic strategy
+    Phase 2 (33–66%) : 1.0 pip slippage — adapts to execution friction
+    Phase 3 (66–100%): 2.0 pip slippage — fully realistic execution
+    """
+
+    def __init__(self, total_timesteps: int, verbose: int = 0):
+        super().__init__(verbose)
+        self.total_timesteps = total_timesteps
+        self._last_logged = -1
+
+    def _current_slippage(self) -> float:
+        progress = min(self.num_timesteps / self.total_timesteps, 1.0)
+        return SLIPPAGE_START + progress * (SLIPPAGE_END - SLIPPAGE_START)
+
+    def _on_step(self) -> bool:
+        slip = self._current_slippage()
+        try:
+            self.training_env.set_attr("max_slippage_pips", slip)
+        except Exception:
+            pass
+
+        # Log every 50k steps
+        milestone = self.num_timesteps // 50_000
+        if milestone != self._last_logged:
+            self._last_logged = milestone
+            if self.verbose:
+                print(f"[Curriculum] Step {self.num_timesteps:,}  slippage={slip:.2f} pips")
+        return True
+
+
+class SaveVecNormalizeCallback(BaseCallback):
+    def __init__(self, save_path: str, verbose: int = 0):
+        super().__init__(verbose)
+        self.save_path = save_path
+
+    def _on_step(self) -> bool:
+        vecnormalize = self.model.get_vec_normalize_env()
+        if vecnormalize is not None:
+            Path(self.save_path).parent.mkdir(parents=True, exist_ok=True)
+            vecnormalize.save(self.save_path)
+            if self.verbose:
+                print(f"[VecNormalize] Saved stats -> {self.save_path}")
+        return True
+
+
+class FullPathEvalCallback(BaseCallback):
+    def __init__(
+        self,
+        eval_env,
+        *,
+        train_vecnormalize: VecNormalize,
+        eval_vecnormalize: VecNormalize,
+        best_model_save_path: str | Path,
+        best_vecnormalize_path: str | Path | None = None,
+        eval_freq: int = 10_000,
+        metric_key: str = "timed_sharpe",
+        history_path: str | Path | None = None,
+        verbose: int = 0,
+    ) -> None:
+        super().__init__(verbose=verbose)
+        self.eval_env = eval_env
+        self._train_vecnormalize = train_vecnormalize
+        self._eval_vecnormalize = eval_vecnormalize
+        self.best_model_save_path = Path(best_model_save_path)
+        self.best_vecnormalize_path = Path(best_vecnormalize_path) if best_vecnormalize_path else None
+        self.eval_freq = max(int(eval_freq), 0)
+        self.metric_key = str(metric_key)
+        self.history_path = Path(history_path) if history_path else None
+        self.best_metric = -float("inf")
+        self.latest_metrics: dict[str, Any] | None = None
+        self.history: list[dict[str, Any]] = []
+
+    def _on_step(self) -> bool:
+        if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
+            sync_vecnormalize_stats(self._train_vecnormalize, self._eval_vecnormalize)
+            _, metrics = evaluate_model(self.model, self.eval_env)
+            metrics = {
+                **metrics,
+                "num_timesteps": int(self.num_timesteps),
+                "path_runs": 1,
+                "deterministic": True,
+                "full_path_eval_used": True,
+            }
+            self.latest_metrics = metrics
+            self.history.append(metrics)
+            if self.history_path is not None:
+                self.history_path.parent.mkdir(parents=True, exist_ok=True)
+                self.history_path.write_text(
+                    json.dumps({"evaluations": self.history}, indent=2, default=_json_default),
+                    encoding="utf-8",
+                )
+
+            current_metric = float(metrics.get(self.metric_key, -float("inf")))
+            if np.isfinite(current_metric) and current_metric > self.best_metric:
+                self.best_metric = current_metric
+                self.best_model_save_path.mkdir(parents=True, exist_ok=True)
+                self.model.save(str((self.best_model_save_path / "best_model").with_suffix("")))
+                if self.best_vecnormalize_path is not None:
+                    self.best_vecnormalize_path.parent.mkdir(parents=True, exist_ok=True)
+                    self._train_vecnormalize.save(str(self.best_vecnormalize_path))
+
+            if self.verbose:
+                print(
+                    f"[Eval] Step {self.num_timesteps:,} | "
+                    f"timed_sharpe={float(metrics.get('timed_sharpe', 0.0)):.3f} | "
+                    f"final_equity={float(metrics.get('final_equity', 0.0)):.2f} | "
+                    f"max_drawdown={float(metrics.get('max_drawdown', 0.0)):.1%}"
+                )
+        return True
+
+
+class TrainingDiagnosticsCallback(BaseCallback):
+    def __init__(self, verbose: int = 0, *, print_every_steps: int | None = None):
+        super().__init__(verbose)
+        self.metrics: dict[str, list[float]] = {
+            "train/approx_kl": [],
+            "train/explained_variance": [],
+            "train/value_loss": [],
+        }
+        self._last_update_index: int | None = None
+        self._last_metric_snapshot: tuple[tuple[str, float], ...] | None = None
+        if print_every_steps is None:
+            print_every_steps = int(os.environ.get("TRAIN_PROGRESS_EVERY_STEPS", "50000"))
+        self._print_every_steps = max(int(print_every_steps), 0)
+        self._next_print = self._print_every_steps
+
+    def _on_step(self) -> bool:
+        logger_values = getattr(self.model.logger, "name_to_value", {})
+        current_values: dict[str, float] = {}
+        for key in self.metrics:
+            value = logger_values.get(key)
+            if value is None:
+                continue
+            try:
+                current_values[key] = float(value)
+            except (TypeError, ValueError):
+                continue
+        update_index: int | None = None
+        raw_update_index = logger_values.get("train/n_updates")
+        if raw_update_index is not None:
+            try:
+                update_index = int(raw_update_index)
+            except (TypeError, ValueError):
+                update_index = None
+        metric_snapshot = tuple(sorted(current_values.items()))
+        duplicate_update = update_index is not None and update_index == self._last_update_index
+        duplicate_snapshot = bool(metric_snapshot) and metric_snapshot == self._last_metric_snapshot
+        if current_values and not duplicate_update and not duplicate_snapshot:
+            for key, value in current_values.items():
+                self.metrics[key].append(value)
+            self._last_update_index = update_index
+            self._last_metric_snapshot = metric_snapshot
+        if self.verbose and self._print_every_steps and self.num_timesteps >= self._next_print:
+            self._next_print += self._print_every_steps
+            summary = self.summary()
+            print(
+                f"[PPO] Step {self.num_timesteps:,} | "
+                f"explained_variance={summary['explained_variance']:.3f} | "
+                f"approx_kl={summary['approx_kl']:.3f} | "
+                f"value_loss_mean(last10)={summary['value_loss_mean_last10']:.3f}"
+            )
+        return True
+
+    def summary(self) -> dict[str, float | bool]:
+        approx_kl = self.metrics["train/approx_kl"]
+        explained_variance = self.metrics["train/explained_variance"]
+        value_loss = self.metrics["train/value_loss"]
+        last_kl = approx_kl[-1] if approx_kl else float("nan")
+        last_ev = explained_variance[-1] if explained_variance else float("nan")
+        recent_value_loss = value_loss[-10:] if value_loss else []
+        value_loss_mean = float(np.mean(recent_value_loss)) if recent_value_loss else float("nan")
+        value_loss_std = float(np.std(recent_value_loss)) if recent_value_loss else float("nan")
+        diagnostic_sample_count = int(max(len(approx_kl), len(explained_variance), len(value_loss)))
+        n_updates = int(self._last_update_index) if self._last_update_index is not None else None
+        metrics_fresh = bool(diagnostic_sample_count > 0 and n_updates is not None)
+        value_loss_stable = bool(
+            bool(recent_value_loss) and np.isfinite(value_loss_mean) and np.isfinite(value_loss_std)
+        )
+        passes = bool(
+            np.isfinite(last_kl)
+            and np.isfinite(last_ev)
+            and value_loss_stable
+            and MIN_EXPLAINED_VARIANCE <= float(last_ev)
+            and KL_MIN <= float(last_kl) <= KL_MAX
+        )
+        blockers: list[str] = []
+        if not np.isfinite(last_ev) or float(last_ev) < MIN_EXPLAINED_VARIANCE:
+            blockers.append(f"explained_variance below {MIN_EXPLAINED_VARIANCE:.2f}")
+        if not np.isfinite(last_kl) or not (KL_MIN <= float(last_kl) <= KL_MAX):
+            blockers.append(f"approx_kl outside [{KL_MIN:.2f}, {KL_MAX:.2f}]")
+        if not value_loss_stable:
+            blockers.append("value_loss is not stable")
+        return {
+            "approx_kl": float(last_kl),
+            "explained_variance": float(last_ev),
+            "value_loss_mean_last10": value_loss_mean,
+            "value_loss_std_last10": value_loss_std,
+            "value_loss_stable": value_loss_stable,
+            "n_updates": n_updates,
+            "diagnostic_sample_count": diagnostic_sample_count,
+            "last_distinct_update_seen": n_updates,
+            "metrics_fresh": metrics_fresh,
+            "passes_thresholds": passes,
+            "gate_passed": passes,
+            "blockers": blockers,
+        }
+
+
+class TrainingHeartbeatCallback(BaseCallback):
+    def __init__(
+        self,
+        *,
+        out_path: str | Path,
+        diagnostics_cb: TrainingDiagnosticsCallback,
+        run_id: str,
+        symbol: str,
+        checkpoints_root: str | Path,
+        fold_index: int | None = None,
+        current_run_path: str | Path = CURRENT_TRAINING_RUN_PATH,
+        every_steps: int = 5_000,
+        verbose: int = 0,
+    ) -> None:
+        super().__init__(verbose)
+        self.out_path = Path(out_path)
+        self.diagnostics_cb = diagnostics_cb
+        self.run_id = str(run_id)
+        self.symbol = str(symbol).upper()
+        self.checkpoints_root = Path(checkpoints_root)
+        self.fold_index = int(fold_index) if fold_index is not None else None
+        self.current_run_path = Path(current_run_path)
+        self.every_steps = max(int(every_steps), 0)
+        self._next_write = self.every_steps if self.every_steps else 0
+
+    def _on_step(self) -> bool:
+        if not self.every_steps:
+            return True
+        if self.num_timesteps < self._next_write:
+            return True
+        self._next_write += self.every_steps
+        diagnostics_summary = self.diagnostics_cb.summary()
+        payload = {
+            "schema_version": HEARTBEAT_SCHEMA_VERSION,
+            "run_id": self.run_id,
+            "symbol": self.symbol,
+            "fold_index": self.fold_index,
+            "checkpoints_root": str(self.checkpoints_root),
+            "process_started_utc": PROCESS_STARTED_UTC,
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "num_timesteps": int(self.num_timesteps),
+            "n_updates": diagnostics_summary.get("n_updates"),
+            "diagnostic_sample_count": diagnostics_summary.get("diagnostic_sample_count"),
+            "ppo_diagnostics": diagnostics_summary,
+        }
+        self.out_path.parent.mkdir(parents=True, exist_ok=True)
+        self.out_path.write_text(json.dumps(payload, indent=2, default=_json_default), encoding="utf-8")
+        _write_current_training_run_context(
+            run_id=self.run_id,
+            symbol=self.symbol,
+            checkpoints_root=self.checkpoints_root,
+            state="training",
+            fold_index=self.fold_index,
+            heartbeat_path=self.out_path,
+            out_path=self.current_run_path,
+        )
+        if self.verbose:
+            print(f"[Heartbeat] Wrote -> {self.out_path}")
+        return True
+
+
+# ── Purged Walk-Forward Split ─────────────────────────────────────────────────
+
+def purged_walk_forward_splits(
+    df: pd.DataFrame,
+    n_folds: int = N_FOLDS,
+    test_frac: float = FOLD_TEST_FRAC,
+    purge_gap: int = PURGE_GAP_BARS,
+) -> list[tuple[pd.DataFrame, pd.DataFrame]]:
+    """
+    Anchored-expansion purged walk-forward folds.
+
+    Each fold expands the training window forward in time.
+    A purge_gap ensures indicator leakage cannot cross the boundary.
+
+    Example (3 folds, test_frac=0.10, gap=200, N=2000):
+      Total reserved for OOS = n_folds × test_frac × N = 600 bars
+      Fold 0: train=[0:1200]  gap  val=[1400:1600]
+      Fold 1: train=[0:1400]  gap  val=[1600:1800]
+      Fold 2: train=[0:1600]  gap  val=[1800:2000]
+    """
+    n = len(df)
+    minimums = training_data_minimums()
+    min_val_size = int(minimums["min_val_bars"])
+    val_size = max(min_val_size, int(n * test_frac))
+
+    # In TRAIN_ENV_MODE=runtime, features are recomputed online via FeatureEngine, so a large
+    # "purge gap" is usually unnecessary. Default to 0 unless explicitly overridden.
+    effective_purge_gap_default = int(purge_gap)
+    if TRAIN_ENV_MODE == "runtime":
+        runtime_override = os.environ.get("TRAIN_PURGE_GAP_RUNTIME_BARS", "").strip()
+        effective_purge_gap_default = int(runtime_override) if runtime_override else 0
+
+    adaptive_gap = os.environ.get("TRAIN_ADAPTIVE_PURGE_GAP", "1") != "0"
+    min_train_bars = int(max(minimums["min_train_bars"], int(WARMUP_BARS) + 20))
+    min_gap_bars = int(os.environ.get("TRAIN_PURGE_GAP_MIN_BARS", "0"))
+
+    # val windows anchored at the END, expanding backwards
+    # val_end for last fold = n, for fold k = n - (n_folds - 1 - k) * val_size
+    folds = []
+    for k in range(n_folds):
+        val_end   = n - (n_folds - 1 - k) * val_size
+        val_start = val_end - val_size
+        gap = int(effective_purge_gap_default)
+        if adaptive_gap:
+            # Shrink gaps for small datasets so folds remain usable.
+            # We prioritize keeping at least `min_train_bars` training rows.
+            max_gap_for_min_train = max(0, int(val_start) - int(min_train_bars))
+            gap = min(gap, max_gap_for_min_train)
+            if gap < min_gap_bars and val_start - min_gap_bars >= min_train_bars:
+                gap = min_gap_bars
+        train_end = val_start - gap
+
+        rejection_reasons: list[str] = []
+        if val_start >= val_end:
+            rejection_reasons.append("invalid validation slice")
+        if train_end < min_train_bars:
+            rejection_reasons.append(f"train bars {train_end} < required {min_train_bars}")
+        if (val_end - val_start) < min_val_size:
+            rejection_reasons.append(f"validation bars {val_end - val_start} < required {min_val_size}")
+        if rejection_reasons:
+            print(f"  Fold {k}: skipped ({'; '.join(rejection_reasons)})")
+            continue
+
+        train_df = df.iloc[:train_end].copy()
+        val_df   = df.iloc[val_start:val_end].copy()
+        folds.append((train_df, val_df))
+        print(f"  Fold {k}: train=[0:{train_end}]  gap={gap}bars  "
+              f"val=[{val_start}:{val_end}]  ({len(val_df)} bars)")
+    return folds
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def linear_schedule(initial_value: float, min_value: float = 1e-6) -> Callable:
+    def func(progress_remaining: float) -> float:
+        return max(progress_remaining * initial_value, min_value)
+    return func
+
+
+def make_env(df, feature_cols, sl_opts, tp_opts, random_start=True,
+             initial_slippage: float = 0.0, symbol: str = "EURUSD", scaler: StandardScaler | None = None):
+    def _init():
+        if TRAIN_ENV_MODE == "runtime":
+            if scaler is None:
+                raise RuntimeError("TRAIN_ENV_MODE=runtime requires a per-fold scaler.")
+            from runtime_gym_env import RuntimeGymConfig, RuntimeGymEnv
+
+            action_map = build_action_map(sl_opts, tp_opts)
+            env = RuntimeGymEnv(
+                symbol=symbol,
+                bars_frame=df,
+                scaler=scaler,
+                action_map=action_map,
+                config=RuntimeGymConfig(
+                    slippage_pips=float(initial_slippage),
+                    random_start=bool(random_start),
+                ),
+            )
+        else:
+            env = ForexTradingEnv(
+                df=df,
+                feature_columns=feature_cols,
+                sl_options=sl_opts,
+                tp_options=tp_opts,
+                random_start=random_start,
+                initial_equity=1_000.0,
+                lot_size=0.01,
+                max_slippage_pips=initial_slippage,  # starts at 0, annealed by curriculum
+                use_trailing_stop=True,
+                use_variable_spread=True,
+                atr_scaled=True,
+                vol_scaling=True,
+                target_risk_pct=0.01,
+                symbol=symbol,
+            )
+        env = ActionMasker(env, action_mask_fn)
+        env = Monitor(env)
+        return env
+    return _init
+
+
+def wrap_vecnormalize(vec_env, *, training: bool):
+    return VecNormalize(
+        vec_env,
+        training=training,
+        norm_obs=True,
+        norm_reward=False,
+        clip_obs=10.0,
+        clip_reward=10.0,
+    )
+
+
+def sync_vecnormalize_stats(source: VecNormalize, target: VecNormalize) -> None:
+    target.obs_rms = copy.deepcopy(source.obs_rms)
+    target.ret_rms = copy.deepcopy(source.ret_rms)
+    target.training = False
+    target.norm_reward = False
+
+
+def _curve_segment_metrics(
+    equity_curve: list[float],
+    timestamps: list[pd.Timestamp],
+) -> dict[str, dict[str, float | int]]:
+    labels = ("first", "middle", "last")
+    segments: dict[str, dict[str, float | int]] = {}
+    if not equity_curve:
+        for label in labels:
+            segments[label] = {
+                "steps": 0,
+                "final_equity": 0.0,
+                "timed_sharpe": 0.0,
+                "max_drawdown": 0.0,
+            }
+        return segments
+
+    curve_len = len(equity_curve)
+    time_len = len(timestamps)
+    for label, indices in zip(labels, np.array_split(np.arange(curve_len), 3)):
+        if len(indices) == 0:
+            segments[label] = {
+                "steps": 0,
+                "final_equity": 0.0,
+                "timed_sharpe": 0.0,
+                "max_drawdown": 0.0,
+            }
+            continue
+        start = int(indices[0])
+        end = int(indices[-1]) + 1
+        seg_curve = equity_curve[start:end]
+        seg_timestamps = timestamps[start:min(end, time_len)] if time_len else []
+        segments[label] = {
+            "steps": int(len(seg_curve)),
+            "final_equity": float(seg_curve[-1]),
+            "timed_sharpe": compute_timed_sharpe(seg_curve, seg_timestamps),
+            "max_drawdown": compute_max_drawdown(seg_curve),
+        }
+    return segments
+
+
+def evaluate_model(model, eval_env) -> tuple[list[float], dict[str, Any]]:
+    obs = eval_env.reset()
+    equity_curve: list[float] = []
+    timestamps: list[pd.Timestamp] = []
+    rewards: list[float] = []
+    while True:
+        masks  = eval_env.env_method("action_masks")
+        action, _ = model.predict(obs, action_masks=masks, deterministic=True)
+        step_out   = eval_env.step(action)
+        if len(step_out) == 4:
+            obs, reward, dones, infos = step_out
+            done = bool(dones[0])
+        else:
+            obs, reward, terminated, truncated, infos = step_out
+            done = bool(terminated[0] or truncated[0])
+        info = infos[0] if infos else {}
+        reward_value = reward[0] if isinstance(reward, (list, tuple, np.ndarray)) else reward
+        rewards.append(float(reward_value))
+        if "equity" in info:
+            equity_curve.append(float(info["equity"]))
+        elif "total_equity_usd" in info:
+            equity_curve.append(float(info["total_equity_usd"]))
+        else:
+            try:
+                equity_curve.append(float(eval_env.get_attr("equity_usd")[0]))
+            except Exception:
+                equity_curve.append(1_000.0)
+        timestamp_utc = info.get("timestamp_utc")
+        if timestamp_utc:
+            timestamps.append(pd.Timestamp(timestamp_utc))
+        if done:
+            break
+    metrics = {
+        "final_equity": float(equity_curve[-1]) if equity_curve else 1_000.0,
+        "timed_sharpe": compute_timed_sharpe(equity_curve, timestamps),
+        "max_drawdown": compute_max_drawdown(equity_curve),
+        "steps": int(len(equity_curve)),
+        "total_reward": float(np.sum(rewards)) if rewards else 0.0,
+        "mean_step_reward": float(np.mean(rewards)) if rewards else 0.0,
+        "segment_metrics": _curve_segment_metrics(equity_curve, timestamps),
+    }
+    return equity_curve, metrics
+
+
+def _split_holdout(df: pd.DataFrame, holdout_frac: float) -> tuple[pd.DataFrame, pd.DataFrame]:
+    minimums = training_data_minimums()
+    holdout_size = max(minimums["min_holdout_bars"], int(len(df) * holdout_frac))
+    split_idx = len(df) - holdout_size
+    if split_idx < minimums["min_train_bars"]:
+        raise RuntimeError(
+            f"Not enough rows ({len(df)}) to reserve a disjoint holdout of {holdout_size} bars "
+            f"while keeping at least {minimums['min_train_bars']} training bars."
+        )
+    return df.iloc[:split_idx].copy(), df.iloc[split_idx:].copy()
+
+
+def _safe_pearson_corr(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    if y_true.size == 0 or y_pred.size == 0:
+        return 0.0
+    if y_true.shape != y_pred.shape:
+        raise ValueError("y_true and y_pred must have the same shape.")
+    if np.std(y_true) == 0.0 or np.std(y_pred) == 0.0:
+        return 0.0
+    return float(np.corrcoef(y_true, y_pred)[0, 1])
+
+
+def _sign_accuracy(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    if y_true.size == 0 or y_pred.size == 0:
+        return 0.0
+    return float(np.mean(np.sign(y_true) == np.sign(y_pred)))
+
+
+def _prepare_supervised_xy(
+    frame: pd.DataFrame,
+    *,
+    feature_cols: list[str],
+    horizon_bars: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    if "Close" not in frame.columns:
+        raise RuntimeError("Baseline gate requires a Close column.")
+    missing = [col for col in feature_cols if col not in frame.columns]
+    if missing:
+        raise RuntimeError(f"Baseline gate missing feature columns: {missing}")
+
+    dataset = frame.loc[:, [*feature_cols, "Close"]].copy()
+    dataset["target"] = np.log(dataset["Close"].shift(-horizon_bars) / dataset["Close"])
+    dataset = dataset.replace([np.inf, -np.inf], np.nan).dropna(subset=[*feature_cols, "target"])
+    if dataset.empty:
+        return np.empty((0, len(feature_cols)), dtype=np.float64), np.empty(0, dtype=np.float64)
+    x = dataset[feature_cols].to_numpy(dtype=np.float64, copy=True)
+    y = dataset["target"].to_numpy(dtype=np.float64, copy=True)
+    return x, y
+
+
+def _baseline_prediction_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float | bool]:
+    if y_true.size == 0 or y_pred.size == 0:
+        return {
+            "r2": float("nan"),
+            "pearson_corr": float("nan"),
+            "sign_accuracy": float("nan"),
+            "pass_thresholds": False,
+        }
+    r2 = float(r2_score(y_true, y_pred))
+    corr = _safe_pearson_corr(y_true, y_pred)
+    sign_acc = _sign_accuracy(y_true, y_pred)
+    passes = bool(
+        np.isfinite(r2)
+        and np.isfinite(corr)
+        and np.isfinite(sign_acc)
+        and r2 > BASELINE_R2_MIN
+        and corr >= BASELINE_CORR_MIN
+        and sign_acc >= BASELINE_SIGN_ACC_MIN
+    )
+    return {
+        "r2": r2,
+        "pearson_corr": corr,
+        "sign_accuracy": sign_acc,
+        "pass_thresholds": passes,
+    }
+
+
+def _fit_baseline_models(
+    x_train: np.ndarray,
+    y_train: np.ndarray,
+) -> dict[str, Any]:
+    ridge = Pipeline(
+        steps=[
+            ("scaler", StandardScaler()),
+            ("model", Ridge(alpha=1.0)),
+        ]
+    )
+    tree = HistGradientBoostingRegressor(
+        max_depth=BASELINE_TREE_MAX_DEPTH,
+        max_iter=BASELINE_TREE_MAX_ITER,
+        random_state=SEED,
+    )
+    ridge.fit(x_train, y_train)
+    tree.fit(x_train, y_train)
+    return {
+        "ridge": ridge,
+        "hist_gradient_boosting": tree,
+    }
+
+
+def run_baseline_research_gate(
+    *,
+    symbol: str,
+    trainable_frame: pd.DataFrame,
+    holdout_frame: pd.DataFrame,
+    folds: list[tuple[pd.DataFrame, pd.DataFrame]],
+    feature_cols: list[str],
+    out_path: str | Path,
+    horizon_bars: int = BASELINE_TARGET_HORIZON_BARS,
+) -> dict[str, Any]:
+    fold_reports: list[dict[str, Any]] = []
+    for fold_idx, (fold_train, fold_val) in enumerate(folds):
+        x_train, y_train = _prepare_supervised_xy(fold_train, feature_cols=feature_cols, horizon_bars=horizon_bars)
+        x_val, y_val = _prepare_supervised_xy(fold_val, feature_cols=feature_cols, horizon_bars=horizon_bars)
+        fold_payload: dict[str, Any] = {
+            "fold": int(fold_idx),
+            "train_samples": int(y_train.size),
+            "val_samples": int(y_val.size),
+            "models": {},
+        }
+        if y_train.size == 0 or y_val.size == 0:
+            fold_payload["blockers"] = ["Insufficient non-null samples for baseline validation."]
+            fold_reports.append(fold_payload)
+            continue
+        fitted = _fit_baseline_models(x_train, y_train)
+        for model_name, model in fitted.items():
+            preds = np.asarray(model.predict(x_val), dtype=np.float64)
+            fold_payload["models"][model_name] = _baseline_prediction_metrics(y_val, preds)
+        fold_reports.append(fold_payload)
+
+    x_trainable, y_trainable = _prepare_supervised_xy(
+        trainable_frame,
+        feature_cols=feature_cols,
+        horizon_bars=horizon_bars,
+    )
+    x_holdout, y_holdout = _prepare_supervised_xy(
+        holdout_frame,
+        feature_cols=feature_cols,
+        horizon_bars=horizon_bars,
+    )
+    holdout_models: dict[str, Any] = {}
+    holdout_blockers: list[str] = []
+    passing_models: list[str] = []
+    if y_trainable.size == 0 or y_holdout.size == 0:
+        holdout_blockers.append("Insufficient non-null samples for baseline holdout.")
+    else:
+        fitted = _fit_baseline_models(x_trainable, y_trainable)
+        for model_name, model in fitted.items():
+            preds = np.asarray(model.predict(x_holdout), dtype=np.float64)
+            metrics = _baseline_prediction_metrics(y_holdout, preds)
+            holdout_models[model_name] = metrics
+            if bool(metrics["pass_thresholds"]):
+                passing_models.append(model_name)
+
+    report = {
+        "symbol": str(symbol).upper(),
+        "target_horizon_bars": int(horizon_bars),
+        "feature_columns": list(feature_cols),
+        "thresholds": {
+            "r2_gt": BASELINE_R2_MIN,
+            "pearson_corr_gte": BASELINE_CORR_MIN,
+            "sign_accuracy_gte": BASELINE_SIGN_ACC_MIN,
+        },
+        "fold_metrics": fold_reports,
+        "holdout_metrics": {
+            "train_samples": int(y_trainable.size),
+            "holdout_samples": int(y_holdout.size),
+            "models": holdout_models,
+            "blockers": holdout_blockers,
+        },
+        "passing_models": passing_models,
+        "gate_passed": bool(passing_models),
+    }
+    save_json_report(report, out_path)
+    return report
+
+
+def _resolve_frame_position(frame: pd.DataFrame, start_index: Any) -> int:
+    loc = frame.index.get_loc(start_index)
+    if isinstance(loc, slice):
+        return int(loc.start or 0)
+    if isinstance(loc, (np.ndarray, list)):
+        return int(loc[0]) if len(loc) else 0
+    return int(loc)
+
+
+def _prepend_runtime_warmup_context(full_frame: pd.DataFrame, segment_frame: pd.DataFrame) -> pd.DataFrame:
+    if segment_frame.empty:
+        raise RuntimeError("Evaluation segment is empty.")
+    start_index = segment_frame.index[0]
+    start_pos = _resolve_frame_position(full_frame, start_index)
+    warmup_start = max(0, start_pos - int(WARMUP_BARS))
+    warmup_frame = full_frame.iloc[warmup_start:start_pos].copy()
+    return pd.concat([warmup_frame, segment_frame], axis=0)
+
+
+def _fit_and_apply_fold_scaler(train_df: pd.DataFrame, val_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, StandardScaler]:
+    train_scaled = train_df.copy()
+    val_scaled = val_df.copy()
+    scaler = StandardScaler()
+    scaler.fit(train_scaled.loc[:, FEATURE_COLS])
+    train_scaled.loc[:, FEATURE_COLS] = scaler.transform(train_scaled.loc[:, FEATURE_COLS])
+    val_scaled.loc[:, FEATURE_COLS] = scaler.transform(val_scaled.loc[:, FEATURE_COLS])
+    return train_scaled, val_scaled, scaler
+
+
+def _holdout_deployment_blockers(
+    *,
+    holdout_sharpe: float,
+    holdout_max_drawdown: float,
+    holdout_final_equity: float,
+    initial_equity: float = 1_000.0,
+) -> list[str]:
+    blockers: list[str] = []
+    if float(holdout_sharpe) < DEPLOY_TIMED_SHARPE_MIN:
+        blockers.append(f"Holdout timed Sharpe {float(holdout_sharpe):.3f} < {DEPLOY_TIMED_SHARPE_MIN:.2f}")
+    if float(holdout_max_drawdown) > DEPLOY_DD_MAX:
+        blockers.append(f"Holdout max drawdown {float(holdout_max_drawdown):.1%} > {DEPLOY_DD_MAX:.0%}")
+    if float(holdout_final_equity) < float(initial_equity):
+        blockers.append(
+            f"Holdout final equity {float(holdout_final_equity):.2f} < initial equity {float(initial_equity):.2f}"
+        )
+    return blockers
+
+
+def _deployment_candidate_rank(diagnostics: dict[str, Any]) -> tuple[float, float] | None:
+    if not bool(diagnostics.get("deploy_ready", False)):
+        return None
+    return (
+        float(diagnostics.get("holdout_sharpe", float("-inf"))),
+        float(diagnostics.get("val_sharpe", float("-inf"))),
+    )
+
+
+def _archive_paths(paths: list[Path], *, archive_root: Path) -> list[str]:
+    archived: list[str] = []
+    seen: set[str] = set()
+    archive_root.mkdir(parents=True, exist_ok=True)
+    for raw_path in paths:
+        path = Path(raw_path)
+        normalized = str(path)
+        if normalized in seen or not path.exists():
+            continue
+        seen.add(normalized)
+        destination = archive_root / path.name
+        suffix = 1
+        while destination.exists():
+            destination = archive_root / f"{path.stem}_{suffix}{path.suffix}"
+            suffix += 1
+        shutil.move(str(path), str(destination))
+        archived.append(str(destination))
+    return archived
+
+
+def _clear_legacy_checkpoint_artifacts(*, run_id: str, checkpoints_root: Path = Path("checkpoints")) -> list[str]:
+    legacy_paths = [
+        *checkpoints_root.glob("fold_*"),
+        checkpoints_root / "best_model.zip",
+        checkpoints_root / "best_vecnormalize.pkl",
+    ]
+    archive_root = checkpoints_root / "archive" / run_id
+    return _archive_paths(legacy_paths, archive_root=archive_root)
+
+
+def _write_current_training_run_context(
+    *,
+    run_id: str,
+    symbol: str,
+    checkpoints_root: Path,
+    state: str,
+    fold_index: int | None = None,
+    heartbeat_path: str | Path | None = None,
+    out_path: str | Path = CURRENT_TRAINING_RUN_PATH,
+) -> Path:
+    payload = {
+        "schema_version": 1,
+        "run_id": str(run_id),
+        "symbol": str(symbol).upper(),
+        "checkpoints_root": str(checkpoints_root),
+        "process_started_utc": PROCESS_STARTED_UTC,
+        "pid": int(os.getpid()),
+        "state": str(state),
+        "fold_index": int(fold_index) if fold_index is not None else None,
+        "heartbeat_path": str(Path(heartbeat_path)) if heartbeat_path is not None else None,
+        "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+    }
+    destination = Path(out_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        json.dumps(payload, indent=2, default=_json_default),
+        encoding="utf-8",
+    )
+    return destination
+
+
+def _clear_current_run_artifacts(
+    *,
+    primary_symbol: str,
+    model_artifact_path: Path,
+    vecnormalize_artifact_path: Path,
+    run_id: str,
+) -> list[str]:
+    report_paths = deployment_paths(primary_symbol)
+    paths_to_archive = [
+        model_artifact_path,
+        vecnormalize_artifact_path,
+        Path(f"models/scaler_{primary_symbol}.pkl"),
+        SCALER_PATH,
+        Path(f"models/artifact_manifest_{primary_symbol}.json"),
+        Path("models") / DEFAULT_MANIFEST_NAME,
+        report_paths.diagnostics_path,
+        report_paths.gate_path,
+        report_paths.live_preflight_path,
+        report_paths.ops_attestation_path,
+    ]
+    archive_root = Path("models") / "archive" / primary_symbol.lower() / run_id
+    return _archive_paths(paths_to_archive, archive_root=archive_root)
+
+
+def _build_promoted_training_diagnostics(
+    diagnostics: dict[str, Any],
+    *,
+    run_id: str,
+    artifact_candidate_selected: bool,
+    artifact_candidate_reason: str,
+) -> dict[str, Any]:
+    payload = copy.deepcopy(diagnostics)
+    payload["run_id"] = run_id
+    payload["artifact_candidate_selected"] = bool(artifact_candidate_selected)
+    payload["artifact_candidate_reason"] = str(artifact_candidate_reason)
+    ticks_per_bar = int(
+        payload.get(
+            "bar_construction_ticks_per_bar",
+            payload.get("ticks_per_bar", DEFAULT_BAR_CONSTRUCTION_TICKS_PER_BAR),
+        )
+    )
+    payload["bar_construction_ticks_per_bar"] = ticks_per_bar
+    payload["ticks_per_bar"] = ticks_per_bar
+    return payload
+
+
+def _publish_primary_candidate_artifacts(
+    *,
+    primary_symbol: str,
+    model_artifact_path: Path,
+    vecnormalize_artifact_path: Path,
+    candidate_model_source: Path,
+    candidate_vecnormalize_source: Path | None,
+    candidate_scalers: dict[str, StandardScaler],
+    holdout_start_utc: str | None,
+    dataset_path: str | Path,
+) -> None:
+    primary_scaler = candidate_scalers.get(primary_symbol)
+    if primary_scaler is None:
+        raise RuntimeError(f"Deployment candidate is missing a scaler for {primary_symbol}.")
+
+    shutil.copyfile(candidate_model_source, model_artifact_path)
+    if candidate_vecnormalize_source is not None and candidate_vecnormalize_source.exists():
+        shutil.copyfile(candidate_vecnormalize_source, vecnormalize_artifact_path)
+    elif vecnormalize_artifact_path.exists():
+        vecnormalize_artifact_path.unlink()
+
+    primary_scaler_path = Path(f"models/scaler_{primary_symbol}.pkl")
+    joblib.dump(primary_scaler, primary_scaler_path)
+    joblib.dump(primary_scaler, SCALER_PATH)
+
+    action_map = build_action_map(list(ACTION_SL_MULTS), list(ACTION_TP_MULTS))
+    observation_shape = [1, len(FEATURE_COLS) + STATE_FEATURE_COUNT]
+    diagnostics_path = deployment_paths(primary_symbol).diagnostics_path
+    manifest = create_manifest(
+        strategy_symbol=primary_symbol,
+        model_path=model_artifact_path,
+        scaler_path=primary_scaler_path,
+        vecnormalize_path=vecnormalize_artifact_path if vecnormalize_artifact_path.exists() else None,
+        holdout_start_utc=holdout_start_utc,
+        training_diagnostics_path=diagnostics_path,
+        model_version=f"{model_artifact_path.stem}-v1",
+        feature_columns=FEATURE_COLS,
+        observation_shape=observation_shape,
+        action_map=action_map,
+        dataset_path=dataset_path,
+        bar_construction_ticks_per_bar=BAR_CONSTRUCTION_TICKS_PER_BAR,
+    )
+    save_manifest(manifest, Path(f"models/artifact_manifest_{primary_symbol}.json"))
+    save_manifest(manifest, Path("models") / DEFAULT_MANIFEST_NAME)
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+def main() -> None:
+    ensure_runtime_dirs()
+    if TRAIN_ENV_MODE not in {"runtime", "legacy"}:
+        raise RuntimeError(f"Unsupported TRAIN_ENV_MODE={TRAIN_ENV_MODE!r}. Expected 'runtime' or 'legacy'.")
+    if TRAIN_ENV_MODE == "legacy":
+        print("[WARN] TRAIN_ENV_MODE=legacy is deprecated. Supported training stack is RuntimeGymEnv + volume bars + MaskablePPO.")
+    print(
+        f"[INFO] Supported training stack: MaskablePPO + RuntimeGymEnv + volume bars | "
+        f"bar_construction_ticks_per_bar={BAR_CONSTRUCTION_TICKS_PER_BAR}"
+    )
+    requested_envs = int(os.environ.get("TRAIN_NUM_ENVS", "0")) or None
+    runtime_plan = configure_training_runtime(requested_envs)
+    device = runtime_plan.device
+    project_python = project_venv_python(Path(__file__).resolve().parent)
+    configured_mp_executable = str(project_python) if project_python is not None else None
+    if configured_mp_executable:
+        mp.set_executable(configured_mp_executable)
+    effective_envs = runtime_plan.env_workers
+    force_dummy = os.environ.get("TRAIN_FORCE_DUMMY_VEC", "0") == "1"
+    vec_env_type, vec_env_warnings = resolve_train_vec_env_type(
+        requested_envs=requested_envs,
+        effective_envs=effective_envs,
+        force_dummy=force_dummy,
+    )
+    print(f"\nTraining on: {runtime_plan.accelerator_label}")
+    print(
+        f"CPU cores={runtime_plan.cpu_cores} | env_workers={runtime_plan.env_workers} | "
+        f"torch_threads={runtime_plan.torch_threads} | interop_threads={runtime_plan.interop_threads}"
+    )
+    print(f"Runtime env mode: {TRAIN_ENV_MODE}")
+    print(
+        f"[Runtime] sys.executable={sys.executable} | sys.prefix={sys.prefix} | "
+        f"multiprocessing_executable={configured_mp_executable} | "
+        f"vec_env_type={vec_env_type} | env_workers={effective_envs}"
+    )
+    for warning in vec_env_warnings:
+        print(f"[WARN] {warning}")
+    if TRAIN_STARTUP_SMOKE_ONLY:
+        print("[StartupSmoke] Runtime setup complete; exiting before data load and training by request.")
+        return
+    # ── Load data ────────────────────────────────────────────────────────────
+    # Try volume bars first (Phase 11), fall back to FOREX_MULTI_SET
+    data_path = resolve_dataset_path()
+    print(f"[INFO] Using dataset: {data_path}")
+    if False:
+        data_path = "data/FOREX_MULTI_SET.csv"
+        print(f"[INFO] Volume bars not found — using {data_path}")
+    else:
+        pass
+
+    df_raw = pd.read_csv(data_path, low_memory=False)
+    df_raw = df_raw.dropna(subset=["Symbol"])
+    df_raw = df_raw[df_raw["Symbol"].apply(lambda x: isinstance(x, str))]
+    df_raw["Symbol"] = df_raw["Symbol"].astype(str).str.upper()
+
+    if TRAIN_SYMBOL:
+        df_raw = df_raw[df_raw["Symbol"] == TRAIN_SYMBOL].copy()
+        if df_raw.empty:
+            raise RuntimeError(f"No rows found for TRAIN_SYMBOL={TRAIN_SYMBOL} in dataset {data_path}.")
+        print(f"[INFO] Training single-symbol model for {TRAIN_SYMBOL}")
+
+    symbols = df_raw["Symbol"].unique().tolist()
+    print(f"Symbols: {symbols}  |  Total rows: {len(df_raw):,}")
+    if not symbols:
+        raise RuntimeError("No symbols available after filtering dataset.")
+    primary_symbol = TRAIN_SYMBOL or symbols[0]
+    model_basename = f"model_{primary_symbol.lower()}_best"
+    model_artifact_path = Path("models") / f"{model_basename}.zip"
+    vecnormalize_artifact_path = Path("models") / f"{model_basename}_vecnormalize.pkl"
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    run_checkpoints_root = Path("checkpoints") / f"run_{run_id}"
+    run_checkpoints_root.mkdir(parents=True, exist_ok=True)
+    legacy_checkpoint_archives = _clear_legacy_checkpoint_artifacts(run_id=run_id)
+    if legacy_checkpoint_archives:
+        print(
+            f"[INFO] Archived {len(legacy_checkpoint_archives)} legacy checkpoint artifacts "
+            f"under checkpoints/archive/{run_id}"
+        )
+    _write_current_training_run_context(
+        run_id=run_id,
+        symbol=primary_symbol,
+        checkpoints_root=run_checkpoints_root,
+        state="starting",
+    )
+
+    # ── Config ───────────────────────────────────────────────────────────────
+    SL_OPTS = list(ACTION_SL_MULTS)
+    TP_OPTS = list(ACTION_TP_MULTS)
+    os.makedirs("models", exist_ok=True)
+    os.makedirs("checkpoints", exist_ok=True)
+
+    # ── Per-symbol feature computation + purged walk-forward ─────────────────
+    sym_folds: dict[str, list[tuple[pd.DataFrame, pd.DataFrame]]] = {}
+    sym_computed_frames: dict[str, pd.DataFrame] = {}
+    sym_trainable_frames: dict[str, pd.DataFrame] = {}
+    sym_holdout_frames: dict[str, pd.DataFrame] = {}
+    holdout_starts: dict[str, str] = {}
+    holdout_sizes: dict[str, int] = {}
+
+    for sym in symbols:
+        sdf = df_raw[df_raw["Symbol"] == sym].copy()
+        computed = _compute_raw(sdf)
+        computed.dropna(subset=[c for c in FEATURE_COLS if c in computed.columns], inplace=True)
+        minimums = training_data_minimums()
+        min_symbol_bars = minimums["min_train_bars"] + minimums["min_holdout_bars"]
+        if len(computed) < min_symbol_bars:
+            print(
+                f"  Skipping {sym}: only {len(computed)} bars after warm-up; "
+                f"need at least {min_symbol_bars} bars for train+holdout minimums"
+            )
+            continue
+        trainable, holdout = _split_holdout(computed, HOLDOUT_FRAC)
+        holdout_blockers = assess_training_data_sufficiency(
+            train_bars=len(trainable),
+            holdout_bars=len(holdout),
+        )
+        if holdout_blockers:
+            print(f"  Skipping {sym}: {'; '.join(holdout_blockers)}")
+            continue
+        sym_computed_frames[sym] = computed
+        sym_trainable_frames[sym] = trainable
+        sym_holdout_frames[sym] = holdout
+        holdout_starts[sym] = pd.Timestamp(holdout.index[0]).isoformat()
+        holdout_sizes[sym] = int(len(holdout))
+
+        # Purged walk-forward folds
+        print(f"\n  {sym}: {len(computed)} bars — generating {N_FOLDS} purged folds")
+        print(
+            f"\n  {sym}: {len(trainable)} train/CV bars + {len(holdout)} holdout bars "
+            f"â€” generating {N_FOLDS} purged folds"
+        )
+        folds = purged_walk_forward_splits(trainable, n_folds=N_FOLDS,
+                                           test_frac=FOLD_TEST_FRAC,
+                                           purge_gap=PURGE_GAP_BARS)
+        if not folds:
+            print(f"  Skipping {sym}: no folds satisfied minimum train/validation bar requirements.")
+            continue
+        sym_folds[sym] = folds
+
+    if not sym_folds:
+        minimums = training_data_minimums()
+        _write_current_training_run_context(
+            run_id=run_id,
+            symbol=primary_symbol,
+            checkpoints_root=run_checkpoints_root,
+            state="failed_data_minimums",
+        )
+        raise RuntimeError(
+            "No symbols had enough data. "
+            f"Required minimums: train>={minimums['min_train_bars']}, "
+            f"val>={minimums['min_val_bars']}, holdout>={minimums['min_holdout_bars']} bars."
+        )
+    feature_cols = FEATURE_COLS
+    baseline_report = run_baseline_research_gate(
+        symbol=primary_symbol,
+        trainable_frame=sym_trainable_frames[primary_symbol],
+        holdout_frame=sym_holdout_frames[primary_symbol],
+        folds=sym_folds[primary_symbol],
+        feature_cols=feature_cols,
+        out_path=Path("models") / f"baseline_diagnostics_{primary_symbol}.json",
+        horizon_bars=BASELINE_TARGET_HORIZON_BARS,
+    )
+    print(
+        f"[BaselineGate] symbol={primary_symbol} gate_passed={baseline_report['gate_passed']} "
+        f"passing_models={baseline_report.get('passing_models', [])}"
+    )
+    if TRAIN_REQUIRE_BASELINE_GATE and not bool(baseline_report["gate_passed"]):
+        _write_current_training_run_context(
+            run_id=run_id,
+            symbol=primary_symbol,
+            checkpoints_root=run_checkpoints_root,
+            state="failed_baseline_gate",
+        )
+        raise RuntimeError("RL not justified: baseline gate failed.")
+
+    archived_paths = _clear_current_run_artifacts(
+        primary_symbol=primary_symbol,
+        model_artifact_path=model_artifact_path,
+        vecnormalize_artifact_path=vecnormalize_artifact_path,
+        run_id=run_id,
+    )
+    if archived_paths:
+        print(
+            f"[INFO] Archived {len(archived_paths)} stale deploy artifacts for {primary_symbol} "
+            f"under models/archive/{primary_symbol.lower()}/{run_id}"
+        )
+
+    # ── Training across folds ─────────────────────────────────────────────────
+    best_observed_sharpe = -np.inf
+    best_observed_summary: dict[str, Any] | None = None
+    candidate_rank: tuple[float, float] | None = None
+    candidate_summary: dict[str, Any] | None = None
+    candidate_scalers: dict[str, StandardScaler] = {}
+    candidate_model_source: Path | None = None
+    candidate_vecnormalize_source: Path | None = None
+
+    for fold_idx in range(N_FOLDS):
+        print(f"\n{'='*60}")
+        print(f"FOLD {fold_idx + 1} / {N_FOLDS}")
+        print(f"{'='*60}")
+
+        # Gather train/val DataFrames across symbols for this fold
+        fold_trains, fold_vals = [], []
+        fold_scalers: dict[str, StandardScaler] = {}
+        for sym, folds in sym_folds.items():
+            if fold_idx < len(folds):
+                fold_train, fold_val, fold_scaler = _fit_and_apply_fold_scaler(folds[fold_idx][0], folds[fold_idx][1])
+                fold_trains.append(fold_train)
+                fold_vals.append(fold_val)
+                fold_scalers[sym] = fold_scaler
+
+        if not fold_trains:
+            continue
+
+        train_df = pd.concat(fold_trains)
+        val_df   = pd.concat(fold_vals)
+        print(f"  Train: {len(train_df):,} bars  |  Val (purged): {len(val_df):,} bars")
+
+        # Parallel training envs — starts with 0 slippage (Curriculum Phase 1)
+        sym_list = list(sym_folds.keys())
+        def make_parallel(rank: int):
+            sym = sym_list[rank % len(sym_list)]
+            if TRAIN_ENV_MODE == "runtime":
+                sdf = sym_folds[sym][fold_idx][0]
+                fold_scaler = fold_scalers.get(sym)
+            else:
+                sym_rows = train_df[train_df.get("Symbol", pd.Series(dtype=str)) == sym] \
+                           if "Symbol" in train_df.columns else train_df
+                sdf = sym_rows if len(sym_rows) > 300 else train_df
+                fold_scaler = None
+            return make_env(
+                sdf,
+                feature_cols,
+                SL_OPTS,
+                TP_OPTS,
+                random_start=True,
+                initial_slippage=SLIPPAGE_START,
+                symbol=sym,
+                scaler=fold_scaler,
+            )
+
+        val_symbol = primary_symbol
+        if TRAIN_ENV_MODE == "runtime":
+            trainable_frame = sym_trainable_frames.get(val_symbol)
+            if trainable_frame is None:
+                raise RuntimeError(f"Missing trainable frame for {val_symbol}.")
+            val_segment = sym_folds[val_symbol][fold_idx][1]
+            val_source = _prepend_runtime_warmup_context(trainable_frame, val_segment)
+            val_scaler = fold_scalers.get(val_symbol)
+            holdout_frame = sym_holdout_frames.get(val_symbol)
+            full_frame = sym_computed_frames.get(val_symbol)
+            if holdout_frame is None or full_frame is None:
+                raise RuntimeError(f"Missing holdout/full computed frame for {val_symbol}.")
+            holdout_source = _prepend_runtime_warmup_context(full_frame, holdout_frame)
+            holdout_scaler = fold_scalers.get(val_symbol)
+        else:
+            val_rows = val_df[val_df.get("Symbol", pd.Series(dtype=str)) == val_symbol] \
+                       if "Symbol" in val_df.columns else val_df
+            val_source = val_rows if len(val_rows) > 300 else val_df
+            val_scaler = None
+            holdout_source = sym_holdout_frames.get(val_symbol)
+            if holdout_source is None:
+                raise RuntimeError(f"Missing holdout frame for {val_symbol}.")
+            holdout_scaler = None
+
+        train_fns = [make_parallel(i) for i in range(effective_envs)]
+        if vec_env_type == "dummy":
+            train_vec = DummyVecEnv(train_fns)
+        else:
+            train_vec = SubprocVecEnv(train_fns)
+        train_vec = wrap_vecnormalize(train_vec, training=True)
+
+        def build_single_eval_base_vec(source_frame: pd.DataFrame, scaler: StandardScaler | None):
+            return DummyVecEnv(
+                [
+                    make_env(
+                        source_frame,
+                        feature_cols,
+                        SL_OPTS,
+                        TP_OPTS,
+                        random_start=False,
+                        initial_slippage=SLIPPAGE_END,
+                        symbol=val_symbol,
+                        scaler=scaler,
+                    )
+                ]
+            )
+
+        def build_single_eval_vec(source_frame: pd.DataFrame, scaler: StandardScaler | None):
+            return wrap_vecnormalize(build_single_eval_base_vec(source_frame, scaler), training=False)
+
+        val_vec = build_single_eval_vec(val_source, val_scaler)
+        holdout_vec = build_single_eval_vec(holdout_source, holdout_scaler)
+        sync_vecnormalize_stats(train_vec, val_vec)
+        sync_vecnormalize_stats(train_vec, holdout_vec)
+
+        ckpt_dir = run_checkpoints_root / f"fold_{fold_idx}"
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+        best_vecnormalize_path = ckpt_dir / BEST_VECNORMALIZE_NAME
+        _write_current_training_run_context(
+            run_id=run_id,
+            symbol=primary_symbol,
+            checkpoints_root=run_checkpoints_root,
+            state="training",
+            fold_index=fold_idx,
+            heartbeat_path=ckpt_dir / "training_heartbeat.json",
+        )
+
+        tensorboard_log = "./tensorboard_log" if importlib.util.find_spec("tensorboard") is not None else None
+
+        model = MaskablePPO(
+            "MlpPolicy",
+            train_vec,
+            verbose=1,
+            learning_rate=linear_schedule(PPO_LEARNING_RATE, PPO_MIN_LEARNING_RATE),
+            n_steps=PPO_N_STEPS,
+            batch_size=PPO_BATCH_SIZE,
+            n_epochs=PPO_N_EPOCHS,
+            ent_coef=PPO_ENT_COEF,
+            target_kl=PPO_TARGET_KL,
+            policy_kwargs=dict(net_arch=dict(pi=[POLICY_WIDTH, POLICY_WIDTH], vf=[256, 256, 128])),
+            tensorboard_log=tensorboard_log,
+            device=device,
+            seed=SEED + fold_idx,   # different seed per fold
+        )
+
+        # Callbacks: curriculum annealing + checkpoint + eval
+        curriculum_cb = CurriculumCallback(TOTAL_TIMESTEPS, verbose=1)
+        diagnostics_cb = TrainingDiagnosticsCallback(verbose=int(os.environ.get("TRAIN_PROGRESS_VERBOSE", "1")))
+        heartbeat_every = int(os.environ.get("TRAIN_HEARTBEAT_EVERY_STEPS", "5000"))
+        heartbeat_cb = TrainingHeartbeatCallback(
+            out_path=Path(ckpt_dir) / "training_heartbeat.json",
+            diagnostics_cb=diagnostics_cb,
+            run_id=run_id,
+            symbol=primary_symbol,
+            checkpoints_root=run_checkpoints_root,
+            fold_index=fold_idx,
+            every_steps=heartbeat_every,
+            verbose=0,
+        )
+        eval_cb = FullPathEvalCallback(
+            val_vec,
+            train_vecnormalize=train_vec,
+            eval_vecnormalize=val_vec,
+            best_model_save_path=ckpt_dir,
+            best_vecnormalize_path=best_vecnormalize_path,
+            history_path=Path(ckpt_dir) / "full_path_evaluations.json",
+            eval_freq=max(TRAIN_EVAL_FREQ // max(effective_envs, 1), 1),
+            verbose=1,
+        )
+
+        model.learn(
+            total_timesteps=TOTAL_TIMESTEPS,
+            callback=[curriculum_cb, diagnostics_cb, heartbeat_cb, eval_cb],
+            log_interval=max(TRAIN_LOG_INTERVAL, 1),
+            tb_log_name=f"{primary_symbol.lower()}_fold_{fold_idx}",
+        )
+
+        if not best_vecnormalize_path.exists():
+            train_vec.save(str(best_vecnormalize_path))
+
+        # Evaluate best checkpoint from this fold
+        best_path = ckpt_dir / "best_model.zip"
+        fold_model = MaskablePPO.load(str(best_path), device="cpu") if best_path.exists() else model
+        if best_vecnormalize_path.exists():
+            val_vec.close()
+            holdout_vec.close()
+            val_vec = VecNormalize.load(str(best_vecnormalize_path), build_single_eval_base_vec(val_source, val_scaler))
+            val_vec.training = False
+            val_vec.norm_reward = False
+            holdout_vec = VecNormalize.load(str(best_vecnormalize_path), build_single_eval_base_vec(holdout_source, holdout_scaler))
+            holdout_vec.training = False
+            holdout_vec.norm_reward = False
+
+        _, evaluation_metrics = evaluate_model(fold_model, val_vec)
+        _, holdout_metrics = evaluate_model(fold_model, holdout_vec)
+        sharpe = float(evaluation_metrics["timed_sharpe"])
+        max_dd = float(evaluation_metrics["max_drawdown"])
+        fin_val = float(evaluation_metrics["final_equity"])
+        holdout_sharpe = float(holdout_metrics["timed_sharpe"])
+        holdout_max_dd = float(holdout_metrics["max_drawdown"])
+        holdout_final_equity = float(holdout_metrics["final_equity"])
+        callback_summary = diagnostics_cb.summary()
+        diagnostics = summarize_training_diagnostics(
+            [
+                {
+                    "approx_kl": approx_kl,
+                    "explained_variance": explained_variance,
+                    "value_loss": value_loss,
+                }
+                for approx_kl, explained_variance, value_loss in zip(
+                    diagnostics_cb.metrics["train/approx_kl"],
+                    diagnostics_cb.metrics["train/explained_variance"],
+                    diagnostics_cb.metrics["train/value_loss"],
+                )
+            ]
+        )
+        diagnostics["fold"] = fold_idx
+        diagnostics["approx_kl"] = float(callback_summary["approx_kl"])
+        diagnostics["explained_variance"] = float(callback_summary["explained_variance"])
+        diagnostics["n_updates"] = callback_summary.get("n_updates")
+        diagnostics["diagnostic_sample_count"] = callback_summary.get("diagnostic_sample_count")
+        diagnostics["last_distinct_update_seen"] = callback_summary.get("last_distinct_update_seen")
+        diagnostics["metrics_fresh"] = callback_summary.get("metrics_fresh")
+        diagnostics["val_sharpe"] = float(sharpe)
+        diagnostics["val_max_drawdown"] = float(max_dd)
+        diagnostics["val_final_equity"] = float(fin_val)
+        diagnostics["holdout_sharpe"] = float(holdout_sharpe)
+        diagnostics["holdout_max_drawdown"] = float(holdout_max_dd)
+        diagnostics["holdout_final_equity"] = float(holdout_final_equity)
+        diagnostics["baseline_gate_passed"] = bool(baseline_report["gate_passed"])
+        diagnostics["eval_protocol_valid"] = True
+        diagnostics["full_path_eval_used"] = True
+        diagnostics["full_path_validation_metrics"] = evaluation_metrics
+        diagnostics["holdout_metrics"] = holdout_metrics
+        diagnostics["segment_metrics"] = {
+            "validation": evaluation_metrics.get("segment_metrics", {}),
+            "holdout": holdout_metrics.get("segment_metrics", {}),
+        }
+        diagnostics["train_bars"] = int(len(train_df))
+        diagnostics["val_bars"] = int(len(val_df))
+        diagnostics["holdout_bars"] = int(holdout_sizes.get(primary_symbol, 0))
+        diagnostics["point_in_time_verified"] = bool(TRAIN_POINT_IN_TIME_VERIFIED)
+        diagnostics["dataset_integrity_verified"] = bool(TRAIN_DATASET_INTEGRITY_VERIFIED)
+        diagnostics["env_workers"] = int(effective_envs)
+        diagnostics["vec_env_type"] = vec_env_type
+        diagnostics["bar_construction_ticks_per_bar"] = int(BAR_CONSTRUCTION_TICKS_PER_BAR)
+        diagnostics["ticks_per_bar"] = int(BAR_CONSTRUCTION_TICKS_PER_BAR)
+        data_sufficiency_blockers = assess_training_data_sufficiency(
+            train_bars=int(len(train_df)),
+            val_bars=int(len(val_df)),
+            holdout_bars=int(holdout_sizes.get(primary_symbol, 0)),
+        )
+        diagnostics.setdefault("blockers", [])
+        diagnostics["data_sufficiency_passed"] = not data_sufficiency_blockers
+        if data_sufficiency_blockers:
+            diagnostics["blockers"] = list(dict.fromkeys([*diagnostics["blockers"], *data_sufficiency_blockers]))
+            diagnostics["gate_passed"] = False
+        holdout_gate_blockers = _holdout_deployment_blockers(
+            holdout_sharpe=holdout_sharpe,
+            holdout_max_drawdown=holdout_max_dd,
+            holdout_final_equity=holdout_final_equity,
+        )
+        diagnostics["holdout_gate_passed"] = not holdout_gate_blockers
+        if holdout_gate_blockers:
+            diagnostics["blockers"] = list(dict.fromkeys([*diagnostics["blockers"], *holdout_gate_blockers]))
+        diagnostics["deploy_ready"] = bool(
+            diagnostics["gate_passed"]
+            and max_dd <= DEPLOY_DD_MAX
+            and not holdout_gate_blockers
+        )
+        metrics_path = ckpt_dir / "training_diagnostics.json"
+        save_json_report(diagnostics, metrics_path)
+
+        if sharpe > best_observed_sharpe:
+            best_observed_sharpe = sharpe
+            best_observed_summary = _build_promoted_training_diagnostics(
+                diagnostics,
+                run_id=run_id,
+                artifact_candidate_selected=False,
+                artifact_candidate_reason=(
+                    "Best-evaluated fold from this run did not meet deployment artifact criteria."
+                    if not diagnostics["deploy_ready"]
+                    else "Best-evaluated fold from this run is deployment eligible but was not selected as the canonical candidate."
+                ),
+            )
+
+        print(f"\n  Fold {fold_idx} VAL: equity=${fin_val:,.2f}  "
+              f"Sharpe={sharpe:.3f}  MaxDD={max_dd:.1%}")
+        print(
+            "  PPO diagnostics: "
+            f"explained_variance={diagnostics['explained_variance']:.3f} "
+            f"approx_kl={diagnostics['approx_kl']:.3f} "
+            f"value_loss_mean={diagnostics['value_loss_mean']:.3f}"
+        )
+
+        current_candidate_rank = _deployment_candidate_rank(diagnostics)
+        if current_candidate_rank is not None and (candidate_rank is None or current_candidate_rank > candidate_rank):
+            candidate_rank = current_candidate_rank
+            candidate_summary = _build_promoted_training_diagnostics(
+                diagnostics,
+                run_id=run_id,
+                artifact_candidate_selected=True,
+                artifact_candidate_reason="Selected deployment artifact candidate from the current run.",
+            )
+            candidate_scalers = fold_scalers
+            candidate_model_source = ckpt_dir / "deployment_candidate_model.zip"
+            fold_model.save(str(candidate_model_source.with_suffix("")))
+            if best_vecnormalize_path.exists():
+                candidate_vecnormalize_source = ckpt_dir / "deployment_candidate_vecnormalize.pkl"
+                shutil.copyfile(best_vecnormalize_path, candidate_vecnormalize_source)
+            else:
+                candidate_vecnormalize_source = None
+            print(
+                "  Selected deployment candidate "
+                f"(holdout_sharpe={holdout_sharpe:.3f}, val_sharpe={sharpe:.3f}) -> {candidate_model_source}"
+            )
+        elif diagnostics["deploy_ready"]:
+            print("  Fold eligible but not promoted: an earlier fold has a stronger holdout ranking.")
+        else:
+            print("  Fold rejected for deployment: diagnostics, validation drawdown, or holdout gate failed.")
+
+        train_vec.close()
+        val_vec.close()
+        holdout_vec.close()
+
+    # ── Final cross-fold summary ──────────────────────────────────────────────
+    if best_observed_summary is None:
+        raise RuntimeError("Training completed without producing fold diagnostics.")
+
+    print(f"\n{'='*60}")
+    print(f"Training complete. Best observed Sharpe across folds: {best_observed_sharpe:.3f}")
+    canonical_summary = candidate_summary or best_observed_summary
+    _write_current_training_run_context(
+        run_id=run_id,
+        symbol=primary_symbol,
+        checkpoints_root=run_checkpoints_root,
+        state="completed",
+    )
+    report_paths = deployment_paths(primary_symbol)
+    save_json_report(canonical_summary, report_paths.diagnostics_path)
+    print(f"Canonical diagnostics -> {report_paths.diagnostics_path}")
+    if candidate_summary is not None and candidate_model_source is not None:
+        _publish_primary_candidate_artifacts(
+            primary_symbol=primary_symbol,
+            model_artifact_path=model_artifact_path,
+            vecnormalize_artifact_path=vecnormalize_artifact_path,
+            candidate_model_source=candidate_model_source,
+            candidate_vecnormalize_source=candidate_vecnormalize_source,
+            candidate_scalers=candidate_scalers,
+            holdout_start_utc=holdout_starts.get(primary_symbol),
+            dataset_path=data_path,
+        )
+        print(f"Deployment candidate saved -> {model_artifact_path}")
+    else:
+        print("No deployment artifact candidate was selected from this run. Canonical model/manifests remain cleared.")
+    print(f"Run evaluate_oos.py for final out-of-sample validation.")
+
+
+if __name__ == "__main__":
+    main()
