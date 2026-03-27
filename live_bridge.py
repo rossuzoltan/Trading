@@ -41,7 +41,7 @@ from feature_engine import FEATURE_COLS, FeatureEngine, WARMUP_BARS
 from mt5_broker_caps import describe_trade_mode, read_symbol_caps, trade_mode_allows_open
 from project_paths import resolve_dataset_path, resolve_manifest_path, validate_dataset_bar_spec
 from run_logging import configure_run_logging, set_log_context
-from runtime_common import STATE_FEATURE_COUNT, ActionSpec, ActionType, build_action_map
+from runtime_common import STATE_FEATURE_COUNT, ActionSpec, ActionType, deserialize_action_map
 from symbol_utils import pip_size_for_symbol
 from trading_config import (
     ACTION_SL_MULTS,
@@ -640,7 +640,7 @@ def bootstrap_live_runtime(
         )
     dataset_id = dataset_id_for_path(dataset_path)
 
-    action_map = build_action_map(ATR_MULT_SL, ATR_MULT_TP)
+    action_map = deserialize_action_map(manifest.action_map)
     observation_shape = [1, len(FEATURE_COLS) + STATE_FEATURE_COUNT]
     model = load_validated_model(
         manifest,

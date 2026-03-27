@@ -50,9 +50,10 @@ from stable_baselines3.common.monitor import Monitor
 from artifact_manifest import DEFAULT_MANIFEST_NAME, create_manifest, save_manifest
 from dataset_validation import validate_symbol_bar_spec
 from device_utils import configure_training_runtime
+from edge_research import run_edge_baseline_research
 from feature_engine import FEATURE_COLS, WARMUP_BARS, _compute_raw, SCALER_PATH
 from masking_utils import action_mask_fn
-from runtime_common import STATE_FEATURE_COUNT, build_action_map, compute_trade_metrics
+from runtime_common import STATE_FEATURE_COUNT, build_action_map, build_simple_action_map, compute_trade_metrics
 from project_paths import (
     ensure_runtime_dirs,
     resolve_dataset_path,
@@ -105,6 +106,9 @@ SLIPPAGE_END     = DEFAULT_SLIPPAGE_END_PIPS
 TOTAL_TIMESTEPS  = int(os.environ.get("TRAIN_TOTAL_TIMESTEPS", "3000000"))
 TRAIN_SYMBOL     = os.environ.get("TRAIN_SYMBOL", os.environ.get("TRADING_SYMBOL", "EURUSD")).strip().upper()
 TRAIN_ENV_MODE = os.environ.get("TRAIN_ENV_MODE", "runtime").strip().lower()
+TRAIN_ACTION_SPACE_MODE = os.environ.get("TRAIN_ACTION_SPACE_MODE", "simple").strip().lower() or "simple"
+TRAIN_SIMPLE_ACTION_SL_MULT = float(os.environ.get("TRAIN_SIMPLE_ACTION_SL_MULT", "1.0"))
+TRAIN_SIMPLE_ACTION_TP_MULT = float(os.environ.get("TRAIN_SIMPLE_ACTION_TP_MULT", "1.0"))
 PPO_LEARNING_RATE = float(os.environ.get("TRAIN_PPO_LEARNING_RATE", str(DEFAULT_LEARNING_RATE)))
 PPO_MIN_LEARNING_RATE = float(os.environ.get("TRAIN_PPO_MIN_LEARNING_RATE", str(DEFAULT_MIN_LEARNING_RATE)))
 PPO_TARGET_KL = float(os.environ.get("TRAIN_PPO_TARGET_KL", str(DEFAULT_TARGET_KL)))
@@ -139,6 +143,9 @@ BASELINE_CORR_MIN = float(os.environ.get("TRAIN_BASELINE_CORR_MIN", "0.05"))
 BASELINE_SIGN_ACC_MIN = float(os.environ.get("TRAIN_BASELINE_SIGN_ACC_MIN", "0.52"))
 BASELINE_TREE_MAX_DEPTH = int(os.environ.get("TRAIN_BASELINE_TREE_MAX_DEPTH", "3"))
 BASELINE_TREE_MAX_ITER = int(os.environ.get("TRAIN_BASELINE_TREE_MAX_ITER", "100"))
+BASELINE_MIN_EDGE_PIPS = float(os.environ.get("TRAIN_BASELINE_MIN_EDGE_PIPS", "0.0"))
+BASELINE_PROB_THRESHOLD = float(os.environ.get("TRAIN_BASELINE_PROB_THRESHOLD", "0.55"))
+BASELINE_PROB_MARGIN = float(os.environ.get("TRAIN_BASELINE_PROB_MARGIN", "0.05"))
 TRAIN_COMMISSION_PER_LOT = float(os.environ.get("TRAIN_COMMISSION_PER_LOT", "7.0"))
 TRAIN_PARTIAL_FILL_RATIO = float(os.environ.get("TRAIN_PARTIAL_FILL_RATIO", "1.0"))
 TRAIN_REWARD_SCALE = float(os.environ.get("TRAIN_REWARD_SCALE", "10000.0"))
@@ -264,6 +271,20 @@ def build_reward_profile() -> dict[str, float]:
     }
 
 
+def build_runtime_action_map(
+    sl_opts: list[float] | tuple[float, ...] | None = None,
+    tp_opts: list[float] | tuple[float, ...] | None = None,
+) -> tuple[Any, ...]:
+    if TRAIN_ACTION_SPACE_MODE == "simple":
+        return build_simple_action_map(
+            sl_value=float(TRAIN_SIMPLE_ACTION_SL_MULT),
+            tp_value=float(TRAIN_SIMPLE_ACTION_TP_MULT),
+        )
+    if TRAIN_ACTION_SPACE_MODE == "legacy":
+        return build_action_map(list(sl_opts or ACTION_SL_MULTS), list(tp_opts or ACTION_TP_MULTS))
+    raise ValueError(f"Unsupported TRAIN_ACTION_SPACE_MODE={TRAIN_ACTION_SPACE_MODE!r}")
+
+
 def get_current_slippage_pips(global_step: int, cfg: dict[str, Any]) -> float:
     scfg = cfg.get("slippage_curriculum", {}) or {}
     if not bool(scfg.get("enabled", False)):
@@ -334,6 +355,13 @@ def build_train_env_recovery_config(base_cfg: dict[str, Any], *, env_workers: in
 def aggregate_training_diagnostics(env_snapshots: list[dict[str, Any]] | None) -> dict[str, Any]:
     action_counts = {"hold": 0, "close": 0, "long": 0, "short": 0}
     trade_totals = {
+        "action_selected_count": 0,
+        "action_accepted_count": 0,
+        "accepted_open_count": 0,
+        "accepted_close_count": 0,
+        "order_executed_count": 0,
+        "executed_open_count": 0,
+        "executed_close_count": 0,
         "entered_long_count": 0,
         "entered_short_count": 0,
         "entry_signal_long_count": 0,
@@ -341,12 +369,22 @@ def aggregate_training_diagnostics(env_snapshots: list[dict[str, Any]] | None) -
         "closed_trade_count": 0,
         "trade_attempt_count": 0,
         "trade_reject_count": 0,
+        "forced_close_count": 0,
         "flat_steps": 0,
         "long_steps": 0,
         "short_steps": 0,
         "position_duration_sum": 0.0,
         "position_duration_count": 0,
         "rapid_reversals": 0,
+    }
+    economic_totals = {
+        "gross_pnl_usd": 0.0,
+        "net_pnl_usd": 0.0,
+        "transaction_cost_usd": 0.0,
+        "commission_usd": 0.0,
+        "spread_slippage_cost_usd": 0.0,
+        "spread_cost_usd": 0.0,
+        "slippage_cost_usd": 0.0,
     }
     reward_totals = {
         "pnl_reward_sum": 0.0,
@@ -369,6 +407,8 @@ def aggregate_training_diagnostics(env_snapshots: list[dict[str, Any]] | None) -
         for key in trade_totals:
             trade_totals[key] += float(trade_stats.get(key, 0)) if key == "position_duration_sum" else int(trade_stats.get(key, 0))
         duration_samples.extend(float(value) for value in list(trade_stats.get("position_durations_sample", []) or []))
+        for key in economic_totals:
+            economic_totals[key] += float((snapshot.get("economics", {}) or {}).get(key, 0.0))
         for key in reward_totals:
             reward_totals[key] += float((snapshot.get("reward_components", {}) or {}).get(key, 0.0))
 
@@ -399,6 +439,13 @@ def aggregate_training_diagnostics(env_snapshots: list[dict[str, Any]] | None) -
             "short_fraction": float(action_counts["short"]) / float(total_actions),
         },
         "trade_diagnostics": {
+            "action_selected_count": int(trade_totals["action_selected_count"]),
+            "action_accepted_count": int(trade_totals["action_accepted_count"]),
+            "accepted_open_count": int(trade_totals["accepted_open_count"]),
+            "accepted_close_count": int(trade_totals["accepted_close_count"]),
+            "order_executed_count": int(trade_totals["order_executed_count"]),
+            "executed_open_count": int(trade_totals["executed_open_count"]),
+            "executed_close_count": int(trade_totals["executed_close_count"]),
             "entered_long_count": int(trade_totals["entered_long_count"]),
             "entered_short_count": int(trade_totals["entered_short_count"]),
             "entry_signal_long_count": int(trade_totals["entry_signal_long_count"]),
@@ -406,6 +453,7 @@ def aggregate_training_diagnostics(env_snapshots: list[dict[str, Any]] | None) -
             "closed_trade_count": int(trade_totals["closed_trade_count"]),
             "trade_attempt_count": int(trade_totals["trade_attempt_count"]),
             "trade_reject_count": int(trade_totals["trade_reject_count"]),
+            "forced_close_count": int(trade_totals["forced_close_count"]),
             "avg_position_duration": float(avg_position_duration),
             "median_position_duration": float(median_position_duration),
             "avg_trades_per_1000_steps": (1000.0 * float(total_entries) / float(total_steps)) if total_steps else 0.0,
@@ -418,6 +466,7 @@ def aggregate_training_diagnostics(env_snapshots: list[dict[str, Any]] | None) -
             "long_fraction": float(trade_totals["long_steps"]) / float(occupancy_steps),
             "short_fraction": float(trade_totals["short_steps"]) / float(occupancy_steps),
         },
+        "economics": {key: float(value) for key, value in economic_totals.items()},
         "reward_components": {key: float(value) for key, value in reward_totals.items()},
     }
 
@@ -999,7 +1048,7 @@ def make_env(
                 raise RuntimeError("TRAIN_ENV_MODE=runtime requires a per-fold scaler.")
             from runtime_gym_env import RuntimeGymConfig, RuntimeGymEnv
 
-            action_map = build_action_map(sl_opts, tp_opts)
+            action_map = build_runtime_action_map(sl_opts, tp_opts)
             env = RuntimeGymEnv(
                 symbol=symbol,
                 bars_frame=df,
@@ -1114,6 +1163,21 @@ def _extract_eval_trade_log(eval_env) -> list[dict[str, Any]]:
     return [dict(item) for item in trade_log if isinstance(item, dict)]
 
 
+def _extract_eval_execution_log(eval_env) -> list[dict[str, Any]]:
+    try:
+        runtimes = eval_env.get_attr("_runtime")
+    except Exception:
+        return []
+    runtime = runtimes[0] if runtimes else None
+    if runtime is None:
+        return []
+    broker = getattr(runtime, "broker", None)
+    execution_log = getattr(broker, "execution_log", None)
+    if not isinstance(execution_log, list):
+        return []
+    return [dict(item) for item in execution_log if isinstance(item, dict)]
+
+
 def evaluate_model(model, eval_env) -> tuple[list[float], dict[str, Any]]:
     obs = eval_env.reset()
     equity_curve: list[float] = []
@@ -1146,19 +1210,42 @@ def evaluate_model(model, eval_env) -> tuple[list[float], dict[str, Any]]:
             timestamps.append(pd.Timestamp(timestamp_utc))
         if done:
             break
-    trade_metrics = compute_trade_metrics(_extract_eval_trade_log(eval_env), initial_equity=1_000.0)
+    trade_log = _extract_eval_trade_log(eval_env)
+    execution_log = _extract_eval_execution_log(eval_env)
+    trade_metrics = compute_trade_metrics(trade_log, initial_equity=1_000.0)
+    try:
+        raw_env_diagnostics = eval_env.env_method("get_training_diagnostics") if hasattr(eval_env, "env_method") else []
+    except Exception:
+        raw_env_diagnostics = []
+    env_diagnostics = aggregate_training_diagnostics(raw_env_diagnostics)
     metrics = {
         "final_equity": float(equity_curve[-1]) if equity_curve else 1_000.0,
         "timed_sharpe": compute_timed_sharpe(equity_curve, timestamps),
         "max_drawdown": compute_max_drawdown(equity_curve),
         "steps": int(len(equity_curve)),
-        "total_reward": float(np.sum(rewards)) if rewards else 0.0,
-        "mean_step_reward": float(np.mean(rewards)) if rewards else 0.0,
+        "aux_total_shaped_reward": float(np.sum(rewards)) if rewards else 0.0,
+        "aux_mean_step_shaped_reward": float(np.mean(rewards)) if rewards else 0.0,
         "segment_metrics": _curve_segment_metrics(equity_curve, timestamps),
         "win_rate": float(trade_metrics["win_rate"]),
         "profit_factor": float(trade_metrics["profit_factor"]),
-        "expectancy": float(trade_metrics["expectancy"]),
+        "expectancy": float(trade_metrics["expectancy_usd"]),
+        "expectancy_usd": float(trade_metrics["expectancy_usd"]),
+        "expectancy_pips": float(trade_metrics["expectancy_pips"]),
         "trade_count": int(trade_metrics["trade_count"]),
+        "gross_pnl_usd": float(trade_metrics["gross_pnl_usd"]),
+        "net_pnl_usd": float(trade_metrics["net_pnl_usd"]),
+        "total_transaction_cost_usd": float(trade_metrics["total_transaction_cost_usd"]),
+        "total_commission_usd": float(trade_metrics["total_commission_usd"]),
+        "total_spread_slippage_cost_usd": float(trade_metrics["total_spread_slippage_cost_usd"]),
+        "avg_win_usd": float(trade_metrics["avg_win_usd"]),
+        "avg_loss_usd": float(trade_metrics["avg_loss_usd"]),
+        "win_loss_asymmetry": float(trade_metrics["win_loss_asymmetry"]),
+        "economic_metrics_primary": True,
+        "reward_shaping_excluded_from_primary_metrics": True,
+        "execution_diagnostics": env_diagnostics,
+        "forced_close_count": int(env_diagnostics.get("trade_diagnostics", {}).get("forced_close_count", 0)),
+        "executed_order_count": int(env_diagnostics.get("trade_diagnostics", {}).get("order_executed_count", 0)),
+        "execution_event_count": int(len(execution_log)),
     }
     return equity_curve, metrics
 
@@ -1273,71 +1360,21 @@ def run_baseline_research_gate(
     out_path: str | Path,
     horizon_bars: int = BASELINE_TARGET_HORIZON_BARS,
 ) -> dict[str, Any]:
-    fold_reports: list[dict[str, Any]] = []
-    for fold_idx, (fold_train, fold_val) in enumerate(folds):
-        x_train, y_train = _prepare_supervised_xy(fold_train, feature_cols=feature_cols, horizon_bars=horizon_bars)
-        x_val, y_val = _prepare_supervised_xy(fold_val, feature_cols=feature_cols, horizon_bars=horizon_bars)
-        fold_payload: dict[str, Any] = {
-            "fold": int(fold_idx),
-            "train_samples": int(y_train.size),
-            "val_samples": int(y_val.size),
-            "models": {},
-        }
-        if y_train.size == 0 or y_val.size == 0:
-            fold_payload["blockers"] = ["Insufficient non-null samples for baseline validation."]
-            fold_reports.append(fold_payload)
-            continue
-        fitted = _fit_baseline_models(x_train, y_train)
-        for model_name, model in fitted.items():
-            preds = np.asarray(model.predict(x_val), dtype=np.float64)
-            fold_payload["models"][model_name] = _baseline_prediction_metrics(y_val, preds)
-        fold_reports.append(fold_payload)
-
-    x_trainable, y_trainable = _prepare_supervised_xy(
-        trainable_frame,
+    return run_edge_baseline_research(
+        symbol=symbol,
+        trainable_frame=trainable_frame,
+        holdout_frame=holdout_frame,
+        folds=folds,
         feature_cols=feature_cols,
+        out_path=out_path,
         horizon_bars=horizon_bars,
+        commission_per_lot=float(TRAIN_COMMISSION_PER_LOT),
+        slippage_pips=float(get_final_slippage_pips(TRAINING_RECOVERY_CONFIG)),
+        min_edge_pips=float(BASELINE_MIN_EDGE_PIPS),
+        probability_threshold=float(BASELINE_PROB_THRESHOLD),
+        probability_margin=float(BASELINE_PROB_MARGIN),
+        min_trade_count=int(MIN_EVAL_TRADE_COUNT),
     )
-    x_holdout, y_holdout = _prepare_supervised_xy(
-        holdout_frame,
-        feature_cols=feature_cols,
-        horizon_bars=horizon_bars,
-    )
-    holdout_models: dict[str, Any] = {}
-    holdout_blockers: list[str] = []
-    passing_models: list[str] = []
-    if y_trainable.size == 0 or y_holdout.size == 0:
-        holdout_blockers.append("Insufficient non-null samples for baseline holdout.")
-    else:
-        fitted = _fit_baseline_models(x_trainable, y_trainable)
-        for model_name, model in fitted.items():
-            preds = np.asarray(model.predict(x_holdout), dtype=np.float64)
-            metrics = _baseline_prediction_metrics(y_holdout, preds)
-            holdout_models[model_name] = metrics
-            if bool(metrics["pass_thresholds"]):
-                passing_models.append(model_name)
-
-    report = {
-        "symbol": str(symbol).upper(),
-        "target_horizon_bars": int(horizon_bars),
-        "feature_columns": list(feature_cols),
-        "thresholds": {
-            "r2_gt": BASELINE_R2_MIN,
-            "pearson_corr_gte": BASELINE_CORR_MIN,
-            "sign_accuracy_gte": BASELINE_SIGN_ACC_MIN,
-        },
-        "fold_metrics": fold_reports,
-        "holdout_metrics": {
-            "train_samples": int(y_trainable.size),
-            "holdout_samples": int(y_holdout.size),
-            "models": holdout_models,
-            "blockers": holdout_blockers,
-        },
-        "passing_models": passing_models,
-        "gate_passed": bool(passing_models),
-    }
-    save_json_report(report, out_path)
-    return report
 
 
 def _resolve_frame_position(frame: pd.DataFrame, start_index: Any) -> int:
@@ -1727,7 +1764,7 @@ def _publish_primary_candidate_artifacts(
     shutil.copyfile(candidate_scaler_source, primary_scaler_path)
     shutil.copyfile(candidate_scaler_source, SCALER_PATH)
 
-    action_map = build_action_map(list(ACTION_SL_MULTS), list(ACTION_TP_MULTS))
+    action_map = build_runtime_action_map(list(ACTION_SL_MULTS), list(ACTION_TP_MULTS))
     observation_shape = [1, len(FEATURE_COLS) + STATE_FEATURE_COUNT]
     diagnostics_path = deployment_paths(primary_symbol).diagnostics_path
     manifest = create_manifest(

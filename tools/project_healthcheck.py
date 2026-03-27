@@ -34,8 +34,8 @@ from project_paths import (
     validate_dataset_bar_spec,
     validate_dataset_integrity,
 )
-from runtime_common import STATE_FEATURE_COUNT, build_action_map
-from trading_config import ACTION_SL_MULTS, ACTION_TP_MULTS, resolve_bar_construction_ticks_per_bar
+from runtime_common import STATE_FEATURE_COUNT, deserialize_action_map
+from trading_config import resolve_bar_construction_ticks_per_bar
 
 ensure_project_venv(project_root=ROOT, script_path=__file__)
 
@@ -70,7 +70,6 @@ OPTIONAL_PACKAGES = {
 }
 DEFAULT_RUNTIME_MODEL_NAME = "models/model_<symbol>_best.zip"
 DEFAULT_RUNTIME_SCALER_NAME = "models/scaler_<SYMBOL>.pkl"
-RUNTIME_ACTION_MAP = build_action_map(list(ACTION_SL_MULTS), list(ACTION_TP_MULTS))
 RUNTIME_OBSERVATION_SHAPE = [1, len(FEATURE_COLS) + STATE_FEATURE_COUNT]
 
 
@@ -173,24 +172,25 @@ def _validate_runtime_manifest_bundle(
         )
 
     symbol = str(manifest.strategy_symbol).strip().upper()
+    expected_action_map = deserialize_action_map(manifest.action_map)
     load_validated_model(
         manifest,
         expected_symbol=symbol,
-        expected_action_map=RUNTIME_ACTION_MAP,
+        expected_action_map=expected_action_map,
         expected_observation_shape=RUNTIME_OBSERVATION_SHAPE,
         expected_dataset_id=expected_dataset_id,
     )
     load_validated_scaler(
         manifest,
         expected_symbol=symbol,
-        expected_action_map=RUNTIME_ACTION_MAP,
+        expected_action_map=expected_action_map,
         expected_observation_shape=RUNTIME_OBSERVATION_SHAPE,
         expected_dataset_id=expected_dataset_id,
     )
     load_validated_vecnormalize(
         manifest,
         expected_symbol=symbol,
-        expected_action_map=RUNTIME_ACTION_MAP,
+        expected_action_map=expected_action_map,
         expected_observation_shape=RUNTIME_OBSERVATION_SHAPE,
         expected_dataset_id=expected_dataset_id,
     )

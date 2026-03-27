@@ -323,11 +323,17 @@ class BrokerPositionSnapshot:
     direction: int = 0
     volume: float = 0.0
     entry_price: float | None = None
+    entry_reference_price: float | None = None
+    entry_bar_index: int | None = None
     sl_price: float | None = None
     tp_price: float | None = None
     broker_ticket: int | None = None
     order_id: int | None = None
     last_confirmed_time_msc: int | None = None
+    entry_spread_slippage_cost_usd: float = 0.0
+    entry_spread_cost_usd: float = 0.0
+    entry_slippage_cost_usd: float = 0.0
+    entry_commission_usd: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -398,7 +404,9 @@ class ReplayBroker(BaseBroker):
         self.next_ticket = 1000
         self._pending: list[OrderIntent] = []
         self._position = BrokerPositionSnapshot(symbol=symbol)
+        self._bar_index = -1
         self.trade_log: list[dict[str, float | int | str]] = []
+        self.execution_log: list[dict[str, float | int | str | bool | None]] = []
 
     def submit_order(self, intent: OrderIntent) -> SubmitResult:
         self._pending.append(intent)
@@ -408,6 +416,9 @@ class ReplayBroker(BaseBroker):
 
     def _apply_commission(self, volume: float) -> None:
         self.equity -= self.commission_per_lot * float(volume)
+
+    def _commission_usd(self, volume: float) -> float:
+        return float(self.commission_per_lot * float(volume))
 
     def _slippage_price(self, direction: int) -> float:
         pip_size = pip_size_for_symbol(self.symbol)
@@ -437,6 +448,41 @@ class ReplayBroker(BaseBroker):
         else:
             price += spread_half
         return price
+
+    def _spread_slippage_cost_usd(
+        self,
+        *,
+        reference_price: float,
+        fill_price: float,
+        volume: float,
+    ) -> float:
+        move_pips = abs(price_to_pips(self.symbol, float(fill_price) - float(reference_price)))
+        pip_value = pip_value_for_volume(
+            self.symbol,
+            price=float(fill_price),
+            volume_lots=float(volume),
+            account_currency=self.account_currency,
+        )
+        return float(move_pips * pip_value)
+
+    def _spread_cost_usd(self, *, price: float, volume: float, avg_spread: float) -> float:
+        spread_half_pips = abs(price_to_pips(self.symbol, max(float(avg_spread), 0.0))) / 2.0
+        pip_value = pip_value_for_volume(
+            self.symbol,
+            price=float(price),
+            volume_lots=float(volume),
+            account_currency=self.account_currency,
+        )
+        return float(spread_half_pips * pip_value)
+
+    def _slippage_cost_usd(self, *, price: float, volume: float) -> float:
+        pip_value = pip_value_for_volume(
+            self.symbol,
+            price=float(price),
+            volume_lots=float(volume),
+            account_currency=self.account_currency,
+        )
+        return float(max(float(self.slippage_pips), 0.0) * pip_value)
 
     def _resolve_fill_volume(self, intent: OrderIntent, *, fill_price: float) -> float:
         planned_volume = float(intent.volume)
@@ -475,11 +521,20 @@ class ReplayBroker(BaseBroker):
             tp_price = float(fill_price) + tp_distance if intent.action.direction > 0 else float(fill_price) - tp_distance
         return sl_price, tp_price
 
-    def _close_position(self, exit_price: float, reason: str, time_msc: int) -> float:
+    def _close_position(
+        self,
+        exit_price: float,
+        reason: str,
+        time_msc: int,
+        *,
+        reference_price: float | None = None,
+        forced: bool = False,
+    ) -> float:
         if self._position.direction == 0 or self._position.entry_price is None:
             return 0.0
+        direction = int(self._position.direction)
         pip_pnl = price_to_pips(self.symbol, exit_price - self._position.entry_price)
-        if self._position.direction < 0:
+        if direction < 0:
             pip_pnl = -pip_pnl
         pip_value = pip_value_for_volume(
             self.symbol,
@@ -487,14 +542,76 @@ class ReplayBroker(BaseBroker):
             volume_lots=self._position.volume,
             account_currency=self.account_currency,
         )
-        pnl = pip_pnl * pip_value
+        pnl = float(pip_pnl * pip_value)
+        entry_reference_price = (
+            float(self._position.entry_reference_price)
+            if self._position.entry_reference_price is not None
+            else float(self._position.entry_price)
+        )
+        exit_reference_price = float(reference_price) if reference_price is not None else float(exit_price)
+        gross_pips = price_to_pips(self.symbol, exit_reference_price - entry_reference_price)
+        if direction < 0:
+            gross_pips = -gross_pips
+        gross_pnl_usd = float(gross_pips * pip_value)
+        exit_spread_slippage_cost_usd = self._spread_slippage_cost_usd(
+            reference_price=exit_reference_price,
+            fill_price=float(exit_price),
+            volume=float(self._position.volume),
+        )
+        exit_spread_cost_usd = self._spread_cost_usd(
+            price=float(exit_price),
+            volume=float(self._position.volume),
+            avg_spread=abs(2.0 * (float(exit_reference_price) - float(exit_price) - self._slippage_price(direction))),
+        )
+        exit_slippage_cost_usd = max(float(exit_spread_slippage_cost_usd - exit_spread_cost_usd), 0.0)
+        exit_commission_usd = self._commission_usd(self._position.volume)
+        total_transaction_cost_usd = (
+            float(self._position.entry_spread_slippage_cost_usd)
+            + float(self._position.entry_commission_usd)
+            + exit_spread_slippage_cost_usd
+            + exit_commission_usd
+        )
+        holding_bars = max(int(self._bar_index - int(self._position.entry_bar_index or self._bar_index)), 1)
+        net_pnl_usd = float(gross_pnl_usd - total_transaction_cost_usd)
         self.equity += pnl
         self._apply_commission(self._position.volume)
+        self.execution_log.append(
+            {
+                "event": "order_executed",
+                "side": "close",
+                "reason": reason,
+                "direction": direction,
+                "volume": float(self._position.volume),
+                "reference_price": exit_reference_price,
+                "fill_price": float(exit_price),
+                "forced": bool(forced),
+                "time_msc": int(time_msc),
+                "ticket": int(self._position.broker_ticket or 0),
+            }
+        )
         self.trade_log.append(
             {
                 "reason": reason,
                 "ticket": int(self._position.broker_ticket or 0),
+                "direction": direction,
+                "volume": float(self._position.volume),
+                "entry_price": float(self._position.entry_price),
+                "exit_price": float(exit_price),
+                "entry_reference_price": entry_reference_price,
+                "exit_reference_price": exit_reference_price,
+                "gross_pips": float(gross_pips),
                 "net_pips": float(pip_pnl),
+                "gross_pnl_usd": gross_pnl_usd,
+                "net_pnl_usd": net_pnl_usd,
+                "transaction_cost_usd": float(total_transaction_cost_usd),
+                "commission_usd": float(self._position.entry_commission_usd + exit_commission_usd),
+                "spread_slippage_cost_usd": float(
+                    self._position.entry_spread_slippage_cost_usd + exit_spread_slippage_cost_usd
+                ),
+                "spread_cost_usd": float(self._position.entry_spread_cost_usd + exit_spread_cost_usd),
+                "slippage_cost_usd": float(self._position.entry_slippage_cost_usd + exit_slippage_cost_usd),
+                "holding_bars": int(holding_bars),
+                "forced_close": bool(forced),
                 "equity": float(self.equity),
             }
         )
@@ -517,7 +634,12 @@ class ReplayBroker(BaseBroker):
                         avg_spread=bar.avg_spread,
                         is_entry=False,
                     )
-                    turnover_lots += self._close_position(close_price, "MANUAL", bar.start_time_msc)
+                    turnover_lots += self._close_position(
+                        close_price,
+                        "MANUAL",
+                        bar.start_time_msc,
+                        reference_price=float(bar.open),
+                    )
                 continue
             if intent.action.action_type != ActionType.OPEN or intent.action.direction is None:
                 continue
@@ -533,17 +655,49 @@ class ReplayBroker(BaseBroker):
             if fill_volume <= 0:
                 continue
             sl_price, tp_price = self._resolve_protective_prices(intent, fill_price=open_price)
+            entry_spread_slippage_cost_usd = self._spread_slippage_cost_usd(
+                reference_price=float(bar.open),
+                fill_price=float(open_price),
+                volume=float(fill_volume),
+            )
+            entry_spread_cost_usd = self._spread_cost_usd(
+                price=float(open_price),
+                volume=float(fill_volume),
+                avg_spread=float(bar.avg_spread),
+            )
+            entry_slippage_cost_usd = max(float(entry_spread_slippage_cost_usd - entry_spread_cost_usd), 0.0)
+            entry_commission_usd = self._commission_usd(fill_volume)
             self._apply_commission(fill_volume)
             self._position = BrokerPositionSnapshot(
                 symbol=self.symbol,
                 direction=int(intent.action.direction),
                 volume=fill_volume,
                 entry_price=float(open_price),
+                entry_reference_price=float(bar.open),
+                entry_bar_index=int(self._bar_index),
                 sl_price=sl_price,
                 tp_price=tp_price,
                 broker_ticket=self.next_ticket,
                 order_id=intent.broker_ticket,
                 last_confirmed_time_msc=bar.start_time_msc,
+                entry_spread_slippage_cost_usd=entry_spread_slippage_cost_usd,
+                entry_spread_cost_usd=entry_spread_cost_usd,
+                entry_slippage_cost_usd=entry_slippage_cost_usd,
+                entry_commission_usd=entry_commission_usd,
+            )
+            self.execution_log.append(
+                {
+                    "event": "order_executed",
+                    "side": "open",
+                    "reason": "ENTRY",
+                    "direction": int(intent.action.direction),
+                    "volume": float(fill_volume),
+                    "reference_price": float(bar.open),
+                    "fill_price": float(open_price),
+                    "forced": False,
+                    "time_msc": int(bar.start_time_msc),
+                    "ticket": int(self.next_ticket),
+                }
             )
             self.next_ticket += 1
             turnover_lots += float(fill_volume)
@@ -564,6 +718,7 @@ class ReplayBroker(BaseBroker):
                     ),
                     "SL",
                     bar.end_time_msc,
+                    reference_price=float(position.sl_price),
                 )
             elif position.tp_price is not None and bar.high >= position.tp_price:
                 return self._close_position(
@@ -575,6 +730,7 @@ class ReplayBroker(BaseBroker):
                     ),
                     "TP",
                     bar.end_time_msc,
+                    reference_price=float(position.tp_price),
                 )
         else:
             if position.sl_price is not None and bar.high >= position.sl_price:
@@ -587,6 +743,7 @@ class ReplayBroker(BaseBroker):
                     ),
                     "SL",
                     bar.end_time_msc,
+                    reference_price=float(position.sl_price),
                 )
             elif position.tp_price is not None and bar.low <= position.tp_price:
                 return self._close_position(
@@ -598,13 +755,32 @@ class ReplayBroker(BaseBroker):
                     ),
                     "TP",
                     bar.end_time_msc,
+                    reference_price=float(position.tp_price),
                 )
         return 0.0
 
     def advance_bar(self, bar: VolumeBar) -> float:
+        self._bar_index += 1
         turnover_lots = self._fill_pending(bar)
         turnover_lots += self._mark_stops(bar)
         return float(turnover_lots)
+
+    def force_flatten(self, bar: VolumeBar, *, reason: str = "FORCED_END_OF_PATH") -> float:
+        if self._position.direction == 0 or self._position.entry_price is None:
+            return 0.0
+        exit_price = self._execution_price(
+            float(bar.close),
+            self._position.direction,
+            avg_spread=bar.avg_spread,
+            is_entry=False,
+        )
+        return self._close_position(
+            exit_price,
+            reason,
+            bar.end_time_msc,
+            reference_price=float(bar.close),
+            forced=True,
+        )
 
     def current_position(self, symbol: str) -> BrokerPositionSnapshot:
         if symbol.upper() != self.symbol.upper():
@@ -640,7 +816,8 @@ class ReplayBroker(BaseBroker):
             volume_lots=self._position.volume,
             account_currency=self.account_currency,
         )
-        return self.equity + pip_pnl * pip_value
+        close_commission_usd = self._commission_usd(self._position.volume) if mark_to_liquidation else 0.0
+        return self.equity + pip_pnl * pip_value - close_commission_usd
 
 
 class ModelPolicy:
@@ -764,6 +941,8 @@ class ProcessResult:
     submit_result: SubmitResult | None
     kill_switch_active: bool = False
     kill_switch_reason: str | None = None
+    executed_events: list[dict[str, Any]] = field(default_factory=list)
+    closed_trades: list[dict[str, Any]] = field(default_factory=list)
     reward_components: dict[str, float] = field(default_factory=dict)
 
 
@@ -812,6 +991,18 @@ class RuntimeEngine:
         broker_position = self.broker.current_position(self.symbol)
         sync_confirmed_position(self.confirmed_position, broker_position, last_reward=last_reward)
 
+    def _execution_events_since(self, start_index: int) -> list[dict[str, Any]]:
+        execution_log = getattr(self.broker, "execution_log", None)
+        if not isinstance(execution_log, list):
+            return []
+        return [dict(item) for item in execution_log[start_index:] if isinstance(item, dict)]
+
+    def _closed_trades_since(self, start_index: int) -> list[dict[str, Any]]:
+        trade_log = getattr(self.broker, "trade_log", None)
+        if not isinstance(trade_log, list):
+            return []
+        return [dict(item) for item in trade_log[start_index:] if isinstance(item, dict)]
+
     def _sync_snapshot_risk_state(self) -> None:
         self.snapshot.high_water_mark = self.risk_engine.high_water_mark
         self.snapshot.day_start_equity = self.risk_engine.day_start_equity
@@ -836,19 +1027,22 @@ class RuntimeEngine:
         observation: np.ndarray,
         submit_result: SubmitResult | None,
         reason: str,
+        execution_log_start: int,
+        trade_log_start: int,
         reward_components: dict[str, float],
     ) -> ProcessResult:
         self.risk_engine.trigger_kill_switch(reason)
         if not self.confirmed_position.is_flat:
-            close_result = self.broker.submit_order(self._build_close_intent(bar))
-            submit_result = close_result
-            self._refresh_confirmed_position(last_reward=self.confirmed_position.last_reward)
-        self.snapshot.last_equity = equity
+            forced_summary = self.force_flatten(bar, reason="KILL_SWITCH_FORCED_CLOSE")
+            equity = float(forced_summary["equity"])
+            submit_result = SubmitResult(accepted=True, fill_price=float(bar.close))
+        self.snapshot.last_equity = float(equity)
+        self.last_equity = float(equity)
         self._sync_snapshot_risk_state()
         if self.state_store is not None:
             self.persist()
-        action = ActionSpec(ActionType.CLOSE) if not self.confirmed_position.is_flat else ActionSpec(ActionType.HOLD)
-        action_index = 1 if action.action_type == ActionType.CLOSE else 0
+        action = ActionSpec(ActionType.CLOSE)
+        action_index = 1
         return ProcessResult(
             bar=bar,
             action_index=action_index,
@@ -861,6 +1055,8 @@ class RuntimeEngine:
             submit_result=submit_result,
             kill_switch_active=True,
             kill_switch_reason=reason,
+            executed_events=self._execution_events_since(execution_log_start),
+            closed_trades=self._closed_trades_since(trade_log_start),
             reward_components=reward_components,
         )
 
@@ -1017,6 +1213,8 @@ class RuntimeEngine:
         )
 
     def process_bar(self, bar: VolumeBar, *, action_index_override: int | None = None) -> ProcessResult:
+        execution_log_start = len(getattr(self.broker, "execution_log", []))
+        trade_log_start = len(getattr(self.broker, "trade_log", []))
         executed_turnover_lots = float(self.broker.advance_bar(bar) or 0.0)
         self._refresh_confirmed_position(last_reward=self.confirmed_position.last_reward)
         self.feature_engine.push(bar.to_series())
@@ -1083,6 +1281,8 @@ class RuntimeEngine:
                 observation=observation,
                 submit_result=submit_result,
                 reason=risk_reason,
+                execution_log_start=execution_log_start,
+                trade_log_start=trade_log_start,
                 reward_components=reward_components,
             )
 
@@ -1098,6 +1298,8 @@ class RuntimeEngine:
                 observation=observation,
                 submit_result=submit_result,
                 reason=broker_fail_reason,
+                execution_log_start=execution_log_start,
+                trade_log_start=trade_log_start,
                 reward_components=reward_components,
             )
 
@@ -1117,6 +1319,8 @@ class RuntimeEngine:
             submit_result=submit_result,
             kill_switch_active=self.risk_engine.kill_switch_active,
             kill_switch_reason=self.risk_engine.kill_switch_reason,
+            executed_events=self._execution_events_since(execution_log_start),
+            closed_trades=self._closed_trades_since(trade_log_start),
             reward_components=reward_components,
         )
 
@@ -1128,6 +1332,38 @@ class RuntimeEngine:
         if submit_result.accepted:
             self._refresh_confirmed_position(last_reward=self.confirmed_position.last_reward)
         return submit_result
+
+    def force_flatten(
+        self,
+        bar: VolumeBar,
+        *,
+        reason: str = "FORCED_END_OF_PATH",
+    ) -> dict[str, float | bool]:
+        self._refresh_confirmed_position(last_reward=self.confirmed_position.last_reward)
+        if self.confirmed_position.is_flat:
+            return {
+                "forced_close": False,
+                "turnover_lots": 0.0,
+                "equity": float(self._current_equity(mark_price=bar.close, avg_spread=bar.avg_spread)),
+            }
+        turnover_lots = 0.0
+        broker_force_flatten = getattr(self.broker, "force_flatten", None)
+        if callable(broker_force_flatten):
+            turnover_lots = float(broker_force_flatten(bar, reason=reason) or 0.0)
+        else:
+            submit_result = self.broker.submit_order(self._build_close_intent(bar))
+            if submit_result.accepted:
+                turnover_lots = float(self.confirmed_position.volume)
+        equity = float(self._current_equity(mark_price=bar.close, avg_spread=bar.avg_spread))
+        self._refresh_confirmed_position(last_reward=self.confirmed_position.last_reward)
+        self.last_equity = equity
+        self.snapshot.last_equity = equity
+        self._sync_snapshot_risk_state()
+        return {
+            "forced_close": bool(turnover_lots > 0.0),
+            "turnover_lots": float(turnover_lots),
+            "equity": equity,
+        }
 
     def persist(self) -> None:
         if self.state_store is None:

@@ -19,7 +19,7 @@ except ImportError:
 
 from event_pipeline import ReplayBroker, RiskEngine, RiskLimits, RuntimeEngine, RuntimeSnapshot, VolumeBar
 from feature_engine import FEATURE_COLS, FeatureEngine, WARMUP_BARS
-from runtime_common import STATE_FEATURE_COUNT, ActionSpec, ActionType, build_action_mask, build_observation
+from runtime_common import STATE_FEATURE_COUNT, ActionSpec, ActionType, action_label, build_action_mask, build_observation
 from symbol_utils import pip_value_for_volume
 
 
@@ -73,6 +73,7 @@ class TrainingDiagnostics:
     def __init__(self) -> None:
         self.action_counts: dict[str, int] = {}
         self.trade_stats: dict[str, float | int] = {}
+        self.economic_stats: dict[str, float] = {}
         self.reward_stats: dict[str, float] = {}
         self._position_duration_samples: deque[int] = deque(maxlen=2048)
         self.reset()
@@ -86,6 +87,13 @@ class TrainingDiagnostics:
             "short": 0,
         }
         self.trade_stats = {
+            "action_selected_count": 0,
+            "action_accepted_count": 0,
+            "accepted_open_count": 0,
+            "accepted_close_count": 0,
+            "order_executed_count": 0,
+            "executed_open_count": 0,
+            "executed_close_count": 0,
             "entered_long_count": 0,
             "entered_short_count": 0,
             "entry_signal_long_count": 0,
@@ -93,12 +101,22 @@ class TrainingDiagnostics:
             "closed_trade_count": 0,
             "trade_attempt_count": 0,
             "trade_reject_count": 0,
+            "forced_close_count": 0,
             "flat_steps": 0,
             "long_steps": 0,
             "short_steps": 0,
             "position_duration_sum": 0,
             "position_duration_count": 0,
             "rapid_reversals": 0,
+        }
+        self.economic_stats = {
+            "gross_pnl_usd": 0.0,
+            "net_pnl_usd": 0.0,
+            "transaction_cost_usd": 0.0,
+            "commission_usd": 0.0,
+            "spread_slippage_cost_usd": 0.0,
+            "spread_cost_usd": 0.0,
+            "slippage_cost_usd": 0.0,
         }
         self.reward_stats = {
             "pnl_reward_sum": 0.0,
@@ -141,6 +159,52 @@ class TrainingDiagnostics:
         elif action.direction is not None and int(action.direction) < 0:
             self.action_counts["short"] += 1
 
+    def _record_executed_events(self, executed_events: Sequence[dict[str, Any]] | None) -> None:
+        for event in list(executed_events or []):
+            self.trade_stats["order_executed_count"] += 1
+            side = str(event.get("side", "")).lower()
+            if side == "open":
+                self.trade_stats["executed_open_count"] += 1
+            elif side == "close":
+                self.trade_stats["executed_close_count"] += 1
+
+    def _record_closed_trades(
+        self,
+        *,
+        closed_trades: Sequence[dict[str, Any]] | None,
+        prev_position: int,
+        prev_position_duration: int,
+        entry_filled_direction: int,
+    ) -> None:
+        closed_trades = list(closed_trades or [])
+        if not closed_trades:
+            return
+        self.trade_stats["closed_trade_count"] += int(len(closed_trades))
+        self.trade_stats["forced_close_count"] += int(
+            sum(1 for trade in closed_trades if bool(trade.get("forced_close", False)))
+        )
+        close_direction = int(prev_position) if int(prev_position) != 0 else int(entry_filled_direction)
+        duration = 0
+        if int(prev_position) != 0:
+            duration = max(int(prev_position_duration), 1)
+        elif int(entry_filled_direction) != 0:
+            duration = 1
+        if duration > 0:
+            self.trade_stats["position_duration_sum"] += duration
+            self.trade_stats["position_duration_count"] += 1
+            self._position_duration_samples.append(duration)
+        if close_direction != 0:
+            self._last_close_step = int(self.total_steps)
+            self._last_closed_direction = close_direction
+            for trade in closed_trades:
+                self.economic_stats["gross_pnl_usd"] += float(trade.get("gross_pnl_usd", 0.0))
+                self.economic_stats["net_pnl_usd"] += float(trade.get("net_pnl_usd", 0.0))
+                self.economic_stats["transaction_cost_usd"] += float(trade.get("transaction_cost_usd", 0.0))
+                self.economic_stats["commission_usd"] += float(trade.get("commission_usd", 0.0))
+                self.economic_stats["spread_slippage_cost_usd"] += float(trade.get("spread_slippage_cost_usd", 0.0))
+                self.economic_stats["spread_cost_usd"] += float(trade.get("spread_cost_usd", 0.0))
+                self.economic_stats["slippage_cost_usd"] += float(trade.get("slippage_cost_usd", 0.0))
+
     def record_step(
         self,
         *,
@@ -151,15 +215,23 @@ class TrainingDiagnostics:
         prev_position_duration: int,
         entry_signal_direction: int = 0,
         entry_filled_direction: int = 0,
-        closed_trade_count_delta: int = 0,
+        executed_events: Sequence[dict[str, Any]] | None = None,
+        closed_trades: Sequence[dict[str, Any]] | None = None,
         reward_components: dict[str, float],
         reward: float,
     ) -> None:
         self.total_steps += 1
+        self.trade_stats["action_selected_count"] += 1
         self._record_action(action)
         if action.action_type != ActionType.HOLD:
             self.trade_stats["trade_attempt_count"] += 1
-        if submit_result is not None and not bool(getattr(submit_result, "accepted", False)):
+        if submit_result is not None and bool(getattr(submit_result, "accepted", False)):
+            self.trade_stats["action_accepted_count"] += 1
+            if action.action_type == ActionType.CLOSE:
+                self.trade_stats["accepted_close_count"] += 1
+            elif action.action_type == ActionType.OPEN:
+                self.trade_stats["accepted_open_count"] += 1
+        elif submit_result is not None:
             self.trade_stats["trade_reject_count"] += 1
 
         if int(entry_signal_direction) > 0:
@@ -184,21 +256,13 @@ class TrainingDiagnostics:
             ):
                 self.trade_stats["rapid_reversals"] += 1
 
-        if int(closed_trade_count_delta) > 0:
-            self.trade_stats["closed_trade_count"] += int(closed_trade_count_delta)
-            close_direction = int(prev_position) if int(prev_position) != 0 else int(entry_filled_direction)
-            duration = 0
-            if int(prev_position) != 0:
-                duration = max(int(prev_position_duration), 1)
-            elif int(entry_filled_direction) != 0:
-                duration = 1
-            if duration > 0:
-                self.trade_stats["position_duration_sum"] += duration
-                self.trade_stats["position_duration_count"] += 1
-                self._position_duration_samples.append(duration)
-            if close_direction != 0:
-                self._last_close_step = int(self.total_steps)
-                self._last_closed_direction = close_direction
+        self._record_executed_events(executed_events)
+        self._record_closed_trades(
+            closed_trades=closed_trades,
+            prev_position=prev_position,
+            prev_position_duration=prev_position_duration,
+            entry_filled_direction=entry_filled_direction,
+        )
 
         if int(new_position) == 0:
             self.trade_stats["flat_steps"] += 1
@@ -218,6 +282,22 @@ class TrainingDiagnostics:
         self.reward_stats["drawdown_penalty_sum"] -= float(reward_components.get("drawdown_penalty_applied", 0.0))
         self.reward_stats["net_reward_sum"] += float(reward)
 
+    def record_forced_close(
+        self,
+        *,
+        prev_position: int,
+        prev_position_duration: int,
+        executed_events: Sequence[dict[str, Any]] | None,
+        closed_trades: Sequence[dict[str, Any]] | None,
+    ) -> None:
+        self._record_executed_events(executed_events)
+        self._record_closed_trades(
+            closed_trades=closed_trades,
+            prev_position=prev_position,
+            prev_position_duration=prev_position_duration,
+            entry_filled_direction=0,
+        )
+
     def snapshot(self) -> dict[str, Any]:
         return {
             "total_steps": int(self.total_steps),
@@ -227,6 +307,7 @@ class TrainingDiagnostics:
                 "position_duration_sum": float(self.trade_stats["position_duration_sum"]),
                 "position_durations_sample": list(self._position_duration_samples),
             },
+            "economics": {key: float(value) for key, value in self.economic_stats.items()},
             "reward_components": {key: float(value) for key, value in self.reward_stats.items()},
         }
 
@@ -313,6 +394,7 @@ class RuntimeGymEnv(gym.Env):
         self._last_observation = None
         self._episode_start_index = 0
         self._pending_entry_direction = 0
+        self._episode_finalized = False
 
     @staticmethod
     def _frame_to_bars(frame: pd.DataFrame) -> list[VolumeBar]:
@@ -412,6 +494,101 @@ class RuntimeGymEnv(gym.Env):
     def get_training_diagnostics(self) -> dict[str, Any]:
         return self._training_diagnostics.snapshot()
 
+    def _latest_bar(self) -> VolumeBar:
+        if not self._bars:
+            raise RuntimeError("No bars available for runtime environment.")
+        index = min(max(int(self._bar_index), 0), len(self._bars) - 1)
+        return self._bars[index]
+
+    def _finalize_episode(self, *, reason: str) -> dict[str, Any]:
+        if self._episode_finalized or self._runtime is None:
+            return {
+                "forced_close": False,
+                "forced_close_count_delta": 0,
+                "executed_order_count_delta": 0,
+                "trade_closed_count_delta": 0,
+                "gross_pnl_usd_delta": 0.0,
+                "net_pnl_usd_delta": 0.0,
+                "transaction_cost_usd_delta": 0.0,
+                "equity": float(self._runtime.last_equity) if self._runtime is not None else float(self.config.initial_equity),
+            }
+        prev_position = int(self._runtime.confirmed_position.direction)
+        prev_position_duration = int(self._runtime.confirmed_position.time_in_trade_bars)
+        broker = self._runtime.broker
+        execution_log_before = len(getattr(broker, "execution_log", []))
+        trade_log_before = len(getattr(broker, "trade_log", []))
+        final_bar = self._latest_bar()
+        forced_summary = self._runtime.force_flatten(final_bar, reason=reason)
+        executed_events = [dict(item) for item in getattr(broker, "execution_log", [])[execution_log_before:] if isinstance(item, dict)]
+        closed_trades = [dict(item) for item in getattr(broker, "trade_log", [])[trade_log_before:] if isinstance(item, dict)]
+        if executed_events or closed_trades:
+            self._training_diagnostics.record_forced_close(
+                prev_position=prev_position,
+                prev_position_duration=prev_position_duration,
+                executed_events=executed_events,
+                closed_trades=closed_trades,
+            )
+        self._episode_finalized = True
+        return {
+            "forced_close": bool(forced_summary.get("forced_close", False)),
+            "forced_close_count_delta": int(sum(1 for event in executed_events if bool(event.get("forced", False)))),
+            "executed_order_count_delta": int(len(executed_events)),
+            "trade_closed_count_delta": int(len(closed_trades)),
+            "gross_pnl_usd_delta": float(sum(float(trade.get("gross_pnl_usd", 0.0)) for trade in closed_trades)),
+            "net_pnl_usd_delta": float(sum(float(trade.get("net_pnl_usd", 0.0)) for trade in closed_trades)),
+            "transaction_cost_usd_delta": float(sum(float(trade.get("transaction_cost_usd", 0.0)) for trade in closed_trades)),
+            "equity": float(forced_summary.get("equity", self._runtime.last_equity)),
+        }
+
+    def _log_slice(self, attr_name: str, start_index: int) -> list[dict[str, Any]]:
+        if self._runtime is None:
+            return []
+        values = getattr(self._runtime.broker, attr_name, None)
+        if not isinstance(values, list):
+            return []
+        return [dict(item) for item in values[start_index:] if isinstance(item, dict)]
+
+    def _force_close_end_of_path(
+        self,
+        *,
+        bar: VolumeBar,
+        prev_equity: float,
+        turnover_lots: float,
+        reward_components: dict[str, float],
+        result: Any,
+    ) -> tuple[dict[str, float], float, bool]:
+        forced_close = False
+        if self._runtime is None or int(result.position_direction) == 0:
+            reward_components.setdefault("forced_close_applied", 0.0)
+            return reward_components, float(turnover_lots), forced_close
+        flatten_result = self._runtime.force_flatten(bar, reason="FORCED_EPISODE_CLOSE")
+        if not bool(flatten_result.get("forced_close", False)):
+            reward_components.setdefault("forced_close_applied", 0.0)
+            return reward_components, float(turnover_lots), forced_close
+        forced_close = True
+        total_turnover_lots = float(turnover_lots) + float(flatten_result.get("turnover_lots", 0.0))
+        updated_reward_components = dict(
+            self._runtime._build_reward_components(
+                float(flatten_result.get("equity", result.equity)),
+                current_price=float(bar.close),
+                turnover_lots=total_turnover_lots,
+                avg_spread=float(bar.avg_spread),
+            )
+        )
+        updated_reward_components["pnl_reward"] = float(
+            updated_reward_components.get("reward_raw_unclipped", updated_reward_components.get("pnl_reward", 0.0))
+        )
+        updated_reward_components["slippage_penalty_applied"] = self._estimate_slippage_penalty(
+            turnover_lots=total_turnover_lots,
+            current_price=float(bar.close),
+            equity_base=prev_equity,
+        )
+        updated_reward_components["forced_close_applied"] = 1.0
+        result.equity = float(flatten_result.get("equity", result.equity))
+        result.position_direction = 0
+        result.reward_components = dict(updated_reward_components)
+        return updated_reward_components, total_turnover_lots, forced_close
+
     def action_masks(self) -> np.ndarray:
         if self._runtime is None or self._runtime.feature_engine._buffer is None:
             return np.zeros(len(self.action_map), dtype=bool)
@@ -448,21 +625,33 @@ class RuntimeGymEnv(gym.Env):
         prev_equity = float(self._runtime.last_equity)
         prev_position = int(self._runtime.confirmed_position.direction)
         prev_position_duration = int(self._runtime.confirmed_position.time_in_trade_bars)
-        trade_log_before = len(getattr(self._runtime.broker, "trade_log", []))
         self._apply_runtime_slippage()
         action = int(action)
         if not (0 <= action < len(self.action_map)):
             raise ValueError(f"Invalid action {action}")
 
         if self._bar_index >= len(self._bars) - 1:
+            finalization = self._finalize_episode(reason="FORCED_EPISODE_CLOSE")
             terminated = True
             truncated = False
-            obs = self._last_observation if self._last_observation is not None else np.zeros(self.observation_space.shape, dtype=np.float32)
+            obs = (
+                self._last_observation
+                if self._last_observation is not None
+                else np.zeros(self.observation_space.shape, dtype=np.float32)
+            )
             info = {
-                "equity": float(self._runtime.last_equity),
+                "equity": float(finalization["equity"]),
+                "total_equity_usd": float(finalization["equity"]),
                 "timestamp_utc": None,
-                "reward_components": {},
+                "reward_components": {"forced_close_applied": float(bool(finalization["forced_close"]))},
                 "episode_start_index": int(self._episode_start_index),
+                "forced_close": bool(finalization["forced_close"]),
+                "forced_close_count": int(finalization["forced_close_count_delta"]),
+                "executed_order_count": int(finalization["executed_order_count_delta"]),
+                "trade_count": int(finalization["trade_closed_count_delta"]),
+                "gross_pnl_usd_delta": float(finalization["gross_pnl_usd_delta"]),
+                "net_pnl_usd_delta": float(finalization["net_pnl_usd_delta"]),
+                "transaction_cost_usd_delta": float(finalization["transaction_cost_usd_delta"]),
             }
             if _GYM:
                 return obs, 0.0, terminated, truncated, info
@@ -490,8 +679,8 @@ class RuntimeGymEnv(gym.Env):
             entry_signal_direction = int(result.action.direction)
             self._pending_entry_direction = entry_signal_direction
 
-        trade_log_after = len(getattr(self._runtime.broker, "trade_log", []))
-        closed_trade_count_delta = max(int(trade_log_after - trade_log_before), 0)
+        executed_events = [dict(item) for item in result.executed_events]
+        closed_trades = [dict(item) for item in result.closed_trades]
         reward_components.setdefault("holding_penalty_applied", 0.0)
         reward_components["pnl_reward"] = float(
             reward_components.get("reward_raw_unclipped", reward_components.get("pnl_reward", 0.0))
@@ -501,6 +690,16 @@ class RuntimeGymEnv(gym.Env):
             current_price=float(bar.close),
             equity_base=prev_equity,
         )
+        terminated = bool(self._bar_index >= len(self._bars) - 1 or result.kill_switch_active)
+        finalization: dict[str, Any] | None = None
+        if terminated and not result.kill_switch_active:
+            finalization = self._finalize_episode(reason="FORCED_EPISODE_CLOSE")
+            reward_components["forced_close_applied"] = float(bool(finalization["forced_close"]))
+            if bool(finalization["forced_close"]):
+                result.equity = float(finalization["equity"])
+                result.position_direction = 0
+        else:
+            reward_components.setdefault("forced_close_applied", 0.0)
         bonus_direction = entry_signal_direction if entry_signal_direction != 0 else int(result.position_direction)
         participation_bonus = compute_participation_bonus(
             prev_position=prev_position,
@@ -526,22 +725,44 @@ class RuntimeGymEnv(gym.Env):
             prev_position_duration=prev_position_duration,
             entry_signal_direction=entry_signal_direction,
             entry_filled_direction=entry_filled_direction,
-            closed_trade_count_delta=closed_trade_count_delta,
+            executed_events=executed_events,
+            closed_trades=closed_trades,
             reward_components=reward_components,
             reward=float(final_reward),
         )
 
-        terminated = bool(self._bar_index >= len(self._bars) - 1 or result.kill_switch_active)
         truncated = False
+        forced_close_count = int(finalization["forced_close_count_delta"]) if finalization is not None else 0
+        executed_order_count = int(len(executed_events)) + int(finalization["executed_order_count_delta"]) if finalization is not None else int(len(executed_events))
+        trade_count = int(len(closed_trades)) + int(finalization["trade_closed_count_delta"]) if finalization is not None else int(len(closed_trades))
+        gross_pnl_usd_delta = float(sum(float(trade.get("gross_pnl_usd", 0.0)) for trade in closed_trades))
+        net_pnl_usd_delta = float(sum(float(trade.get("net_pnl_usd", 0.0)) for trade in closed_trades))
+        transaction_cost_usd_delta = float(sum(float(trade.get("transaction_cost_usd", 0.0)) for trade in closed_trades))
+        if finalization is not None:
+            gross_pnl_usd_delta += float(finalization["gross_pnl_usd_delta"])
+            net_pnl_usd_delta += float(finalization["net_pnl_usd_delta"])
+            transaction_cost_usd_delta += float(finalization["transaction_cost_usd_delta"])
         info = {
             "equity": float(result.equity),
             "total_equity_usd": float(result.equity),
             "reward": float(final_reward),
             "reward_components": dict(reward_components),
+            "selected_action_index": int(result.action_index),
+            "selected_action_label": action_label(result.action),
+            "selected_action_type": result.action.action_type.value,
+            "selected_action_direction": int(result.action.direction or 0),
+            "action_accepted": bool(result.submit_result is not None and bool(getattr(result.submit_result, "accepted", False))),
             "kill_switch_active": bool(result.kill_switch_active),
             "kill_switch_reason": result.kill_switch_reason,
             "episode_start_index": int(self._episode_start_index),
             "timestamp_utc": pd.Timestamp(bar.timestamp).isoformat(),
+            "forced_close": bool(reward_components.get("forced_close_applied", 0.0) > 0.0),
+            "forced_close_count": forced_close_count,
+            "executed_order_count": executed_order_count,
+            "trade_count": trade_count,
+            "gross_pnl_usd_delta": gross_pnl_usd_delta,
+            "net_pnl_usd_delta": net_pnl_usd_delta,
+            "transaction_cost_usd_delta": transaction_cost_usd_delta,
         }
         if _GYM:
             return result.observation, float(final_reward), terminated, truncated, info

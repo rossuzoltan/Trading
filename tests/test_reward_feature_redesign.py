@@ -136,7 +136,7 @@ class RewardFeatureRedesignTests(unittest.TestCase):
         history = _make_history(rows=320)
         raw = _compute_raw(history).dropna(subset=FEATURE_COLS)
         scaler = StandardScaler().fit(raw.loc[:, FEATURE_COLS])
-        action_map = build_action_map([0.5], [0.5])
+        action_map = build_action_map([100.0], [100.0])
 
         def build_env(random_start: bool) -> RuntimeGymEnv:
             return RuntimeGymEnv(
@@ -222,6 +222,39 @@ class RewardFeatureRedesignTests(unittest.TestCase):
         self.assertEqual(1, diagnostics["trade_stats"]["trade_attempt_count"])
         self.assertEqual(1, diagnostics["trade_stats"]["flat_steps"])
         self.assertAlmostEqual(0.01, diagnostics["reward_components"]["participation_bonus_sum"])
+
+    def test_runtime_env_force_closes_open_position_at_episode_end(self) -> None:
+        history = _make_history(rows=320)
+        raw = _compute_raw(history).dropna(subset=FEATURE_COLS)
+        scaler = StandardScaler().fit(raw.loc[:, FEATURE_COLS])
+        action_map = build_action_map([100.0], [100.0])
+        env = RuntimeGymEnv(
+            symbol="EURUSD",
+            bars_frame=history,
+            scaler=scaler,
+            action_map=action_map,
+            config=RuntimeGymConfig(random_start=False, slippage_pips=0.1),
+        )
+
+        env.reset(seed=7)
+        terminated = False
+        info = {}
+        action = 2
+        while not terminated:
+            _, _, terminated, truncated, info = env.step(action)
+            self.assertFalse(truncated)
+            action = 0
+
+        trade_log = env._runtime.broker.trade_log
+        self.assertTrue(trade_log)
+        self.assertEqual("FORCED_EPISODE_CLOSE", trade_log[-1]["reason"])
+        self.assertTrue(bool(trade_log[-1]["forced_close"]))
+        self.assertEqual(0, env._runtime.confirmed_position.direction)
+        diagnostics = env.get_training_diagnostics()
+        self.assertEqual(1, diagnostics["trade_stats"]["forced_close_count"])
+        self.assertGreaterEqual(diagnostics["trade_stats"]["order_executed_count"], 2)
+        self.assertGreaterEqual(diagnostics["economics"]["transaction_cost_usd"], 0.0)
+        self.assertTrue(bool(info["forced_close"]))
 
 
 if __name__ == "__main__":

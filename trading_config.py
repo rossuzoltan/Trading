@@ -5,8 +5,31 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-ACTION_SL_MULTS: tuple[float, ...] = (0.5, 1.0, 2.0, 3.0)
-ACTION_TP_MULTS: tuple[float, ...] = (0.5, 1.0, 2.0, 3.0)
+LEGACY_ACTION_SL_MULTS: tuple[float, ...] = (0.5, 1.0, 2.0, 3.0)
+LEGACY_ACTION_TP_MULTS: tuple[float, ...] = (0.5, 1.0, 2.0, 3.0)
+SIMPLE_ACTION_SL_MULTS: tuple[float, ...] = (1.0,)
+SIMPLE_ACTION_TP_MULTS: tuple[float, ...] = (1.0,)
+
+
+def resolve_action_space_mode(default: str = "simple") -> str:
+    raw_mode = os.environ.get("TRADING_ACTION_SPACE_MODE", default).strip().lower()
+    if raw_mode in {"", "simple"}:
+        return "simple"
+    if raw_mode == "legacy":
+        return "legacy"
+    raise ValueError(
+        f"Unsupported TRADING_ACTION_SPACE_MODE={raw_mode!r}. Expected 'simple' or 'legacy'."
+    )
+
+
+def resolve_action_sl_tp_options() -> tuple[tuple[float, ...], tuple[float, ...]]:
+    mode = resolve_action_space_mode()
+    if mode == "legacy":
+        return LEGACY_ACTION_SL_MULTS, LEGACY_ACTION_TP_MULTS
+    return SIMPLE_ACTION_SL_MULTS, SIMPLE_ACTION_TP_MULTS
+
+
+ACTION_SL_MULTS, ACTION_TP_MULTS = resolve_action_sl_tp_options()
 
 DEFAULT_LEARNING_RATE = 1e-3
 DEFAULT_MIN_LEARNING_RATE = 3e-4
