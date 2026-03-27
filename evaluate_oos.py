@@ -21,6 +21,7 @@ from artifact_manifest import (
     load_validated_scaler,
     load_validated_vecnormalize,
 )
+from dataset_validation import validate_symbol_bar_spec
 from event_pipeline import (
     JsonStateStore,
     ModelPolicy,
@@ -32,7 +33,7 @@ from event_pipeline import (
     VolumeBar,
 )
 from feature_engine import FEATURE_COLS, FeatureEngine, WARMUP_BARS
-from project_paths import resolve_dataset_path, resolve_manifest_path
+from project_paths import resolve_dataset_path, resolve_manifest_path, validate_dataset_bar_spec
 from runtime_common import STATE_FEATURE_COUNT, build_action_map, compute_max_drawdown, compute_timed_sharpe, compute_trade_metrics
 from trading_config import ACTION_SL_MULTS, ACTION_TP_MULTS, deployment_paths
 from validation_metrics import build_deployment_gate, load_json_report, save_json_report
@@ -66,9 +67,16 @@ def _frame_to_bars(frame: pd.DataFrame) -> list[VolumeBar]:
 
 def run_replay() -> tuple[list[float], list[pd.Timestamp], list[dict]]:
     dataset_path = resolve_dataset_path()
-    dataset_id = dataset_id_for_path(dataset_path)
     manifest_path = resolve_manifest_path(symbol=TARGET_SYM)
     manifest = load_manifest(manifest_path)
+    manifest_ticks = manifest.bar_construction_ticks_per_bar or manifest.ticks_per_bar
+    if manifest_ticks is not None:
+        validate_dataset_bar_spec(
+            dataset_path=dataset_path,
+            expected_ticks_per_bar=int(manifest_ticks),
+            metadata_required=True,
+        )
+    dataset_id = dataset_id_for_path(dataset_path)
 
     action_map = build_action_map(SL_OPTS, TP_OPTS)
     observation_shape = [1, len(FEATURE_COLS) + STATE_FEATURE_COUNT]
@@ -98,6 +106,12 @@ def run_replay() -> tuple[list[float], list[pd.Timestamp], list[dict]]:
     raw = raw[raw["Symbol"].astype(str).str.upper() == TARGET_SYM].copy()
     raw["Gmt time"] = pd.to_datetime(raw["Gmt time"], utc=True, errors="coerce")
     raw = raw.dropna(subset=["Gmt time"]).set_index("Gmt time").sort_index()
+    if manifest_ticks is not None:
+        validate_symbol_bar_spec(
+            raw.reset_index(),
+            expected_ticks_per_bar=int(manifest_ticks),
+            symbol=TARGET_SYM,
+        )
     if len(raw) <= WARMUP_BARS + 10:
         raise RuntimeError(f"Not enough raw bars for {TARGET_SYM}: {len(raw)}")
 

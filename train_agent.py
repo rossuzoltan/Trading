@@ -28,6 +28,7 @@ import json
 import multiprocessing as mp
 import shutil
 import sys
+import time
 from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
@@ -46,11 +47,17 @@ from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.monitor import Monitor
 
 from artifact_manifest import DEFAULT_MANIFEST_NAME, create_manifest, save_manifest
+from dataset_validation import validate_symbol_bar_spec
 from device_utils import configure_training_runtime
 from feature_engine import FEATURE_COLS, WARMUP_BARS, _compute_raw, SCALER_PATH
 from masking_utils import action_mask_fn
-from runtime_common import STATE_FEATURE_COUNT, build_action_map
-from project_paths import ensure_runtime_dirs, resolve_dataset_path
+from runtime_common import STATE_FEATURE_COUNT, build_action_map, compute_trade_metrics
+from project_paths import (
+    ensure_runtime_dirs,
+    resolve_dataset_path,
+    validate_dataset_bar_spec,
+    validate_dataset_integrity,
+)
 from trading_env import ForexTradingEnv
 from trading_config import (
     ACTION_SL_MULTS,
@@ -61,6 +68,8 @@ from trading_config import (
     DEFAULT_SLIPPAGE_END_PIPS,
     DEFAULT_SLIPPAGE_START_PIPS,
     DEFAULT_TARGET_KL,
+    DEPLOY_EXPECTANCY_MIN,
+    DEPLOY_PROFIT_FACTOR_MIN,
     DEPLOY_TIMED_SHARPE_MIN,
     deployment_paths,
     resolve_bar_construction_ticks_per_bar,
@@ -101,6 +110,7 @@ MIN_EXPLAINED_VARIANCE = float(os.environ.get("TRAIN_MIN_EXPLAINED_VARIANCE", "0
 KL_MIN = float(os.environ.get("TRAIN_KL_MIN", "0.01"))
 KL_MAX = float(os.environ.get("TRAIN_KL_MAX", "0.05"))
 DEPLOY_DD_MAX = float(os.environ.get("TRAIN_DEPLOY_DD_MAX", "0.30"))
+MIN_EVAL_TRADE_COUNT = int(os.environ.get("TRAIN_MIN_EVAL_TRADES", os.environ.get("DEPLOY_MIN_TRADE_COUNT", "20")))
 HOLDOUT_FRAC = float(os.environ.get("TRAIN_HOLDOUT_FRAC", "0.15"))
 POLICY_WIDTH = int(os.environ.get("TRAIN_POLICY_WIDTH", "128"))
 BAR_CONSTRUCTION_TICKS_PER_BAR = resolve_bar_construction_ticks_per_bar(
@@ -384,23 +394,29 @@ class TrainingHeartbeatCallback(BaseCallback):
         *,
         out_path: str | Path,
         diagnostics_cb: TrainingDiagnosticsCallback,
+        eval_cb: FullPathEvalCallback | None,
         run_id: str,
         symbol: str,
         checkpoints_root: str | Path,
         fold_index: int | None = None,
         current_run_path: str | Path = CURRENT_TRAINING_RUN_PATH,
         every_steps: int = 5_000,
+        total_timesteps: int | None = None,
         verbose: int = 0,
     ) -> None:
         super().__init__(verbose)
         self.out_path = Path(out_path)
         self.diagnostics_cb = diagnostics_cb
+        self.eval_cb = eval_cb
         self.run_id = str(run_id)
         self.symbol = str(symbol).upper()
         self.checkpoints_root = Path(checkpoints_root)
         self.fold_index = int(fold_index) if fold_index is not None else None
         self.current_run_path = Path(current_run_path)
         self.every_steps = max(int(every_steps), 0)
+        self.total_timesteps = int(total_timesteps) if total_timesteps is not None else None
+        self.fold_started_utc = datetime.now(timezone.utc).isoformat()
+        self._fold_started_perf_counter = time.perf_counter()
         self._next_write = self.every_steps if self.every_steps else 0
 
     def _on_step(self) -> bool:
@@ -410,6 +426,24 @@ class TrainingHeartbeatCallback(BaseCallback):
             return True
         self._next_write += self.every_steps
         diagnostics_summary = self.diagnostics_cb.summary()
+        now_utc = datetime.now(timezone.utc)
+        elapsed_seconds = max((now_utc - datetime.fromisoformat(PROCESS_STARTED_UTC)).total_seconds(), 0.0)
+        fold_elapsed_seconds = max(time.perf_counter() - self._fold_started_perf_counter, 0.0)
+        steps_per_second = (
+            float(self.num_timesteps) / float(fold_elapsed_seconds)
+            if fold_elapsed_seconds > 0
+            else None
+        )
+        progress_fraction = None
+        estimated_remaining_seconds = None
+        if self.total_timesteps:
+            progress_fraction = min(float(self.num_timesteps) / float(self.total_timesteps), 1.0)
+            if steps_per_second and np.isfinite(steps_per_second) and steps_per_second > 0:
+                estimated_remaining_seconds = max(
+                    float(self.total_timesteps - self.num_timesteps) / float(steps_per_second),
+                    0.0,
+                )
+        latest_eval_metrics = copy.deepcopy(self.eval_cb.latest_metrics) if self.eval_cb and self.eval_cb.latest_metrics else None
         payload = {
             "schema_version": HEARTBEAT_SCHEMA_VERSION,
             "run_id": self.run_id,
@@ -417,11 +451,19 @@ class TrainingHeartbeatCallback(BaseCallback):
             "fold_index": self.fold_index,
             "checkpoints_root": str(self.checkpoints_root),
             "process_started_utc": PROCESS_STARTED_UTC,
-            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "fold_started_utc": self.fold_started_utc,
+            "timestamp_utc": now_utc.isoformat(),
             "num_timesteps": int(self.num_timesteps),
+            "total_timesteps": self.total_timesteps,
+            "elapsed_seconds": elapsed_seconds,
+            "fold_elapsed_seconds": fold_elapsed_seconds,
+            "steps_per_second": steps_per_second,
+            "progress_fraction": progress_fraction,
+            "estimated_remaining_seconds": estimated_remaining_seconds,
             "n_updates": diagnostics_summary.get("n_updates"),
             "diagnostic_sample_count": diagnostics_summary.get("diagnostic_sample_count"),
             "ppo_diagnostics": diagnostics_summary,
+            "latest_eval": latest_eval_metrics,
         }
         self.out_path.parent.mkdir(parents=True, exist_ok=True)
         self.out_path.write_text(json.dumps(payload, indent=2, default=_json_default), encoding="utf-8")
@@ -433,6 +475,10 @@ class TrainingHeartbeatCallback(BaseCallback):
             fold_index=self.fold_index,
             heartbeat_path=self.out_path,
             out_path=self.current_run_path,
+            num_timesteps=int(self.num_timesteps),
+            total_timesteps=self.total_timesteps,
+            progress_fraction=progress_fraction,
+            estimated_remaining_seconds=estimated_remaining_seconds,
         )
         if self.verbose:
             print(f"[Heartbeat] Wrote -> {self.out_path}")
@@ -618,6 +664,21 @@ def _curve_segment_metrics(
     return segments
 
 
+def _extract_eval_trade_log(eval_env) -> list[dict[str, Any]]:
+    try:
+        runtimes = eval_env.get_attr("_runtime")
+    except Exception:
+        return []
+    if not runtimes:
+        return []
+    runtime = runtimes[0]
+    broker = getattr(runtime, "broker", None)
+    trade_log = getattr(broker, "trade_log", None)
+    if not isinstance(trade_log, list):
+        return []
+    return [dict(item) for item in trade_log if isinstance(item, dict)]
+
+
 def evaluate_model(model, eval_env) -> tuple[list[float], dict[str, Any]]:
     obs = eval_env.reset()
     equity_curve: list[float] = []
@@ -650,6 +711,7 @@ def evaluate_model(model, eval_env) -> tuple[list[float], dict[str, Any]]:
             timestamps.append(pd.Timestamp(timestamp_utc))
         if done:
             break
+    trade_metrics = compute_trade_metrics(_extract_eval_trade_log(eval_env), initial_equity=1_000.0)
     metrics = {
         "final_equity": float(equity_curve[-1]) if equity_curve else 1_000.0,
         "timed_sharpe": compute_timed_sharpe(equity_curve, timestamps),
@@ -658,6 +720,10 @@ def evaluate_model(model, eval_env) -> tuple[list[float], dict[str, Any]]:
         "total_reward": float(np.sum(rewards)) if rewards else 0.0,
         "mean_step_reward": float(np.mean(rewards)) if rewards else 0.0,
         "segment_metrics": _curve_segment_metrics(equity_curve, timestamps),
+        "win_rate": float(trade_metrics["win_rate"]),
+        "profit_factor": float(trade_metrics["profit_factor"]),
+        "expectancy": float(trade_metrics["expectancy"]),
+        "trade_count": int(trade_metrics["trade_count"]),
     }
     return equity_curve, metrics
 
@@ -873,6 +939,9 @@ def _holdout_deployment_blockers(
     holdout_sharpe: float,
     holdout_max_drawdown: float,
     holdout_final_equity: float,
+    holdout_profit_factor: float,
+    holdout_expectancy: float,
+    holdout_trade_count: int,
     initial_equity: float = 1_000.0,
 ) -> list[str]:
     blockers: list[str] = []
@@ -884,14 +953,23 @@ def _holdout_deployment_blockers(
         blockers.append(
             f"Holdout final equity {float(holdout_final_equity):.2f} < initial equity {float(initial_equity):.2f}"
         )
+    if not np.isfinite(float(holdout_profit_factor)) or float(holdout_profit_factor) < DEPLOY_PROFIT_FACTOR_MIN:
+        blockers.append(
+            f"Holdout profit factor {float(holdout_profit_factor):.3f} < {DEPLOY_PROFIT_FACTOR_MIN:.2f}"
+        )
+    if float(holdout_expectancy) < DEPLOY_EXPECTANCY_MIN:
+        blockers.append(f"Holdout expectancy {float(holdout_expectancy):.3f} < {DEPLOY_EXPECTANCY_MIN:.2f}")
+    if int(holdout_trade_count) < MIN_EVAL_TRADE_COUNT:
+        blockers.append(f"Holdout trades {int(holdout_trade_count)} < required {MIN_EVAL_TRADE_COUNT}")
     return blockers
 
 
-def _deployment_candidate_rank(diagnostics: dict[str, Any]) -> tuple[float, float] | None:
+def _deployment_candidate_rank(diagnostics: dict[str, Any]) -> tuple[float, float, float] | None:
     if not bool(diagnostics.get("deploy_ready", False)):
         return None
     return (
         float(diagnostics.get("holdout_sharpe", float("-inf"))),
+        float(diagnostics.get("holdout_profit_factor", float("-inf"))),
         float(diagnostics.get("val_sharpe", float("-inf"))),
     )
 
@@ -935,6 +1013,10 @@ def _write_current_training_run_context(
     fold_index: int | None = None,
     heartbeat_path: str | Path | None = None,
     out_path: str | Path = CURRENT_TRAINING_RUN_PATH,
+    num_timesteps: int | None = None,
+    total_timesteps: int | None = None,
+    progress_fraction: float | None = None,
+    estimated_remaining_seconds: float | None = None,
 ) -> Path:
     payload = {
         "schema_version": 1,
@@ -948,6 +1030,14 @@ def _write_current_training_run_context(
         "heartbeat_path": str(Path(heartbeat_path)) if heartbeat_path is not None else None,
         "updated_at_utc": datetime.now(timezone.utc).isoformat(),
     }
+    if num_timesteps is not None:
+        payload["num_timesteps"] = int(num_timesteps)
+    if total_timesteps is not None:
+        payload["total_timesteps"] = int(total_timesteps)
+    if progress_fraction is not None:
+        payload["progress_fraction"] = float(progress_fraction)
+    if estimated_remaining_seconds is not None:
+        payload["estimated_remaining_seconds"] = float(estimated_remaining_seconds)
     destination = Path(out_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(
@@ -1094,6 +1184,11 @@ def main() -> None:
     # ── Load data ────────────────────────────────────────────────────────────
     # Try volume bars first (Phase 11), fall back to FOREX_MULTI_SET
     data_path = resolve_dataset_path()
+    validate_dataset_bar_spec(
+        dataset_path=data_path,
+        expected_ticks_per_bar=BAR_CONSTRUCTION_TICKS_PER_BAR,
+        metadata_required=True,
+    )
     print(f"[INFO] Using dataset: {data_path}")
     if False:
         data_path = "data/FOREX_MULTI_SET.csv"
@@ -1123,6 +1218,24 @@ def main() -> None:
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_checkpoints_root = Path("checkpoints") / f"run_{run_id}"
     run_checkpoints_root.mkdir(parents=True, exist_ok=True)
+    dataset_integrity_report = validate_dataset_integrity(
+        dataset_path=data_path,
+        expected_ticks_per_bar=BAR_CONSTRUCTION_TICKS_PER_BAR,
+        metadata_required=True,
+        symbol=primary_symbol,
+    )
+    dataset_integrity_report_path = run_checkpoints_root / "dataset_integrity_report.json"
+    save_json_report(dataset_integrity_report, dataset_integrity_report_path)
+    dataset_integrity_verified = bool(TRAIN_DATASET_INTEGRITY_VERIFIED or dataset_integrity_report.get("passed", False))
+    point_in_time_verified = bool(TRAIN_POINT_IN_TIME_VERIFIED)
+    integrity_symbol_report = dataset_integrity_report["symbol_reports"].get(primary_symbol, {})
+    print(
+        "[INFO] Dataset integrity OK "
+        f"for {primary_symbol}: bars={integrity_symbol_report.get('rows', 0):,} "
+        f"raw_tick_rows={integrity_symbol_report.get('raw_tick_rows', 0):,} "
+        f"max_gap_hours={integrity_symbol_report.get('max_gap_hours', 0.0):.2f}"
+    )
+    print(f"[INFO] Dataset integrity report -> {dataset_integrity_report_path}")
     legacy_checkpoint_archives = _clear_legacy_checkpoint_artifacts(run_id=run_id)
     if legacy_checkpoint_archives:
         print(
@@ -1152,6 +1265,11 @@ def main() -> None:
 
     for sym in symbols:
         sdf = df_raw[df_raw["Symbol"] == sym].copy()
+        validate_symbol_bar_spec(
+            sdf,
+            expected_ticks_per_bar=BAR_CONSTRUCTION_TICKS_PER_BAR,
+            symbol=sym,
+        )
         computed = _compute_raw(sdf)
         computed.dropna(subset=[c for c in FEATURE_COLS if c in computed.columns], inplace=True)
         minimums = training_data_minimums()
@@ -1381,16 +1499,6 @@ def main() -> None:
         curriculum_cb = CurriculumCallback(TOTAL_TIMESTEPS, verbose=1)
         diagnostics_cb = TrainingDiagnosticsCallback(verbose=int(os.environ.get("TRAIN_PROGRESS_VERBOSE", "1")))
         heartbeat_every = int(os.environ.get("TRAIN_HEARTBEAT_EVERY_STEPS", "5000"))
-        heartbeat_cb = TrainingHeartbeatCallback(
-            out_path=Path(ckpt_dir) / "training_heartbeat.json",
-            diagnostics_cb=diagnostics_cb,
-            run_id=run_id,
-            symbol=primary_symbol,
-            checkpoints_root=run_checkpoints_root,
-            fold_index=fold_idx,
-            every_steps=heartbeat_every,
-            verbose=0,
-        )
         eval_cb = FullPathEvalCallback(
             val_vec,
             train_vecnormalize=train_vec,
@@ -1401,10 +1509,22 @@ def main() -> None:
             eval_freq=max(TRAIN_EVAL_FREQ // max(effective_envs, 1), 1),
             verbose=1,
         )
+        heartbeat_cb = TrainingHeartbeatCallback(
+            out_path=Path(ckpt_dir) / "training_heartbeat.json",
+            diagnostics_cb=diagnostics_cb,
+            eval_cb=eval_cb,
+            run_id=run_id,
+            symbol=primary_symbol,
+            checkpoints_root=run_checkpoints_root,
+            fold_index=fold_idx,
+            every_steps=heartbeat_every,
+            total_timesteps=TOTAL_TIMESTEPS,
+            verbose=0,
+        )
 
         model.learn(
             total_timesteps=TOTAL_TIMESTEPS,
-            callback=[curriculum_cb, diagnostics_cb, heartbeat_cb, eval_cb],
+            callback=[curriculum_cb, diagnostics_cb, eval_cb, heartbeat_cb],
             log_interval=max(TRAIN_LOG_INTERVAL, 1),
             tb_log_name=f"{primary_symbol.lower()}_fold_{fold_idx}",
         )
@@ -1430,9 +1550,15 @@ def main() -> None:
         sharpe = float(evaluation_metrics["timed_sharpe"])
         max_dd = float(evaluation_metrics["max_drawdown"])
         fin_val = float(evaluation_metrics["final_equity"])
+        val_profit_factor = float(evaluation_metrics.get("profit_factor", 0.0))
+        val_expectancy = float(evaluation_metrics.get("expectancy", 0.0))
+        val_trade_count = int(evaluation_metrics.get("trade_count", 0) or 0)
         holdout_sharpe = float(holdout_metrics["timed_sharpe"])
         holdout_max_dd = float(holdout_metrics["max_drawdown"])
         holdout_final_equity = float(holdout_metrics["final_equity"])
+        holdout_profit_factor = float(holdout_metrics.get("profit_factor", 0.0))
+        holdout_expectancy = float(holdout_metrics.get("expectancy", 0.0))
+        holdout_trade_count = int(holdout_metrics.get("trade_count", 0) or 0)
         callback_summary = diagnostics_cb.summary()
         diagnostics = summarize_training_diagnostics(
             [
@@ -1458,9 +1584,15 @@ def main() -> None:
         diagnostics["val_sharpe"] = float(sharpe)
         diagnostics["val_max_drawdown"] = float(max_dd)
         diagnostics["val_final_equity"] = float(fin_val)
+        diagnostics["val_profit_factor"] = float(val_profit_factor)
+        diagnostics["val_expectancy"] = float(val_expectancy)
+        diagnostics["val_trade_count"] = int(val_trade_count)
         diagnostics["holdout_sharpe"] = float(holdout_sharpe)
         diagnostics["holdout_max_drawdown"] = float(holdout_max_dd)
         diagnostics["holdout_final_equity"] = float(holdout_final_equity)
+        diagnostics["holdout_profit_factor"] = float(holdout_profit_factor)
+        diagnostics["holdout_expectancy"] = float(holdout_expectancy)
+        diagnostics["holdout_trade_count"] = int(holdout_trade_count)
         diagnostics["baseline_gate_passed"] = bool(baseline_report["gate_passed"])
         diagnostics["eval_protocol_valid"] = True
         diagnostics["full_path_eval_used"] = True
@@ -1473,8 +1605,9 @@ def main() -> None:
         diagnostics["train_bars"] = int(len(train_df))
         diagnostics["val_bars"] = int(len(val_df))
         diagnostics["holdout_bars"] = int(holdout_sizes.get(primary_symbol, 0))
-        diagnostics["point_in_time_verified"] = bool(TRAIN_POINT_IN_TIME_VERIFIED)
-        diagnostics["dataset_integrity_verified"] = bool(TRAIN_DATASET_INTEGRITY_VERIFIED)
+        diagnostics["point_in_time_verified"] = bool(point_in_time_verified)
+        diagnostics["dataset_integrity_verified"] = bool(dataset_integrity_verified)
+        diagnostics["dataset_integrity_report_path"] = str(dataset_integrity_report_path)
         diagnostics["env_workers"] = int(effective_envs)
         diagnostics["vec_env_type"] = vec_env_type
         diagnostics["bar_construction_ticks_per_bar"] = int(BAR_CONSTRUCTION_TICKS_PER_BAR)
@@ -1493,6 +1626,9 @@ def main() -> None:
             holdout_sharpe=holdout_sharpe,
             holdout_max_drawdown=holdout_max_dd,
             holdout_final_equity=holdout_final_equity,
+            holdout_profit_factor=holdout_profit_factor,
+            holdout_expectancy=holdout_expectancy,
+            holdout_trade_count=holdout_trade_count,
         )
         diagnostics["holdout_gate_passed"] = not holdout_gate_blockers
         if holdout_gate_blockers:
@@ -1518,8 +1654,11 @@ def main() -> None:
                 ),
             )
 
-        print(f"\n  Fold {fold_idx} VAL: equity=${fin_val:,.2f}  "
-              f"Sharpe={sharpe:.3f}  MaxDD={max_dd:.1%}")
+        print(
+            f"\n  Fold {fold_idx} VAL: equity=${fin_val:,.2f}  "
+            f"Sharpe={sharpe:.3f}  MaxDD={max_dd:.1%}  "
+            f"PF={val_profit_factor:.2f}  Trades={val_trade_count}"
+        )
         print(
             "  PPO diagnostics: "
             f"explained_variance={diagnostics['explained_variance']:.3f} "

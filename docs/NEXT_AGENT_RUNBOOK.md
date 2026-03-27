@@ -14,12 +14,12 @@
 
 ### 2. Re-download thin pairs
 ```powershell
-.\.venv\Scripts\python.exe download_dukascopy.py --pairs EURUSD GBPUSD --days 1095 --bar-volume 2000 --force-refresh-pairs EURUSD GBPUSD --max-workers 16
+.\.venv\Scripts\python.exe download_dukascopy.py --pairs EURUSD GBPUSD --days 1095 --force-refresh-pairs EURUSD GBPUSD --max-workers 16
 ```
 
 ### 3. Rebuild consolidated bars
 ```powershell
-.\.venv\Scripts\python.exe build_volume_bars.py --ticks-per-bar 2000
+.\.venv\Scripts\python.exe build_volume_bars.py
 ```
 
 ### 4. Train one symbol at a time

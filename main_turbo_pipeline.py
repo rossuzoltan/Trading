@@ -3,6 +3,8 @@ import time
 import os
 import sys
 
+from trading_config import resolve_bar_construction_ticks_per_bar
+
 def run_step(cmd, desc):
     print(f"\n{'='*60}")
     print(f"STEP: {desc}")
@@ -34,18 +36,19 @@ def main():
         print(f"[WARN] Could not set Stay-Awake mode: {e}")
 
     start_time = time.time()
+    ticks_per_bar = resolve_bar_construction_ticks_per_bar("BAR_SPEC_TICKS_PER_BAR", "TRADING_TICKS_PER_BAR")
     
     # 1. Turbo Ingestion (3-year history for 3 pairs)
     # Using the optimized 2000-tick bar volume
     run_step(
-        "./.venv/Scripts/python -u download_dukascopy.py --pairs EURUSD GBPUSD USDJPY --days 1095 --bar-volume 2000",
+        f"./.venv/Scripts/python -u download_dukascopy.py --pairs EURUSD GBPUSD USDJPY --days 1095 --bar-volume {ticks_per_bar}",
         "Phase 12: Turbo Data Ingestion (Dukascopy Ticks)"
     )
 
     # 2. Build Unified Training Set
     # Consolidates all pairs into DATA_CLEAN_VOLUME.csv
     run_step(
-        "./.venv/Scripts/python -u build_volume_bars.py --ticks-per-bar 2000",
+        f"./.venv/Scripts/python -u build_volume_bars.py --ticks-per-bar {ticks_per_bar}",
         "Phase 13: Building Consolidated Institutional Dataset"
     )
 

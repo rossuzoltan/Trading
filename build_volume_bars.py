@@ -9,28 +9,37 @@ import glob
 import json
 import os
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from dataset_validation import validate_symbol_bar_spec
+from project_paths import DATASET_BUILD_INFO_PATH, LEGACY_DATASET_QC_REPORT_PATH, parquet_row_count
+from trading_config import (
+    DEFAULT_BAR_CONSTRUCTION_TICKS_PER_BAR,
+    resolve_bar_construction_ticks_per_bar,
+)
 
-TICKS_PER_BAR = 2_000
+
+TICKS_PER_BAR = DEFAULT_BAR_CONSTRUCTION_TICKS_PER_BAR
 DATA_DIR = "data"
 MODELS_DIR = "models"
 OUTPUT_FILE = "data/DATA_CLEAN_VOLUME.csv"
 COMPAT_OUTPUT = "data/FOREX_MULTI_SET.csv"
-QC_REPORT = "data/volume_bars_qc_report.json"
 
 
-def purge_old_data(keep_data: bool = False) -> None:
-    """Delete generated datasets and scaler files without touching raw inputs."""
+def purge_old_data(keep_data: bool = False, *, purge_scalers: bool = False) -> None:
+    """Delete generated datasets without touching raw tick inputs by default."""
     if not keep_data:
         patterns = [
             "DATA_CLEAN_VOLUME.csv",
             "FOREX_MULTI_SET.csv",
             "*_volbars.csv",
             "*_volbars_*.csv",
+            DATASET_BUILD_INFO_PATH.name,
+            LEGACY_DATASET_QC_REPORT_PATH.name,
         ]
         csv_files: list[str] = []
         for pattern in patterns:
@@ -46,20 +55,28 @@ def purge_old_data(keep_data: bool = False) -> None:
         else:
             print(f"  No generated CSV files to purge in {DATA_DIR}/")
 
-    pkl_files = glob.glob(os.path.join(MODELS_DIR, "scaler_*.pkl"))
-    combined_pkl = os.path.join(MODELS_DIR, "scaler_features.pkl")
-    all_pkl = sorted(set(pkl_files + ([combined_pkl] if os.path.exists(combined_pkl) else [])))
-    for file_path in all_pkl:
-        os.remove(file_path)
-        print(f"  Deleted: {file_path}")
+    if purge_scalers:
+        pkl_files = glob.glob(os.path.join(MODELS_DIR, "scaler_*.pkl"))
+        combined_pkl = os.path.join(MODELS_DIR, "scaler_features.pkl")
+        all_pkl = sorted(set(pkl_files + ([combined_pkl] if os.path.exists(combined_pkl) else [])))
+        for file_path in all_pkl:
+            os.remove(file_path)
+            print(f"  Deleted: {file_path}")
 
-    if all_pkl:
-        print(f"  Purged {len(all_pkl)} scaler files from {MODELS_DIR}/")
+        if all_pkl:
+            print(f"  Purged {len(all_pkl)} scaler files from {MODELS_DIR}/")
+        else:
+            print(f"  No scaler files to purge in {MODELS_DIR}/")
     else:
-        print(f"  No scaler files to purge in {MODELS_DIR}/")
+        print("  Keeping model scaler files in models/ (use --purge-scalers to remove them)")
 
 
-def _load_ticks_for_pair(pair: str) -> pd.DataFrame | None:
+def _load_ticks_for_pair(
+    pair: str,
+    ticks_per_bar: int,
+    *,
+    allow_prebuilt_bars: bool,
+) -> pd.DataFrame | None:
     parquet_path = os.path.join(DATA_DIR, f"{pair}_ticks.parquet")
     csv_path = os.path.join(DATA_DIR, f"{pair}_ticks.csv")
 
@@ -77,9 +94,17 @@ def _load_ticks_for_pair(pair: str) -> pd.DataFrame | None:
             df.index = df.index.tz_localize("UTC")
         return df
 
-    vbar_candidates = sorted(glob.glob(os.path.join(DATA_DIR, f"{pair}_volbars*.csv")))
-    if vbar_candidates:
-        vbar_path = vbar_candidates[0]
+    exact_vbar_path = os.path.join(DATA_DIR, f"{pair}_volbars_{ticks_per_bar}.csv")
+    alias_vbar_path = os.path.join(DATA_DIR, f"{pair}_volbars.csv")
+    ordered_candidates = [path for path in (exact_vbar_path, alias_vbar_path) if os.path.exists(path)]
+    if ordered_candidates:
+        if not allow_prebuilt_bars:
+            print(
+                f"  [WARN] No raw tick data found for {pair}; refusing to use pre-built volume bars "
+                "without --allow-prebuilt-bars."
+            )
+            return None
+        vbar_path = ordered_candidates[0]
         print(f"  [INFO] No tick data found - loading pre-built volume bars: {vbar_path}")
         df = pd.read_csv(vbar_path, parse_dates=["Gmt time"])
         df = df.set_index("Gmt time")
@@ -87,6 +112,13 @@ def _load_ticks_for_pair(pair: str) -> pd.DataFrame | None:
             df.index = df.index.tz_localize("UTC")
         df["Symbol"] = pair
         return df
+
+    other_vbar_candidates = sorted(glob.glob(os.path.join(DATA_DIR, f"{pair}_volbars*.csv")))
+    if other_vbar_candidates:
+        print(
+            f"  [WARN] Found pre-built volume bars for {pair}, but none match requested "
+            f"ticks_per_bar={ticks_per_bar}. Rebuild volume bars or restore raw tick data."
+        )
 
     return None
 
@@ -156,7 +188,78 @@ def discover_pairs() -> list[str]:
     return pairs
 
 
-def main(ticks_per_bar: int, keep_data: bool) -> None:
+def _summarize_bars(
+    pair: str,
+    bars: pd.DataFrame,
+    *,
+    source: str,
+    ticks_per_bar: int,
+    source_path: str | Path | None = None,
+) -> dict[str, float | int | str]:
+    ordered = bars.sort_index()
+    delta = ordered.index.to_series().diff().dt.total_seconds().dropna()
+    raw_tick_path = Path(DATA_DIR) / f"{pair}_ticks.parquet"
+    raw_tick_rows: int | None = None
+    if raw_tick_path.exists():
+        try:
+            raw_tick_rows = parquet_row_count(raw_tick_path)
+        except Exception:
+            raw_tick_rows = None
+    expected_bars = None
+    if raw_tick_rows is not None:
+        expected_bars = (int(raw_tick_rows) + int(ticks_per_bar) - 1) // int(ticks_per_bar)
+    return {
+        "source": source,
+        "bars": int(len(ordered)),
+        "start_utc": str(ordered.index.min()) if len(ordered) else "",
+        "end_utc": str(ordered.index.max()) if len(ordered) else "",
+        "avg_spread_mean": float(np.nanmean(ordered.get("avg_spread", pd.Series([0.0])).values)) if len(ordered) else 0.0,
+        "time_delta_s_mean": float(np.nanmean(ordered.get("time_delta_s", pd.Series([0.0])).values)) if len(ordered) else 0.0,
+        "duplicate_timestamp_count": int(ordered.index.duplicated().sum()) if len(ordered) else 0,
+        "gap_count_gt_6h": int((delta > 21600).sum()) if not delta.empty else 0,
+        "gap_count_gt_24h": int((delta > 86400).sum()) if not delta.empty else 0,
+        "max_gap_hours": float(delta.max() / 3600.0) if not delta.empty else 0.0,
+        "median_gap_minutes": float(delta.median() / 60.0) if not delta.empty else 0.0,
+        "source_path": str(source_path) if source_path is not None else "",
+        "raw_tick_path": str(raw_tick_path) if raw_tick_path.exists() else "",
+        "raw_tick_rows": int(raw_tick_rows) if raw_tick_rows is not None else None,
+        "expected_bars_from_ticks": int(expected_bars) if expected_bars is not None else None,
+        "bar_count_matches_raw_ticks": bool(expected_bars == len(ordered)) if expected_bars is not None else None,
+    }
+
+
+def _build_dataset_metadata(
+    *,
+    ticks_per_bar: int,
+    combined: pd.DataFrame,
+    symbol_stats: dict[str, dict[str, float | int | str]],
+) -> dict[str, object]:
+    symbol_counts = (
+        combined["Symbol"].astype(str).str.upper().value_counts().sort_index().to_dict()
+        if "Symbol" in combined.columns
+        else {}
+    )
+    return {
+        "schema_version": 1,
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "dataset_path": OUTPUT_FILE,
+        "compatibility_dataset_path": COMPAT_OUTPUT,
+        "bar_construction_ticks_per_bar": int(ticks_per_bar),
+        "ticks_per_bar": int(ticks_per_bar),
+        "combined_rows": int(len(combined)),
+        "symbols": sorted(symbol_counts.keys()),
+        "symbol_counts": {symbol: int(count) for symbol, count in symbol_counts.items()},
+        "symbol_stats": symbol_stats,
+    }
+
+
+def main(
+    ticks_per_bar: int,
+    keep_data: bool,
+    *,
+    allow_prebuilt_bars: bool = False,
+    purge_scalers: bool = False,
+) -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(MODELS_DIR, exist_ok=True)
 
@@ -165,7 +268,10 @@ def main(ticks_per_bar: int, keep_data: bool) -> None:
     print("-" * 60)
 
     print("\n[1] Purging generated data ...")
-    purge_old_data(keep_data=keep_data)
+    purge_old_data(
+        keep_data=keep_data,
+        purge_scalers=purge_scalers,
+    )
 
     pairs = discover_pairs()
     if not pairs:
@@ -179,14 +285,28 @@ def main(ticks_per_bar: int, keep_data: bool) -> None:
     qc: dict[str, dict[str, float | int | str]] = {}
     print(f"\n[3] Building volume bars ({ticks_per_bar} ticks/bar) ...")
     for pair in pairs:
-        ticks = _load_ticks_for_pair(pair)
+        ticks = _load_ticks_for_pair(
+            pair,
+            ticks_per_bar,
+            allow_prebuilt_bars=allow_prebuilt_bars,
+        )
         if ticks is None:
             print(f"  [SKIP] {pair}: no tick data")
             continue
 
         if "Symbol" in ticks.columns and "Close" in ticks.columns:
             print(f"  {pair}: using pre-built volume bars ({len(ticks)} bars)")
+            validate_symbol_bar_spec(ticks, expected_ticks_per_bar=ticks_per_bar, symbol=pair)
             all_bars.append(ticks)
+            exact_vbar_path = os.path.join(DATA_DIR, f"{pair}_volbars_{ticks_per_bar}.csv")
+            source_path = exact_vbar_path if os.path.exists(exact_vbar_path) else os.path.join(DATA_DIR, f"{pair}_volbars.csv")
+            qc[pair] = _summarize_bars(
+                pair,
+                ticks,
+                source="prebuilt_volume_bars",
+                ticks_per_bar=ticks_per_bar,
+                source_path=source_path,
+            )
             continue
 
         bars = build_volume_bars(ticks, ticks_per_bar)
@@ -195,15 +315,16 @@ def main(ticks_per_bar: int, keep_data: bool) -> None:
             continue
 
         bars["Symbol"] = pair
+        validate_symbol_bar_spec(bars, expected_ticks_per_bar=ticks_per_bar, symbol=pair)
         all_bars.append(bars)
         print(f"  {pair}: {len(bars):,} volume bars (from {len(ticks):,} ticks)")
-        qc[pair] = {
-            "bars": int(len(bars)),
-            "start_utc": str(bars.index.min()) if len(bars) else "",
-            "end_utc": str(bars.index.max()) if len(bars) else "",
-            "avg_spread_mean": float(np.nanmean(bars.get("avg_spread", pd.Series([0.0])).values)) if len(bars) else 0.0,
-            "time_delta_s_mean": float(np.nanmean(bars.get("time_delta_s", pd.Series([0.0])).values)) if len(bars) else 0.0,
-        }
+        qc[pair] = _summarize_bars(
+            pair,
+            bars,
+            source="raw_ticks",
+            ticks_per_bar=ticks_per_bar,
+            source_path=os.path.join(DATA_DIR, f"{pair}_ticks.parquet"),
+        )
 
         per_pair_path = os.path.join(DATA_DIR, f"{pair}_volbars_{ticks_per_bar}.csv")
         out = bars.reset_index()
@@ -236,17 +357,44 @@ def main(ticks_per_bar: int, keep_data: bool) -> None:
     print(f"   Symbols    : {combined['Symbol'].unique().tolist()}")
     if "Gmt time" in combined.columns:
         print(f"   Date range : {combined['Gmt time'].min()} -> {combined['Gmt time'].max()}")
-    Path(QC_REPORT).write_text(json.dumps(qc, indent=2), encoding="utf-8")
-    print(f"QC report -> {QC_REPORT}")
+    metadata = _build_dataset_metadata(
+        ticks_per_bar=ticks_per_bar,
+        combined=combined,
+        symbol_stats=qc,
+    )
+    DATASET_BUILD_INFO_PATH.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    LEGACY_DATASET_QC_REPORT_PATH.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    print(f"Dataset build info -> {DATASET_BUILD_INFO_PATH}")
+    print(f"QC report alias -> {LEGACY_DATASET_QC_REPORT_PATH}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Build consolidated volume-bar datasets")
-    parser.add_argument("--ticks-per-bar", type=int, default=TICKS_PER_BAR)
+    parser.add_argument(
+        "--ticks-per-bar",
+        type=int,
+        default=resolve_bar_construction_ticks_per_bar("BAR_SPEC_TICKS_PER_BAR", "TRADING_TICKS_PER_BAR"),
+        help="Ticks per bar (defaults to BAR_SPEC_TICKS_PER_BAR / TRADING_TICKS_PER_BAR / 2000)",
+    )
     parser.add_argument(
         "--keep-data",
         action="store_true",
-        help="Keep existing generated CSV files and only purge scalers",
+        help="Keep existing generated CSV files and skip dataset purge.",
+    )
+    parser.add_argument(
+        "--allow-prebuilt-bars",
+        action="store_true",
+        help="Allow using pre-built *_volbars*.csv files when raw tick data is missing.",
+    )
+    parser.add_argument(
+        "--purge-scalers",
+        action="store_true",
+        help="Also delete generated scaler_*.pkl files from models/ before rebuilding the dataset.",
     )
     args = parser.parse_args()
-    main(args.ticks_per_bar, args.keep_data)
+    main(
+        args.ticks_per_bar,
+        args.keep_data,
+        allow_prebuilt_bars=args.allow_prebuilt_bars,
+        purge_scalers=args.purge_scalers,
+    )
