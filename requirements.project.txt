@@ -1,0 +1,14 @@
+# Supplemental runtime dependencies that are required by the current codebase
+# but are missing or unclear in the legacy Requirements.txt snapshot.
+joblib>=1.4
+optuna>=4.8
+py-spy>=0.4.1
+pyarrow>=18.0.0
+python-dotenv>=1.0.1
+pytest>=8.3
+pytest-xdist>=3.8
+ruff>=0.15
+scikit-learn>=1.5
+scipy>=1.14
+sb3-contrib>=2.5.0
+MetaTrader5>=5.0.5640

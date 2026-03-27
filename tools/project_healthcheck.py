@@ -1,0 +1,234 @@
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+# Add project root to sys.path to ensure infra modules can be imported from tools/
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+import subprocess
+from interpreter_guard import ensure_project_venv
+from project_paths import (
+    ROOT_DIR,
+    DATA_DIR,
+    MODELS_DIR,
+    resolve_dataset_path,
+    resolve_model_path,
+    resolve_scaler_path,
+)
+
+ensure_project_venv(project_root=ROOT, script_path=__file__)
+
+REQUIRED_FILES = (
+    ROOT_DIR / "README.md",
+    ROOT_DIR / ".env.example",
+    ROOT_DIR / "train_agent.py",
+    ROOT_DIR / "evaluate_oos.py",
+    ROOT_DIR / "live_bridge.py",
+)
+
+REQUIRED_PACKAGES = {
+    "numpy": "numpy",
+    "pandas": "pandas",
+    "matplotlib": "matplotlib",
+    "requests": "requests",
+    "torch": "torch",
+    "stable-baselines3": "stable_baselines3",
+    "sb3-contrib": "sb3-contrib",
+    "gymnasium": "gymnasium",
+    "pandas-ta": "pandas-ta",
+    "joblib": "joblib",
+    "scikit-learn": "scikit-learn",
+    "scipy": "scipy",
+    "python-dotenv": "python-dotenv",
+    "yfinance": "yfinance",
+    "pyarrow": "pyarrow",
+}
+
+OPTIONAL_PACKAGES = {
+    "MetaTrader5": "MetaTrader5",
+}
+
+
+def _print_header(title: str) -> None:
+    print(f"\n{title}")
+    print("-" * len(title))
+
+
+def _read_requirements() -> set[str]:
+    entries: set[str] = set()
+    for req_path in (ROOT_DIR / "Requirements.txt", ROOT_DIR / "requirements.project.txt"):
+        if not req_path.exists():
+            continue
+
+        raw_bytes = req_path.read_bytes()
+        text = raw_bytes.decode("utf-8", errors="ignore")
+        if text.count("\x00") > max(len(text) // 10, 1):
+            for encoding in ("utf-16", "utf-16-le", "utf-16-be"):
+                try:
+                    text = raw_bytes.decode(encoding)
+                    break
+                except UnicodeDecodeError:
+                    continue
+
+        for raw_line in text.replace("\x00", "").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            normalized = (
+                line.split("==")[0]
+                .split(">=")[0]
+                .split("<=")[0]
+                .strip()
+                .lower()
+            )
+            entries.add(normalized)
+    return entries
+
+
+def _check_file_presence() -> list[str]:
+    issues: list[str] = []
+    for path in REQUIRED_FILES:
+        if not path.exists():
+            issues.append(f"Missing file: {path.relative_to(ROOT_DIR)}")
+    return issues
+
+
+def _check_runtime_assets() -> list[str]:
+    issues: list[str] = []
+
+    try:
+        dataset_path = resolve_dataset_path()
+        print(f"Dataset: {dataset_path.relative_to(ROOT_DIR)}")
+    except FileNotFoundError as exc:
+        issues.append(str(exc))
+
+    try:
+        model_path = resolve_model_path()
+        print(f"Model:   {model_path.relative_to(ROOT_DIR)}")
+    except FileNotFoundError as exc:
+        issues.append(str(exc))
+
+    scaler_path = resolve_scaler_path(symbol="EURUSD", required=False)
+    if scaler_path is None:
+        issues.append(
+            "No scaler found. Expected models/scaler_EURUSD.pkl or models/scaler_features.pkl."
+        )
+    else:
+        print(f"Scaler:  {scaler_path.relative_to(ROOT_DIR)}")
+
+    if not (DATA_DIR / "FOREX_MULTI_SET.csv").exists():
+        issues.append("Compatibility dataset alias missing: data/FOREX_MULTI_SET.csv")
+
+    if not list(MODELS_DIR.glob("*.zip")):
+        issues.append("No zipped model artifacts found in models/.")
+
+    return issues
+
+
+def _check_venv_layout() -> list[str]:
+    issues: list[str] = []
+    venv_dir = ROOT_DIR / ".venv"
+    if not venv_dir.exists():
+        issues.append("Virtual environment missing: .venv/")
+        return issues
+
+    python_exe = venv_dir / "Scripts" / "python.exe"
+    if not python_exe.exists():
+        issues.append("Missing interpreter: .venv/Scripts/python.exe")
+        return issues
+
+    checks = {
+        "pip": "import pip",
+        "pandas": "import pandas",
+    }
+    for name, snippet in checks.items():
+        result = subprocess.run(
+            [str(python_exe), "-c", snippet],
+            cwd=str(ROOT_DIR),
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            details = result.stderr.strip() or result.stdout.strip() or "unknown error"
+            issues.append(f"Broken {name} install in .venv: {details}")
+
+    return issues
+
+
+def _check_requirements() -> list[str]:
+    issues: list[str] = []
+    entries = _read_requirements()
+    if not entries:
+        return ["Requirements.txt and requirements.project.txt are missing or empty."]
+
+    for display_name, package_key in REQUIRED_PACKAGES.items():
+        if package_key.lower() not in entries:
+            issues.append(f"Requirements.txt missing package: {display_name}")
+
+    optional_missing = [
+        display_name
+        for display_name, package_key in OPTIONAL_PACKAGES.items()
+        if package_key.lower() not in entries
+    ]
+    if optional_missing:
+        print("Optional packages not declared: " + ", ".join(optional_missing))
+
+    return issues
+
+
+def main() -> None:
+    print("Trading Project Health Check")
+    print("============================")
+
+    all_issues: list[str] = []
+
+    _print_header("File Presence")
+    file_issues = _check_file_presence()
+    all_issues.extend(file_issues)
+    if file_issues:
+        for issue in file_issues:
+            print(f"[MISSING] {issue}")
+    else:
+        print("Core repo files are present.")
+
+    _print_header("Runtime Assets")
+    asset_issues = _check_runtime_assets()
+    all_issues.extend(asset_issues)
+    if asset_issues:
+        for issue in asset_issues:
+            print(f"[ISSUE] {issue}")
+
+    _print_header("Virtual Environment")
+    venv_issues = _check_venv_layout()
+    all_issues.extend(venv_issues)
+    if venv_issues:
+        for issue in venv_issues:
+            print(f"[ISSUE] {issue}")
+    else:
+        print("Virtual environment layout looks intact.")
+
+    _print_header("Requirements Audit")
+    req_issues = _check_requirements()
+    all_issues.extend(req_issues)
+    if req_issues:
+        for issue in req_issues:
+            print(f"[ISSUE] {issue}")
+    else:
+        print("Requirement files cover the core runtime dependencies.")
+
+    _print_header("Summary")
+    if all_issues:
+        print(f"Found {len(all_issues)} issue(s).")
+        if venv_issues:
+            print("Recommended next step: repair .venv, then rerun this script.")
+        else:
+            print("Recommended next step: address the runtime asset or dependency issues above, then rerun this script.")
+    else:
+        print("No obvious file or dependency issues detected.")
+
+
+if __name__ == "__main__":
+    main()
