@@ -3,7 +3,7 @@
 ## Open These First For Most Tasks
 
 - `train_agent.py`: primary training entrypoint and current model workflow
-- `evaluate_oos.py`: symbol-scoped OOS evaluation
+- `evaluate_oos.py`: symbol-scoped OOS evaluation that loads the symbol manifest first
 - `download_dukascopy.py`: raw tick ingestion and refresh logic
 - `build_volume_bars.py`: training dataset construction
 
@@ -13,8 +13,8 @@
 - `runtime_gym_env.py`: supported runtime training environment
 - `live_bridge.py`: MT5 execution behavior
 - `mt5_live_preflight.py`: mandatory live-readiness gate
-- `artifact_manifest.py`: artifact compatibility and manifest validation
-- `project_paths.py`: repo path resolution and artifact locations
+- `artifact_manifest.py`: artifact compatibility, checksums, and manifest validation
+- `project_paths.py`: repo path resolution and symbol-scoped artifact locations
 
 ## Treat As Compatibility Or Legacy Unless Proven Needed
 
@@ -25,6 +25,6 @@
 ## Tests And Ops
 
 - `tests/`: regression coverage
-- `tools/project_healthcheck.py`: environment and dependency check
-- `tools/training_status.py`: PPO and heartbeat diagnostics
-- `tools/summarize_execution_audit.py`: live execution drift summaries
+- `tools/project_healthcheck.py`: dataset integrity, bar-spec, and runtime-artifact smoke check
+- `training_status.py`: PPO and heartbeat diagnostics
+- `summarize_execution_audit.py`: live execution drift summaries

@@ -7,9 +7,14 @@ This repo is a Python-based Forex reinforcement-learning pipeline with four main
 - `train_agent.py` trains a `MaskablePPO` agent on engineered Forex features.
 - `evaluate_oos.py` and `live_bridge.py` handle out-of-sample validation and live or simulated execution.
 
-## Current Architecture
+## Documentation
 
-See [REPOSITORY_MAP.md](file:///c:/dev/trading/REPOSITORY_MAP.md) for a complete visual file tree and detailed component descriptions.
+- [docs/README.md](docs/README.md) is the current documentation index.
+- [docs/NEXT_AGENT_CONTEXT.md](docs/NEXT_AGENT_CONTEXT.md) captures the current repo and data state.
+- [docs/NEXT_AGENT_FILE_MAP.md](docs/NEXT_AGENT_FILE_MAP.md) points to the files that matter for each task.
+- [docs/NEXT_AGENT_RUNBOOK.md](docs/NEXT_AGENT_RUNBOOK.md) keeps the verified commands in one place.
+
+## Current Architecture
 
 - Supported training environment: `RuntimeGymEnv` on volume bars
 - Compatibility fallback: legacy `trading_env.py` path for older experiments only
@@ -21,6 +26,7 @@ See [REPOSITORY_MAP.md](file:///c:/dev/trading/REPOSITORY_MAP.md) for a complete
 
 1. Activate the repo virtualenv or call it explicitly: `.\.venv\Scripts\python.exe`
 2. Run `.\.venv\Scripts\python.exe .\tools\project_healthcheck.py`
+   - Missing model/scaler artifacts are expected before the first training run; use `--strict-runtime-assets` only when you expect a fully trained workspace.
 3. If needed, repair or recreate `.venv`
 4. Install anything missing from `Requirements.txt` and `requirements.project.txt`
 5. Download data with `.\.venv\Scripts\python.exe .\download_dukascopy.py`
@@ -60,17 +66,16 @@ usage is still the least ambiguous path.
 ## Training Feedback
 
 - `train_agent.py` writes a lightweight progress heartbeat to `checkpoints/fold_*/training_heartbeat.json`.
-- Use `.\.venv\Scripts\python.exe .\tools\training_status.py --symbol EURUSD` to see the latest PPO diagnostics + deployment gate blockers.
+- Use `.\.venv\Scripts\python.exe .\training_status.py --symbol EURUSD` to see the latest PPO diagnostics + deployment gate blockers.
 
 ## MT5 Live Readiness
 
 - Run `.\.venv\Scripts\python.exe .\mt5_live_preflight.py --symbol EURUSD` before any live MT5 session.
 - The preflight writes `models/live_preflight_eurusd.json` and fails closed when gate approval, MT5 connectivity, bar-spec parity, or ops evidence is missing.
 - Live orders now append a structured execution audit to `models/execution_audit_eurusd.jsonl`.
-- Summarize real fill drift with `.\.venv\Scripts\python.exe .\tools\summarize_execution_audit.py --symbol EURUSD`.
+- Summarize real fill drift with `.\.venv\Scripts\python.exe .\summarize_execution_audit.py --symbol EURUSD`.
 
 ## Important Notes
 
-- The checked-in `.venv` currently appears unhealthy in this workspace, so verify it before trusting runtime behavior.
 - The repo previously mixed older H1-bar and RecurrentPPO docs with the current volume-bar and MaskablePPO stack. Treat `RecurrentPPO` references as legacy history, not the supported training architecture.
 - Live trading requires a trained model plus scaler files in `models/`.

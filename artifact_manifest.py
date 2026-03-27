@@ -43,6 +43,8 @@ class ArtifactManifest:
     vecnormalize_sha256: str | None = None
     holdout_start_utc: str | None = None
     training_diagnostics_path: str | None = None
+    execution_cost_profile: dict[str, float | int | str | bool | None] | None = None
+    reward_profile: dict[str, float | int | str | bool | None] | None = None
 
 
 def _file_sha256(path: Path) -> str:
@@ -93,6 +95,8 @@ def create_manifest(
     dataset_path: str | Path,
     bar_construction_ticks_per_bar: int | None = None,
     ticks_per_bar: int | None = None,
+    execution_cost_profile: dict[str, float | int | str | bool | None] | None = None,
+    reward_profile: dict[str, float | int | str | bool | None] | None = None,
 ) -> ArtifactManifest:
     model_path = str(Path(model_path))
     scaler_path = str(Path(scaler_path))
@@ -131,6 +135,8 @@ def create_manifest(
         vecnormalize_sha256=_file_sha256(Path(vecnormalize_str)) if vecnormalize_str is not None else None,
         holdout_start_utc=holdout_start_utc,
         training_diagnostics_path=training_diag_str,
+        execution_cost_profile=dict(execution_cost_profile) if execution_cost_profile is not None else None,
+        reward_profile=dict(reward_profile) if reward_profile is not None else None,
     )
 
 

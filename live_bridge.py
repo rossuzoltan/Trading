@@ -6,7 +6,6 @@ import os
 import sys
 import time
 from datetime import datetime, timezone
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
@@ -39,7 +38,9 @@ from event_pipeline import (
     VolumeBarBuilder,
 )
 from feature_engine import FEATURE_COLS, FeatureEngine, WARMUP_BARS
+from mt5_broker_caps import describe_trade_mode, read_symbol_caps, trade_mode_allows_open
 from project_paths import resolve_dataset_path, resolve_manifest_path, validate_dataset_bar_spec
+from run_logging import configure_run_logging, set_log_context
 from runtime_common import STATE_FEATURE_COUNT, ActionSpec, ActionType, build_action_map
 from symbol_utils import pip_size_for_symbol
 from trading_config import (
@@ -61,16 +62,7 @@ except ImportError:
     MT5_AVAILABLE = False
 
 
-log = logging.getLogger("LiveBridge")
-log.setLevel(logging.INFO)
-_fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-_fh = RotatingFileHandler("live_bot.log", maxBytes=5_000_000, backupCount=3, encoding="utf-8")
-_fh.setFormatter(_fmt)
-_sh = logging.StreamHandler(sys.stdout)
-_sh.setFormatter(_fmt)
-if not log.handlers:
-    log.addHandler(_fh)
-    log.addHandler(_sh)
+log = logging.getLogger("live_bridge")
 
 
 SYMBOL = os.environ.get("TRADING_SYMBOL", "EURUSD").upper()
@@ -343,21 +335,59 @@ class LiveMt5Broker(BaseBroker):
         )
 
     def _normalize_volume(self, symbol_info: Any, requested_volume: float) -> float:
-        volume_min = float(_safe_mt5_attr(symbol_info, "volume_min", requested_volume) or requested_volume)
-        volume_max = float(_safe_mt5_attr(symbol_info, "volume_max", requested_volume) or requested_volume)
-        volume_step = float(_safe_mt5_attr(symbol_info, "volume_step", 0.01) or 0.01)
-        clipped = min(max(float(requested_volume), volume_min), volume_max)
-        steps = round((clipped - volume_min) / volume_step) if volume_step > 0 else 0
-        normalized = volume_min + (steps * volume_step)
-        return round(max(volume_min, min(volume_max, normalized)), 8)
+        caps = read_symbol_caps(self.symbol, symbol_info)
+        return caps.normalize_volume(requested_volume)
 
-    def _stops_valid(self, symbol_info: Any, price: float, sl_price: float | None, tp_price: float | None) -> tuple[bool, str | None]:
-        point = float(_safe_mt5_attr(symbol_info, "point", 0.0) or 0.0)
-        if point <= 0:
-            return True, None
-        stops_level_points = float(_safe_mt5_attr(symbol_info, "trade_stops_level", 0.0) or 0.0)
-        freeze_level_points = float(_safe_mt5_attr(symbol_info, "trade_freeze_level", 0.0) or 0.0)
-        min_distance = max(stops_level_points, freeze_level_points) * point
+    def _normalize_price(self, symbol_info: Any, price: float | None) -> float | None:
+        caps = read_symbol_caps(self.symbol, symbol_info)
+        return caps.normalize_price(price)
+
+    def _trade_permissions_blocker(
+        self,
+        *,
+        symbol: str,
+        opening: bool,
+        direction: int | None = None,
+        symbol_info: Any | None = None,
+    ) -> str | None:
+        if hasattr(self.mt5, "terminal_info"):
+            terminal_info = self.mt5.terminal_info()
+            if terminal_info is not None and hasattr(terminal_info, "trade_allowed") and not bool(getattr(terminal_info, "trade_allowed")):
+                return "MT5 terminal has trading disabled."
+        if hasattr(self.mt5, "account_info"):
+            account_info = self.mt5.account_info()
+            if account_info is not None and hasattr(account_info, "trade_allowed") and not bool(getattr(account_info, "trade_allowed")):
+                return "MT5 account reports trading disabled."
+        symbol_info = symbol_info if symbol_info is not None else self.mt5.symbol_info(symbol)
+        if symbol_info is None:
+            return f"symbol_info returned None for {symbol}"
+        caps = read_symbol_caps(symbol, symbol_info)
+        if opening and not trade_mode_allows_open(self.mt5, caps.trade_mode, direction):
+            return f"Broker symbol trade mode does not allow this open request ({describe_trade_mode(self.mt5, caps.trade_mode)})."
+        return None
+
+    def _stops_valid(
+        self,
+        symbol_info: Any,
+        price: float,
+        sl_price: float | None,
+        tp_price: float | None,
+        *,
+        direction: int | None = None,
+    ) -> tuple[bool, str | None]:
+        caps = read_symbol_caps(self.symbol, symbol_info)
+        min_distance = caps.minimum_stop_distance
+        if direction is not None:
+            if direction > 0:
+                if sl_price is not None and float(sl_price) >= float(price):
+                    return False, "SL must be below entry price for long positions."
+                if tp_price is not None and float(tp_price) <= float(price):
+                    return False, "TP must be above entry price for long positions."
+            if direction < 0:
+                if sl_price is not None and float(sl_price) <= float(price):
+                    return False, "SL must be above entry price for short positions."
+                if tp_price is not None and float(tp_price) >= float(price):
+                    return False, "TP must be below entry price for short positions."
         for label, target in (("sl", sl_price), ("tp", tp_price)):
             if target is None:
                 continue
@@ -398,6 +428,11 @@ class LiveMt5Broker(BaseBroker):
             "shadow_mode": bool(LIVE_SHADOW_MODE),
             "order_id": result.order_id,
             "broker_point": point,
+            "broker_tick_size": _safe_mt5_attr(symbol_info, "trade_tick_size"),
+            "broker_tick_value": _safe_mt5_attr(symbol_info, "trade_tick_value"),
+            "broker_contract_size": _safe_mt5_attr(symbol_info, "trade_contract_size"),
+            "broker_stops_level_points": _safe_mt5_attr(symbol_info, "trade_stops_level"),
+            "broker_freeze_level_points": _safe_mt5_attr(symbol_info, "trade_freeze_level"),
         }
         _append_jsonl(self.paths.execution_audit_path, payload)
 
@@ -460,6 +495,17 @@ class LiveMt5Broker(BaseBroker):
         if not getattr(symbol_info, "visible", True) and hasattr(self.mt5, "symbol_select"):
             if not self.mt5.symbol_select(intent.symbol, True):
                 return SubmitResult(accepted=False, error=f"symbol_select failed for {intent.symbol}")
+            symbol_info = self.mt5.symbol_info(intent.symbol)
+            if symbol_info is None:
+                return SubmitResult(accepted=False, error=f"symbol_info returned None for {intent.symbol} after symbol_select")
+        permission_blocker = self._trade_permissions_blocker(
+            symbol=intent.symbol,
+            opening=intent.action.action_type == ActionType.OPEN,
+            direction=intent.action.direction,
+            symbol_info=symbol_info,
+        )
+        if permission_blocker is not None:
+            return SubmitResult(accepted=False, error=permission_blocker)
         point = float(getattr(symbol_info, "point", 0.0) or 0.0)
         deviation_points = 0
         if point > 0:
@@ -475,7 +521,7 @@ class LiveMt5Broker(BaseBroker):
             for position_row in positions:
                 position_direction = 1 if int(position_row.type) == 0 else -1
                 order_type = self.mt5.ORDER_TYPE_SELL if position_direction > 0 else self.mt5.ORDER_TYPE_BUY
-                price = tick.bid if position_direction > 0 else tick.ask
+                price = self._normalize_price(symbol_info, tick.bid if position_direction > 0 else tick.ask)
                 volume = self._normalize_volume(symbol_info, float(position_row.volume))
                 request = {
                     "action": self.mt5.TRADE_ACTION_DEAL,
@@ -511,12 +557,25 @@ class LiveMt5Broker(BaseBroker):
             if intent.action.direction is None:
                 return SubmitResult(accepted=False, error="OPEN intent missing direction.")
             order_type = self.mt5.ORDER_TYPE_BUY if intent.action.direction > 0 else self.mt5.ORDER_TYPE_SELL
-            price = tick.ask if intent.action.direction > 0 else tick.bid
+            price = self._normalize_price(symbol_info, tick.ask if intent.action.direction > 0 else tick.bid)
             normalized_volume = self._normalize_volume(symbol_info, intent.volume)
-            stops_ok, stops_error = self._stops_valid(symbol_info, price, intent.sl_price, intent.tp_price)
+            normalized_sl = self._normalize_price(symbol_info, intent.sl_price)
+            normalized_tp = self._normalize_price(symbol_info, intent.tp_price)
+            stops_ok, stops_error = self._stops_valid(
+                symbol_info,
+                float(price),
+                normalized_sl,
+                normalized_tp,
+                direction=intent.action.direction,
+            )
             if not stops_ok:
                 result = SubmitResult(accepted=False, error=stops_error)
-                self._audit_order(intent=intent, request={"price": price, "volume": normalized_volume, "sl": intent.sl_price, "tp": intent.tp_price}, result=result, symbol_info=symbol_info)
+                self._audit_order(
+                    intent=intent,
+                    request={"price": price, "volume": normalized_volume, "sl": normalized_sl, "tp": normalized_tp},
+                    result=result,
+                    symbol_info=symbol_info,
+                )
                 return result
             request = {
                 "action": self.mt5.TRADE_ACTION_DEAL,
@@ -524,8 +583,8 @@ class LiveMt5Broker(BaseBroker):
                 "volume": normalized_volume,
                 "type": order_type,
                 "price": price,
-                "sl": intent.sl_price,
-                "tp": intent.tp_price,
+                "sl": normalized_sl,
+                "tp": normalized_tp,
                 "magic": ORDER_MAGIC,
                 "comment": "Bot open",
                 "type_time": self.mt5.ORDER_TIME_GTC,
@@ -539,7 +598,14 @@ class LiveMt5Broker(BaseBroker):
     def current_position(self, symbol: str) -> BrokerPositionSnapshot:
         return self._aggregate_strategy_position(symbol)
 
-    def current_equity(self, symbol: str, mark_price: float | None = None) -> float:
+    def current_equity(
+        self,
+        symbol: str,
+        mark_price: float | None = None,
+        *,
+        avg_spread: float = 0.0,
+        mark_to_liquidation: bool = True,
+    ) -> float:
         isolation_blocker = self.isolation_blocker(symbol)
         if isolation_blocker is not None:
             raise RuntimeError(isolation_blocker)
@@ -757,6 +823,22 @@ def run_live_loop(
 
 
 def main() -> None:
+    log_config = configure_run_logging(
+        "live_bridge",
+        symbol=SYMBOL,
+        capture_print=True,
+        extra_text_log_paths=[Path("live_bot.log")],
+    )
+    set_log_context(symbol=SYMBOL)
+    log.info(
+        "Live bridge logging ready",
+        extra={
+            "event": "live_bridge_logging_ready",
+            "text_log_path": log_config.text_log_path,
+            "jsonl_log_path": log_config.jsonl_log_path,
+            "legacy_text_log_path": Path("live_bot.log"),
+        },
+    )
     run_live_loop()
 
 

@@ -17,6 +17,7 @@ except ImportError:  # pragma: no cover
     load_dotenv = None
 
 from artifact_manifest import load_manifest
+from mt5_broker_caps import describe_trade_mode, read_symbol_caps, trade_mode_allows_open
 from project_paths import resolve_manifest_path
 from summarize_execution_audit import build_summary
 from trading_config import deployment_paths, resolve_bar_construction_ticks_per_bar
@@ -25,12 +26,6 @@ from validation_metrics import load_json_report
 
 if load_dotenv is not None:
     load_dotenv()
-
-
-def _bool_attr(obj: Any, name: str) -> bool | None:
-    if obj is None or not hasattr(obj, name):
-        return None
-    return bool(getattr(obj, name))
 
 
 def _append_blocker(blockers: list[str], condition: bool, message: str) -> None:
@@ -113,16 +108,17 @@ def build_report(symbol: str, ticks_per_bar: int) -> dict[str, Any]:
             if symbol_info is not None and not getattr(symbol_info, "visible", True) and hasattr(mt5, "symbol_select"):
                 mt5.symbol_select(symbol, True)
                 symbol_info = mt5.symbol_info(symbol)
+            caps = read_symbol_caps(symbol, symbol_info) if symbol_info is not None else None
             _append_blocker(blockers, terminal_info is None, "MT5 terminal_info() returned None.")
             _append_blocker(blockers, account_info is None, "MT5 account_info() returned None.")
             _append_blocker(blockers, symbol_info is None, f"MT5 symbol_info() returned None for {symbol}.")
             if terminal_info is not None:
-                trade_allowed = _bool_attr(terminal_info, "trade_allowed")
+                trade_allowed = bool(getattr(terminal_info, "trade_allowed")) if hasattr(terminal_info, "trade_allowed") else None
                 _append_blocker(blockers, trade_allowed is False, "MT5 terminal has trading disabled.")
-                connected_flag = _bool_attr(terminal_info, "connected")
+                connected_flag = bool(getattr(terminal_info, "connected")) if hasattr(terminal_info, "connected") else None
                 _append_blocker(blockers, connected_flag is False, "MT5 terminal is not connected to the broker.")
             if account_info is not None:
-                trade_allowed = _bool_attr(account_info, "trade_allowed")
+                trade_allowed = bool(getattr(account_info, "trade_allowed")) if hasattr(account_info, "trade_allowed") else None
                 _append_blocker(blockers, trade_allowed is False, "MT5 account reports trading disabled.")
                 margin_mode = getattr(account_info, "margin_mode", None)
                 hedging_constant = getattr(mt5, "ACCOUNT_MARGIN_MODE_RETAIL_HEDGING", None)
@@ -152,16 +148,37 @@ def build_report(symbol: str, ticks_per_bar: int) -> dict[str, Any]:
                     warnings.append(message + " Override enabled via LIVE_ALLOW_FOREIGN_POSITIONS=1.")
                 else:
                     blockers.append(message)
-            if symbol_info is not None:
-                volume_min = getattr(symbol_info, "volume_min", None)
-                volume_step = getattr(symbol_info, "volume_step", None)
-                stops_level = getattr(symbol_info, "trade_stops_level", None)
-                if volume_min in (None, 0):
+            if caps is not None:
+                if caps.visible is False:
+                    blockers.append(f"MT5 symbol {symbol} is still not visible after symbol_select.")
+                if caps.volume_min in (None, 0):
                     warnings.append("Broker did not expose volume_min; order sizing normalization may be incomplete.")
-                if volume_step in (None, 0):
+                if caps.volume_max in (None, 0):
+                    warnings.append("Broker did not expose volume_max; order sizing normalization may be incomplete.")
+                if caps.volume_step in (None, 0):
                     warnings.append("Broker did not expose volume_step; lot normalization may be incomplete.")
-                if stops_level in (None,):
+                if caps.trade_stops_level is None:
                     warnings.append("Broker did not expose trade_stops_level; stop-distance prechecks may be incomplete.")
+                if caps.trade_freeze_level is None:
+                    warnings.append("Broker did not expose trade_freeze_level; freeze-distance prechecks may be incomplete.")
+                if caps.tick_size in (None, 0):
+                    warnings.append("Broker did not expose trade_tick_size; price alignment may rely on point size only.")
+                if caps.tick_value in (None, 0):
+                    warnings.append("Broker did not expose trade_tick_value; audit economics may be incomplete.")
+                if caps.contract_size in (None, 0):
+                    warnings.append("Broker did not expose trade_contract_size; symbol economics may be incomplete.")
+                if caps.trade_mode is not None:
+                    if not trade_mode_allows_open(mt5, caps.trade_mode, 1) and not trade_mode_allows_open(mt5, caps.trade_mode, -1):
+                        blockers.append(
+                            f"MT5 symbol trade mode blocks new orders: {describe_trade_mode(mt5, caps.trade_mode)}."
+                        )
+                    elif not (
+                        trade_mode_allows_open(mt5, caps.trade_mode, 1)
+                        and trade_mode_allows_open(mt5, caps.trade_mode, -1)
+                    ):
+                        warnings.append(
+                            f"MT5 symbol trade mode is directional-only: {describe_trade_mode(mt5, caps.trade_mode)}."
+                        )
             mt5.shutdown()
 
     if ops_attestation is None:
@@ -192,6 +209,22 @@ def build_report(symbol: str, ticks_per_bar: int) -> dict[str, Any]:
         "terminal_info": None if terminal_info is None else terminal_info._asdict(),
         "account_info": None if account_info is None else account_info._asdict(),
         "symbol_info": None if symbol_info is None else symbol_info._asdict(),
+        "symbol_capabilities": None
+        if symbol_info is None
+        else {
+            "visible": getattr(symbol_info, "visible", None),
+            "digits": getattr(symbol_info, "digits", None),
+            "point": getattr(symbol_info, "point", None),
+            "trade_mode": getattr(symbol_info, "trade_mode", None),
+            "trade_stops_level": getattr(symbol_info, "trade_stops_level", None),
+            "trade_freeze_level": getattr(symbol_info, "trade_freeze_level", None),
+            "volume_min": getattr(symbol_info, "volume_min", None),
+            "volume_max": getattr(symbol_info, "volume_max", None),
+            "volume_step": getattr(symbol_info, "volume_step", None),
+            "trade_tick_size": getattr(symbol_info, "trade_tick_size", None),
+            "trade_tick_value": getattr(symbol_info, "trade_tick_value", None),
+            "trade_contract_size": getattr(symbol_info, "trade_contract_size", None),
+        },
     }
     paths.live_preflight_path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
     return report

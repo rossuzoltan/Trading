@@ -16,6 +16,9 @@ from train_agent import (
     _deployment_candidate_rank,
     _holdout_deployment_blockers,
     evaluate_model,
+    get_current_ent_coef,
+    get_current_phase,
+    get_current_slippage_pips,
     run_baseline_research_gate,
 )
 
@@ -102,7 +105,80 @@ class DummyEvalEnv:
         return [float(self._equities[max(self._index - 1, 0)])]
 
 
+class DummyTrainingEnv:
+    def __init__(self, snapshots: list[dict[str, object]]) -> None:
+        self._snapshots = snapshots
+
+    def env_method(self, name: str):
+        if name != "get_training_diagnostics":
+            raise AssertionError(f"Unexpected env_method {name}")
+        return self._snapshots
+
+
+class DummyCurriculum:
+    def snapshot(self) -> dict[str, object]:
+        return {
+            "slippage_mode": "staircase",
+            "current_slippage_pips": 0.1,
+            "current_phase": 1,
+            "entropy_coef": 0.02,
+            "participation_bonus_enabled": True,
+            "participation_bonus_active": True,
+        }
+
+
+class DummyHeartbeatModel:
+    def __init__(self, env: DummyTrainingEnv) -> None:
+        self._env = env
+        self.saved_paths: list[str] = []
+        self._vecnormalize = None
+
+    def get_env(self) -> DummyTrainingEnv:
+        return self._env
+
+    def save(self, path: str) -> None:
+        self.saved_paths.append(path)
+        Path(f"{path}.zip").write_bytes(b"model")
+
+    def get_vec_normalize_env(self):
+        return self._vecnormalize
+
+
 class TrainRehabTests(unittest.TestCase):
+    def test_recovery_helpers_follow_staircase_and_entropy_schedule(self):
+        cfg = {
+            "slippage_curriculum": {
+                "enabled": True,
+                "mode": "staircase",
+                "phases": [
+                    {"until_step": 750_000, "slippage_pips": 0.1},
+                    {"until_step": 1_750_000, "slippage_pips": 0.5},
+                    {"until_step": 3_000_000, "slippage_pips": 1.0},
+                ],
+                "linear_start_pips": 0.1,
+                "linear_end_pips": 1.0,
+                "default_slippage_pips": 1.0,
+            },
+            "entropy_schedule": {
+                "enabled": True,
+                "initial_ent_coef": 0.02,
+                "mid_ent_coef": 0.01,
+                "final_ent_coef": 0.001,
+                "phase_1_until": 750_000,
+                "phase_2_until": 1_750_000,
+            },
+        }
+
+        self.assertEqual(0.1, get_current_slippage_pips(100_000, cfg))
+        self.assertEqual(1, get_current_phase(100_000, cfg))
+        self.assertEqual(0.5, get_current_slippage_pips(900_000, cfg))
+        self.assertEqual(2, get_current_phase(900_000, cfg))
+        self.assertEqual(1.0, get_current_slippage_pips(2_000_000, cfg))
+        self.assertEqual(3, get_current_phase(2_000_000, cfg))
+        self.assertEqual(0.02, get_current_ent_coef(100_000, cfg))
+        self.assertEqual(0.01, get_current_ent_coef(900_000, cfg))
+        self.assertEqual(0.001, get_current_ent_coef(2_000_000, cfg))
+
     def test_baseline_gate_passes_on_predictive_synthetic_data(self):
         tmpdir = make_test_dir("baseline_pass")
         frame = make_supervised_frame(rows=900, predictive=True)
@@ -168,12 +244,46 @@ class TrainRehabTests(unittest.TestCase):
         heartbeat = TrainingHeartbeatCallback(
             out_path=out_path,
             diagnostics_cb=callback,
+            curriculum_cb=DummyCurriculum(),
+            eval_cb=None,
             run_id="run-123",
             symbol="USDJPY",
             checkpoints_root=tmpdir,
             fold_index=1,
             current_run_path=run_context_path,
             every_steps=10,
+        )
+        heartbeat.model = DummyHeartbeatModel(
+            DummyTrainingEnv(
+                [
+                    {
+                        "total_steps": 10,
+                        "action_counts": {"hold": 7, "close": 1, "long": 1, "short": 1},
+                        "trade_stats": {
+                            "entered_long_count": 1,
+                            "entered_short_count": 1,
+                            "closed_trade_count": 1,
+                            "trade_attempt_count": 3,
+                            "trade_reject_count": 0,
+                            "flat_steps": 7,
+                            "long_steps": 2,
+                            "short_steps": 1,
+                            "position_duration_sum": 4.0,
+                            "position_duration_count": 1,
+                            "rapid_reversals": 0,
+                            "position_durations_sample": [4],
+                        },
+                        "reward_components": {
+                            "pnl_reward_sum": 1.5,
+                            "slippage_penalty_sum": -0.2,
+                            "participation_bonus_sum": 0.05,
+                            "holding_penalty_sum": 0.0,
+                            "drawdown_penalty_sum": -0.1,
+                            "net_reward_sum": 1.25,
+                        },
+                    }
+                ]
+            )
         )
         heartbeat.num_timesteps = 10
         heartbeat._next_write = 10
@@ -191,10 +301,62 @@ class TrainRehabTests(unittest.TestCase):
             self.assertEqual(1, payload["diagnostic_sample_count"])
             self.assertTrue(payload["ppo_diagnostics"]["metrics_fresh"])
             self.assertEqual(7, payload["ppo_diagnostics"]["last_distinct_update_seen"])
+            self.assertEqual("stage_a_unlock", payload["training_stage"])
+            self.assertEqual("staircase", payload["curriculum_state"]["slippage_mode"])
+            self.assertEqual(7, payload["action_distribution"]["hold"])
+            self.assertEqual(1, payload["trade_diagnostics"]["entered_long_count"])
+            self.assertAlmostEqual(1.25, payload["reward_components"]["net_reward_sum"])
             run_context = json.loads(run_context_path.read_text(encoding="utf-8"))
             self.assertEqual("run-123", run_context["run_id"])
             self.assertEqual("training", run_context["state"])
             self.assertEqual(str(out_path), run_context["heartbeat_path"])
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_heartbeat_writes_resume_checkpoints_when_configured(self):
+        tmpdir = make_test_dir("heartbeat_resume_checkpoint")
+        out_path = tmpdir / "training_heartbeat.json"
+        callback = TrainingDiagnosticsCallback(verbose=0)
+        callback.metrics["train/approx_kl"] = [0.02]
+        callback.metrics["train/explained_variance"] = [0.35]
+        callback.metrics["train/value_loss"] = [1.0]
+        callback._last_update_index = 7
+
+        class DummyVecNormalize:
+            def __init__(self) -> None:
+                self.saved_paths: list[str] = []
+
+            def save(self, path: str) -> None:
+                self.saved_paths.append(path)
+                Path(path).write_bytes(b"vec")
+
+        resume_model_path = tmpdir / "resume_model.zip"
+        resume_vecnormalize_path = tmpdir / "resume_vecnormalize.pkl"
+        heartbeat = TrainingHeartbeatCallback(
+            out_path=out_path,
+            diagnostics_cb=callback,
+            curriculum_cb=DummyCurriculum(),
+            eval_cb=None,
+            run_id="run-456",
+            symbol="EURUSD",
+            checkpoints_root=tmpdir,
+            fold_index=0,
+            current_run_path=tmpdir / "current_training_run.json",
+            every_steps=10,
+            resume_model_path=resume_model_path,
+            resume_vecnormalize_path=resume_vecnormalize_path,
+        )
+        model = DummyHeartbeatModel(DummyTrainingEnv([]))
+        model._vecnormalize = DummyVecNormalize()
+        heartbeat.model = model
+        heartbeat.num_timesteps = 10
+        heartbeat._next_write = 10
+
+        try:
+            self.assertTrue(heartbeat._on_step())
+            self.assertEqual([str(resume_model_path.with_suffix(""))], model.saved_paths)
+            self.assertTrue(resume_model_path.exists())
+            self.assertTrue(resume_vecnormalize_path.exists())
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -225,16 +387,20 @@ class TrainRehabTests(unittest.TestCase):
             "deploy_ready": True,
             "val_sharpe": 0.45,
             "holdout_sharpe": 0.55,
+            "holdout_profit_factor": 1.20,
         }
 
         self.assertIsNone(_deployment_candidate_rank(rejected))
-        self.assertEqual((0.55, 0.45), _deployment_candidate_rank(promoted))
+        self.assertEqual((0.55, 1.20, 0.45), _deployment_candidate_rank(promoted))
 
     def test_holdout_gate_requires_sharpe_drawdown_and_nonnegative_equity(self):
         blockers = _holdout_deployment_blockers(
             holdout_sharpe=0.10,
             holdout_max_drawdown=0.35,
             holdout_final_equity=999.0,
+            holdout_profit_factor=1.50,
+            holdout_expectancy=0.05,
+            holdout_trade_count=50,
         )
 
         self.assertEqual(3, len(blockers))

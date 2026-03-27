@@ -25,6 +25,7 @@ import os
 import copy
 import importlib.util
 import json
+import logging
 import multiprocessing as mp
 import shutil
 import sys
@@ -58,6 +59,7 @@ from project_paths import (
     validate_dataset_bar_spec,
     validate_dataset_integrity,
 )
+from run_logging import configure_run_logging, set_log_context
 from trading_env import ForexTradingEnv
 from trading_config import (
     ACTION_SL_MULTS,
@@ -127,23 +129,109 @@ PPO_N_EPOCHS = int(os.environ.get("TRAIN_PPO_N_EPOCHS", "10"))
 TRAIN_EVAL_FREQ = int(os.environ.get("TRAIN_EVAL_FREQ", "20000"))
 TRAIN_LOG_INTERVAL = int(os.environ.get("TRAIN_LOG_INTERVAL", "5"))
 PPO_ENT_COEF = float(os.environ.get("TRAIN_PPO_ENT_COEF", "0.015"))
-TRAIN_REQUIRE_BASELINE_GATE = os.environ.get("TRAIN_REQUIRE_BASELINE_GATE", "1") != "0"
+TRAIN_DEBUG_ALLOW_BASELINE_BYPASS = os.environ.get("TRAIN_DEBUG_ALLOW_BASELINE_BYPASS", "0") == "1"
+TRAIN_LEGACY_REQUIRE_BASELINE_GATE = os.environ.get("TRAIN_REQUIRE_BASELINE_GATE", "1") != "0"
 TRAIN_STARTUP_SMOKE_ONLY = os.environ.get("TRAIN_STARTUP_SMOKE_ONLY", "0") == "1"
-BASELINE_TARGET_HORIZON_BARS = int(os.environ.get("TRAIN_BASELINE_TARGET_HORIZON_BARS", "5"))
+TRAIN_RESUME_LATEST = os.environ.get("TRAIN_RESUME_LATEST", "0") == "1"
+BASELINE_TARGET_HORIZON_BARS = int(os.environ.get("TRAIN_BASELINE_TARGET_HORIZON_BARS", "10"))
 BASELINE_R2_MIN = float(os.environ.get("TRAIN_BASELINE_R2_MIN", "0.0"))
 BASELINE_CORR_MIN = float(os.environ.get("TRAIN_BASELINE_CORR_MIN", "0.05"))
 BASELINE_SIGN_ACC_MIN = float(os.environ.get("TRAIN_BASELINE_SIGN_ACC_MIN", "0.52"))
 BASELINE_TREE_MAX_DEPTH = int(os.environ.get("TRAIN_BASELINE_TREE_MAX_DEPTH", "3"))
 BASELINE_TREE_MAX_ITER = int(os.environ.get("TRAIN_BASELINE_TREE_MAX_ITER", "100"))
+TRAIN_COMMISSION_PER_LOT = float(os.environ.get("TRAIN_COMMISSION_PER_LOT", "7.0"))
+TRAIN_PARTIAL_FILL_RATIO = float(os.environ.get("TRAIN_PARTIAL_FILL_RATIO", "1.0"))
+TRAIN_REWARD_SCALE = float(os.environ.get("TRAIN_REWARD_SCALE", "10000.0"))
+TRAIN_REWARD_DRAWDOWN_PENALTY = float(os.environ.get("TRAIN_REWARD_DRAWDOWN_PENALTY", "2.0"))
+TRAIN_REWARD_TRANSACTION_PENALTY = float(os.environ.get("TRAIN_REWARD_TRANSACTION_PENALTY", "1.0"))
+TRAIN_REWARD_CLIP_LOW = float(os.environ.get("TRAIN_REWARD_CLIP_LOW", "-5.0"))
+TRAIN_REWARD_CLIP_HIGH = float(os.environ.get("TRAIN_REWARD_CLIP_HIGH", "5.0"))
 HEARTBEAT_SCHEMA_VERSION = 2
 PROCESS_STARTED_UTC = datetime.now(timezone.utc).isoformat()
+TRAINING_STAGE = os.environ.get("TRAINING_STAGE", "stage_a_unlock").strip().lower() or "stage_a_unlock"
+
+TRAINING_RECOVERY_CONFIG: dict[str, Any] = {
+    "training_stage": TRAINING_STAGE,
+    "slippage_curriculum": {
+        "enabled": os.environ.get("TRAIN_RECOVERY_SLIPPAGE_ENABLED", "1") != "0",
+        "mode": os.environ.get("TRAIN_RECOVERY_SLIPPAGE_MODE", "staircase").strip().lower() or "staircase",
+        "phases": [
+            {
+                "until_step": int(os.environ.get("TRAIN_RECOVERY_PHASE_1_UNTIL", "750000")),
+                "slippage_pips": float(os.environ.get("TRAIN_RECOVERY_PHASE_1_SLIPPAGE_PIPS", "0.1")),
+            },
+            {
+                "until_step": int(os.environ.get("TRAIN_RECOVERY_PHASE_2_UNTIL", "1750000")),
+                "slippage_pips": float(os.environ.get("TRAIN_RECOVERY_PHASE_2_SLIPPAGE_PIPS", "0.5")),
+            },
+            {
+                "until_step": int(os.environ.get("TRAIN_RECOVERY_PHASE_3_UNTIL", str(TOTAL_TIMESTEPS))),
+                "slippage_pips": float(os.environ.get("TRAIN_RECOVERY_PHASE_3_SLIPPAGE_PIPS", "1.0")),
+            },
+        ],
+        "linear_start_pips": float(os.environ.get("TRAIN_RECOVERY_LINEAR_START_PIPS", "0.1")),
+        "linear_end_pips": float(os.environ.get("TRAIN_RECOVERY_LINEAR_END_PIPS", "1.0")),
+        "default_slippage_pips": float(
+            os.environ.get("TRAIN_RECOVERY_DEFAULT_SLIPPAGE_PIPS", str(DEFAULT_SLIPPAGE_END_PIPS))
+        ),
+    },
+    "participation_bonus": {
+        "enabled": os.environ.get("TRAIN_RECOVERY_PARTICIPATION_BONUS_ENABLED", "1") != "0",
+        "bonus_value": float(os.environ.get("TRAIN_RECOVERY_PARTICIPATION_BONUS_VALUE", "0.0025")),
+        "active_until_step": int(os.environ.get("TRAIN_RECOVERY_PARTICIPATION_BONUS_UNTIL", "500000")),
+        "cooldown_steps": int(os.environ.get("TRAIN_RECOVERY_PARTICIPATION_BONUS_COOLDOWN", "8")),
+        "only_from_flat": os.environ.get("TRAIN_RECOVERY_PARTICIPATION_ONLY_FROM_FLAT", "1") != "0",
+        "max_bonus_per_episode": int(os.environ.get("TRAIN_RECOVERY_PARTICIPATION_MAX_PER_EPISODE", "50")),
+    },
+    "entropy_schedule": {
+        "enabled": os.environ.get("TRAIN_RECOVERY_ENTROPY_SCHEDULE_ENABLED", "1") != "0",
+        "initial_ent_coef": float(os.environ.get("TRAIN_RECOVERY_ENTROPY_INITIAL", "0.02")),
+        "mid_ent_coef": float(os.environ.get("TRAIN_RECOVERY_ENTROPY_MID", "0.01")),
+        "final_ent_coef": float(os.environ.get("TRAIN_RECOVERY_ENTROPY_FINAL", "0.001")),
+        "phase_1_until": int(os.environ.get("TRAIN_RECOVERY_ENTROPY_PHASE_1_UNTIL", "750000")),
+        "phase_2_until": int(os.environ.get("TRAIN_RECOVERY_ENTROPY_PHASE_2_UNTIL", "1750000")),
+    },
+    "diagnostics": {
+        "log_action_distribution": os.environ.get("TRAIN_RECOVERY_LOG_ACTION_DISTRIBUTION", "1") != "0",
+        "log_reward_components": os.environ.get("TRAIN_RECOVERY_LOG_REWARD_COMPONENTS", "1") != "0",
+        "heartbeat_every_n_updates": int(os.environ.get("TRAIN_RECOVERY_HEARTBEAT_EVERY_N_UPDATES", "10")),
+    },
+}
+
+# Diagnostic guideposts for the Stage A unlock path. These are intended for
+# heartbeat interpretation and post-run review, not as hard stop conditions.
+STAGE_A_RECOVERY_TARGETS: dict[str, dict[str, str]] = {
+    "200k_steps": {
+        "trade_attempt_count": "> 0",
+        "entry_count": "> 20",
+        "hold_fraction": "< 0.995",
+        "participation_bonus_sum": "> 0",
+        "explained_variance": "should stop deteriorating",
+    },
+    "500k_steps": {
+        "closed_trade_count": "> 50",
+        "hold_fraction": "< 0.98",
+        "action_distribution": "should not be fully degenerate",
+        "explained_variance": "should show upward trend",
+        "participation_bonus_dependency": "reward should not be explained purely by participation bonus",
+    },
+    "1m_steps": {
+        "participation_bonus": "expired or near expiry",
+        "activity": "should persist after bonus fades",
+        "explained_variance": "should move toward 0.25-0.30",
+        "eval_trade_activity": "should be meaningful",
+    },
+}
 
 # ── Purged walk-forward config ────────────────────────────────────────────────
 PURGE_GAP_BARS   = int(os.environ.get("TRAIN_PURGE_GAP_BARS", "200"))
 N_FOLDS          = int(os.environ.get("TRAIN_N_FOLDS", "3"))
 FOLD_TEST_FRAC   = float(os.environ.get("TRAIN_FOLD_TEST_FRAC", "0.10"))
 BEST_VECNORMALIZE_NAME = "best_vecnormalize.pkl"
+RESUME_MODEL_NAME = "resume_model.zip"
+RESUME_VECNORMALIZE_NAME = "resume_vecnormalize.pkl"
 CURRENT_TRAINING_RUN_PATH = Path("checkpoints") / "current_training_run.json"
+log = logging.getLogger("train_agent")
 
 
 def _json_default(value: Any) -> Any:
@@ -154,6 +242,184 @@ def _json_default(value: Any) -> Any:
     if isinstance(value, (np.floating,)):
         return float(value)
     raise TypeError(f"Object of type {value.__class__.__name__} is not JSON serializable")
+
+
+def build_execution_cost_profile(*, slippage_pips: float = SLIPPAGE_END) -> dict[str, float | str]:
+    return {
+        "commission_per_lot": float(TRAIN_COMMISSION_PER_LOT),
+        "slippage_pips": float(slippage_pips),
+        "partial_fill_ratio": float(TRAIN_PARTIAL_FILL_RATIO),
+        "spread_model": "bar_avg_spread_half_side",
+        "mark_to_liquidation": True,
+    }
+
+
+def build_reward_profile() -> dict[str, float]:
+    return {
+        "reward_scale": float(TRAIN_REWARD_SCALE),
+        "drawdown_penalty": float(TRAIN_REWARD_DRAWDOWN_PENALTY),
+        "transaction_penalty": float(TRAIN_REWARD_TRANSACTION_PENALTY),
+        "reward_clip_low": float(TRAIN_REWARD_CLIP_LOW),
+        "reward_clip_high": float(TRAIN_REWARD_CLIP_HIGH),
+    }
+
+
+def get_current_slippage_pips(global_step: int, cfg: dict[str, Any]) -> float:
+    scfg = cfg.get("slippage_curriculum", {}) or {}
+    if not bool(scfg.get("enabled", False)):
+        return float(scfg.get("default_slippage_pips", DEFAULT_SLIPPAGE_END_PIPS))
+
+    phases = list(scfg.get("phases", []) or [])
+    if not phases:
+        raise ValueError("TRAINING_RECOVERY_CONFIG.slippage_curriculum.phases must not be empty.")
+
+    mode = str(scfg.get("mode", "staircase")).strip().lower()
+    if mode == "staircase":
+        for phase in phases:
+            if int(global_step) <= int(phase["until_step"]):
+                return float(phase["slippage_pips"])
+        return float(phases[-1]["slippage_pips"])
+    if mode == "linear":
+        total_end = max(int(phases[-1]["until_step"]), 1)
+        progress = min(max(float(global_step) / float(total_end), 0.0), 1.0)
+        start = float(scfg.get("linear_start_pips", DEFAULT_SLIPPAGE_START_PIPS))
+        end = float(scfg.get("linear_end_pips", DEFAULT_SLIPPAGE_END_PIPS))
+        return float(start + progress * (end - start))
+    raise ValueError(f"Unknown slippage curriculum mode: {mode}")
+
+
+def get_current_phase(global_step: int, cfg: dict[str, Any]) -> int:
+    phases = list((cfg.get("slippage_curriculum", {}) or {}).get("phases", []) or [])
+    if not phases:
+        return 0
+    for idx, phase in enumerate(phases, start=1):
+        if int(global_step) <= int(phase["until_step"]):
+            return idx
+    return len(phases)
+
+
+def get_current_ent_coef(global_step: int, cfg: dict[str, Any]) -> float:
+    ecfg = cfg.get("entropy_schedule", {}) or {}
+    if not bool(ecfg.get("enabled", False)):
+        return float(ecfg.get("final_ent_coef", PPO_ENT_COEF))
+    if int(global_step) <= int(ecfg.get("phase_1_until", 0)):
+        return float(ecfg.get("initial_ent_coef", PPO_ENT_COEF))
+    if int(global_step) <= int(ecfg.get("phase_2_until", 0)):
+        return float(ecfg.get("mid_ent_coef", PPO_ENT_COEF))
+    return float(ecfg.get("final_ent_coef", PPO_ENT_COEF))
+
+
+def get_final_slippage_pips(cfg: dict[str, Any]) -> float:
+    scfg = cfg.get("slippage_curriculum", {}) or {}
+    phases = list(scfg.get("phases", []) or [])
+    if phases:
+        return float(phases[-1]["slippage_pips"])
+    return float(scfg.get("default_slippage_pips", DEFAULT_SLIPPAGE_END_PIPS))
+
+
+def is_participation_bonus_active(global_step: int, cfg: dict[str, Any]) -> bool:
+    pcfg = cfg.get("participation_bonus", {}) or {}
+    return bool(pcfg.get("enabled", False)) and int(global_step) <= int(pcfg.get("active_until_step", 0))
+
+
+def build_train_env_recovery_config(base_cfg: dict[str, Any], *, env_workers: int) -> dict[str, Any]:
+    cfg = copy.deepcopy(base_cfg)
+    pcfg = cfg.get("participation_bonus", {}) or {}
+    if bool(pcfg.get("enabled", False)) and env_workers > 0:
+        pcfg["bonus_value"] = float(pcfg.get("bonus_value", 0.0)) / float(env_workers)
+    cfg["participation_bonus"] = pcfg
+    return cfg
+
+
+def aggregate_training_diagnostics(env_snapshots: list[dict[str, Any]] | None) -> dict[str, Any]:
+    action_counts = {"hold": 0, "close": 0, "long": 0, "short": 0}
+    trade_totals = {
+        "entered_long_count": 0,
+        "entered_short_count": 0,
+        "entry_signal_long_count": 0,
+        "entry_signal_short_count": 0,
+        "closed_trade_count": 0,
+        "trade_attempt_count": 0,
+        "trade_reject_count": 0,
+        "flat_steps": 0,
+        "long_steps": 0,
+        "short_steps": 0,
+        "position_duration_sum": 0.0,
+        "position_duration_count": 0,
+        "rapid_reversals": 0,
+    }
+    reward_totals = {
+        "pnl_reward_sum": 0.0,
+        "slippage_penalty_sum": 0.0,
+        "participation_bonus_sum": 0.0,
+        "holding_penalty_sum": 0.0,
+        "drawdown_penalty_sum": 0.0,
+        "net_reward_sum": 0.0,
+    }
+    total_steps = 0
+    duration_samples: list[float] = []
+
+    for snapshot in env_snapshots or []:
+        if not isinstance(snapshot, dict):
+            continue
+        total_steps += int(snapshot.get("total_steps", 0))
+        for key in action_counts:
+            action_counts[key] += int((snapshot.get("action_counts", {}) or {}).get(key, 0))
+        trade_stats = snapshot.get("trade_stats", {}) or {}
+        for key in trade_totals:
+            trade_totals[key] += float(trade_stats.get(key, 0)) if key == "position_duration_sum" else int(trade_stats.get(key, 0))
+        duration_samples.extend(float(value) for value in list(trade_stats.get("position_durations_sample", []) or []))
+        for key in reward_totals:
+            reward_totals[key] += float((snapshot.get("reward_components", {}) or {}).get(key, 0.0))
+
+    total_actions = max(sum(action_counts.values()), 1)
+    occupancy_steps = max(
+        int(trade_totals["flat_steps"]) + int(trade_totals["long_steps"]) + int(trade_totals["short_steps"]),
+        1,
+    )
+    total_entries = int(trade_totals["entered_long_count"]) + int(trade_totals["entered_short_count"])
+    closed_trade_count = int(trade_totals["closed_trade_count"])
+    avg_position_duration = (
+        float(trade_totals["position_duration_sum"]) / float(trade_totals["position_duration_count"])
+        if int(trade_totals["position_duration_count"]) > 0
+        else 0.0
+    )
+    median_position_duration = float(np.median(duration_samples)) if duration_samples else 0.0
+
+    return {
+        "total_steps": int(total_steps),
+        "action_distribution": {
+            "hold": int(action_counts["hold"]),
+            "close": int(action_counts["close"]),
+            "long": int(action_counts["long"]),
+            "short": int(action_counts["short"]),
+            "hold_fraction": float(action_counts["hold"]) / float(total_actions),
+            "close_fraction": float(action_counts["close"]) / float(total_actions),
+            "long_fraction": float(action_counts["long"]) / float(total_actions),
+            "short_fraction": float(action_counts["short"]) / float(total_actions),
+        },
+        "trade_diagnostics": {
+            "entered_long_count": int(trade_totals["entered_long_count"]),
+            "entered_short_count": int(trade_totals["entered_short_count"]),
+            "entry_signal_long_count": int(trade_totals["entry_signal_long_count"]),
+            "entry_signal_short_count": int(trade_totals["entry_signal_short_count"]),
+            "closed_trade_count": int(trade_totals["closed_trade_count"]),
+            "trade_attempt_count": int(trade_totals["trade_attempt_count"]),
+            "trade_reject_count": int(trade_totals["trade_reject_count"]),
+            "avg_position_duration": float(avg_position_duration),
+            "median_position_duration": float(median_position_duration),
+            "avg_trades_per_1000_steps": (1000.0 * float(total_entries) / float(total_steps)) if total_steps else 0.0,
+            "churn_ratio": (
+                float(trade_totals["rapid_reversals"]) / float(max(closed_trade_count, 1))
+                if closed_trade_count >= 0
+                else 0.0
+            ),
+            "flat_fraction": float(trade_totals["flat_steps"]) / float(occupancy_steps),
+            "long_fraction": float(trade_totals["long_steps"]) / float(occupancy_steps),
+            "short_fraction": float(trade_totals["short_steps"]) / float(occupancy_steps),
+        },
+        "reward_components": {key: float(value) for key, value in reward_totals.items()},
+    }
 
 
 def resolve_train_vec_env_type(
@@ -175,7 +441,7 @@ def resolve_train_vec_env_type(
 
 # ── Curriculum Learning Callback ──────────────────────────────────────────────
 
-class CurriculumCallback(BaseCallback):
+class LegacyCurriculumCallback(BaseCallback):
     """
     Linearly anneals max_slippage_pips in the training environments
     from SLIPPAGE_START to SLIPPAGE_END over total_timesteps.
@@ -207,6 +473,109 @@ class CurriculumCallback(BaseCallback):
             self._last_logged = milestone
             if self.verbose:
                 print(f"[Curriculum] Step {self.num_timesteps:,}  slippage={slip:.2f} pips")
+        return True
+
+
+class CurriculumCallback(BaseCallback):
+    LOG_EVERY_STEPS = 50_000
+
+    def __init__(
+        self,
+        recovery_cfg: dict[str, Any],
+        *,
+        train_env=None,
+        eval_envs: list[Any] | None = None,
+        verbose: int = 0,
+    ) -> None:
+        super().__init__(verbose)
+        self.recovery_cfg = copy.deepcopy(recovery_cfg)
+        self.train_env = train_env
+        self.eval_envs = list(eval_envs or [])
+        self.last_slippage: float | None = None
+        self.last_ent_coef: float | None = None
+        self._last_logged_step = -1
+
+    def _iter_target_envs(self) -> list[Any]:
+        envs: list[Any] = []
+        if self.train_env is not None:
+            envs.append(self.train_env)
+        elif getattr(self, "training_env", None) is not None:
+            envs.append(self.training_env)
+        envs.extend(env for env in self.eval_envs if env is not None)
+        unique: list[Any] = []
+        seen_ids: set[int] = set()
+        for env in envs:
+            env_id = id(env)
+            if env_id not in seen_ids:
+                unique.append(env)
+                seen_ids.add(env_id)
+        return unique
+
+    def _set_env_method(self, env, method_name: str, value: Any) -> None:
+        try:
+            env.env_method(method_name, value)
+            return
+        except Exception:
+            pass
+        if method_name == "set_slippage_pips":
+            try:
+                env.set_attr("max_slippage_pips", value)
+            except Exception:
+                pass
+
+    def _apply_curriculum_state(self) -> None:
+        step = int(self.num_timesteps)
+        current_slippage = get_current_slippage_pips(step, self.recovery_cfg)
+        current_ent_coef = get_current_ent_coef(step, self.recovery_cfg)
+
+        targets = self._iter_target_envs()
+        for env in targets:
+            self._set_env_method(env, "set_global_step", step)
+        if self.last_slippage != current_slippage:
+            for env in targets:
+                self._set_env_method(env, "set_slippage_pips", current_slippage)
+            self.last_slippage = float(current_slippage)
+
+        # MaskablePPO.train() reads self.ent_coef directly on each update in the
+        # installed sb3_contrib version, so updating the scalar here affects the
+        # subsequent PPO update cycle without changing the optimizer setup.
+        if self.last_ent_coef != current_ent_coef:
+            self.model.ent_coef = float(current_ent_coef)
+            self.last_ent_coef = float(current_ent_coef)
+
+    def snapshot(self) -> dict[str, Any]:
+        step = int(self.num_timesteps)
+        return {
+            "slippage_mode": str((self.recovery_cfg.get("slippage_curriculum", {}) or {}).get("mode", "staircase")),
+            "current_slippage_pips": float(
+                self.last_slippage if self.last_slippage is not None else get_current_slippage_pips(step, self.recovery_cfg)
+            ),
+            "current_phase": int(get_current_phase(step, self.recovery_cfg)),
+            "entropy_coef": float(
+                self.last_ent_coef if self.last_ent_coef is not None else get_current_ent_coef(step, self.recovery_cfg)
+            ),
+            "participation_bonus_enabled": bool(
+                (self.recovery_cfg.get("participation_bonus", {}) or {}).get("enabled", False)
+            ),
+            "participation_bonus_active": bool(is_participation_bonus_active(step, self.recovery_cfg)),
+        }
+
+    def _on_training_start(self) -> None:
+        self._apply_curriculum_state()
+
+    def _on_step(self) -> bool:
+        self._apply_curriculum_state()
+        if self.verbose and (
+            self._last_logged_step < 0 or (self.num_timesteps - self._last_logged_step) >= self.LOG_EVERY_STEPS
+        ):
+            self._last_logged_step = int(self.num_timesteps)
+            snapshot = self.snapshot()
+            print(
+                f"[Curriculum] Step {self.num_timesteps:,} | "
+                f"phase={snapshot['current_phase']} | "
+                f"slippage={snapshot['current_slippage_pips']:.2f} pips | "
+                f"ent_coef={snapshot['entropy_coef']:.4f}"
+            )
         return True
 
 
@@ -394,19 +763,26 @@ class TrainingHeartbeatCallback(BaseCallback):
         *,
         out_path: str | Path,
         diagnostics_cb: TrainingDiagnosticsCallback,
-        eval_cb: FullPathEvalCallback | None,
+        curriculum_cb: CurriculumCallback | None = None,
         run_id: str,
         symbol: str,
         checkpoints_root: str | Path,
+        eval_cb: FullPathEvalCallback | None = None,
         fold_index: int | None = None,
         current_run_path: str | Path = CURRENT_TRAINING_RUN_PATH,
         every_steps: int = 5_000,
         total_timesteps: int | None = None,
+        dataset_integrity_report_path: str | Path | None = None,
+        dataset_integrity_verified: bool | None = None,
+        baseline_report_path: str | Path | None = None,
+        resume_model_path: str | Path | None = None,
+        resume_vecnormalize_path: str | Path | None = None,
         verbose: int = 0,
     ) -> None:
         super().__init__(verbose)
         self.out_path = Path(out_path)
         self.diagnostics_cb = diagnostics_cb
+        self.curriculum_cb = curriculum_cb
         self.eval_cb = eval_cb
         self.run_id = str(run_id)
         self.symbol = str(symbol).upper()
@@ -415,9 +791,27 @@ class TrainingHeartbeatCallback(BaseCallback):
         self.current_run_path = Path(current_run_path)
         self.every_steps = max(int(every_steps), 0)
         self.total_timesteps = int(total_timesteps) if total_timesteps is not None else None
+        self.dataset_integrity_report_path = (
+            Path(dataset_integrity_report_path) if dataset_integrity_report_path is not None else None
+        )
+        self.dataset_integrity_verified = (
+            bool(dataset_integrity_verified) if dataset_integrity_verified is not None else None
+        )
+        self.baseline_report_path = Path(baseline_report_path) if baseline_report_path is not None else None
+        self.resume_model_path = Path(resume_model_path) if resume_model_path is not None else None
+        self.resume_vecnormalize_path = (
+            Path(resume_vecnormalize_path) if resume_vecnormalize_path is not None else None
+        )
         self.fold_started_utc = datetime.now(timezone.utc).isoformat()
         self._fold_started_perf_counter = time.perf_counter()
         self._next_write = self.every_steps if self.every_steps else 0
+
+    def _collect_training_diagnostics(self) -> dict[str, Any]:
+        try:
+            snapshots = self.training_env.env_method("get_training_diagnostics")
+        except Exception:
+            snapshots = []
+        return aggregate_training_diagnostics(snapshots if isinstance(snapshots, list) else [])
 
     def _on_step(self) -> bool:
         if not self.every_steps:
@@ -444,6 +838,7 @@ class TrainingHeartbeatCallback(BaseCallback):
                     0.0,
                 )
         latest_eval_metrics = copy.deepcopy(self.eval_cb.latest_metrics) if self.eval_cb and self.eval_cb.latest_metrics else None
+        env_diagnostics = self._collect_training_diagnostics()
         payload = {
             "schema_version": HEARTBEAT_SCHEMA_VERSION,
             "run_id": self.run_id,
@@ -464,9 +859,29 @@ class TrainingHeartbeatCallback(BaseCallback):
             "diagnostic_sample_count": diagnostics_summary.get("diagnostic_sample_count"),
             "ppo_diagnostics": diagnostics_summary,
             "latest_eval": latest_eval_metrics,
+            "training_stage": TRAINING_STAGE,
+            "curriculum_state": self.curriculum_cb.snapshot() if self.curriculum_cb is not None else None,
+            "action_distribution": env_diagnostics["action_distribution"],
+            "trade_diagnostics": env_diagnostics["trade_diagnostics"],
+            "reward_components": env_diagnostics["reward_components"],
+            "recovery_targets": STAGE_A_RECOVERY_TARGETS,
         }
+        if self.dataset_integrity_report_path is not None:
+            payload["dataset_integrity_report_path"] = str(self.dataset_integrity_report_path)
+        if self.dataset_integrity_verified is not None:
+            payload["dataset_integrity_verified"] = bool(self.dataset_integrity_verified)
+        if self.baseline_report_path is not None:
+            payload["baseline_report_path"] = str(self.baseline_report_path)
         self.out_path.parent.mkdir(parents=True, exist_ok=True)
         self.out_path.write_text(json.dumps(payload, indent=2, default=_json_default), encoding="utf-8")
+        if self.resume_model_path is not None:
+            self.resume_model_path.parent.mkdir(parents=True, exist_ok=True)
+            self.model.save(str(self.resume_model_path.with_suffix("")))
+        if self.resume_vecnormalize_path is not None:
+            vecnormalize = self.model.get_vec_normalize_env()
+            if vecnormalize is not None:
+                self.resume_vecnormalize_path.parent.mkdir(parents=True, exist_ok=True)
+                vecnormalize.save(str(self.resume_vecnormalize_path))
         _write_current_training_run_context(
             run_id=self.run_id,
             symbol=self.symbol,
@@ -479,6 +894,9 @@ class TrainingHeartbeatCallback(BaseCallback):
             total_timesteps=self.total_timesteps,
             progress_fraction=progress_fraction,
             estimated_remaining_seconds=estimated_remaining_seconds,
+            dataset_integrity_report_path=self.dataset_integrity_report_path,
+            dataset_integrity_verified=self.dataset_integrity_verified,
+            baseline_report_path=self.baseline_report_path,
         )
         if self.verbose:
             print(f"[Heartbeat] Wrote -> {self.out_path}")
@@ -564,8 +982,17 @@ def linear_schedule(initial_value: float, min_value: float = 1e-6) -> Callable:
     return func
 
 
-def make_env(df, feature_cols, sl_opts, tp_opts, random_start=True,
-             initial_slippage: float = 0.0, symbol: str = "EURUSD", scaler: StandardScaler | None = None):
+def make_env(
+    df,
+    feature_cols,
+    sl_opts,
+    tp_opts,
+    random_start=True,
+    initial_slippage: float = 0.0,
+    symbol: str = "EURUSD",
+    scaler: StandardScaler | None = None,
+    recovery_config: dict[str, Any] | None = None,
+):
     def _init():
         if TRAIN_ENV_MODE == "runtime":
             if scaler is None:
@@ -579,9 +1006,17 @@ def make_env(df, feature_cols, sl_opts, tp_opts, random_start=True,
                 scaler=scaler,
                 action_map=action_map,
                 config=RuntimeGymConfig(
+                    commission_per_lot=float(TRAIN_COMMISSION_PER_LOT),
                     slippage_pips=float(initial_slippage),
+                    partial_fill_ratio=float(TRAIN_PARTIAL_FILL_RATIO),
+                    reward_scale=float(TRAIN_REWARD_SCALE),
+                    drawdown_penalty=float(TRAIN_REWARD_DRAWDOWN_PENALTY),
+                    transaction_penalty=float(TRAIN_REWARD_TRANSACTION_PENALTY),
+                    reward_clip_low=float(TRAIN_REWARD_CLIP_LOW),
+                    reward_clip_high=float(TRAIN_REWARD_CLIP_HIGH),
                     random_start=bool(random_start),
                 ),
+                recovery_config=copy.deepcopy(recovery_config) if recovery_config is not None else None,
             )
         else:
             env = ForexTradingEnv(
@@ -1017,6 +1452,9 @@ def _write_current_training_run_context(
     total_timesteps: int | None = None,
     progress_fraction: float | None = None,
     estimated_remaining_seconds: float | None = None,
+    dataset_integrity_report_path: str | Path | None = None,
+    dataset_integrity_verified: bool | None = None,
+    baseline_report_path: str | Path | None = None,
 ) -> Path:
     payload = {
         "schema_version": 1,
@@ -1038,6 +1476,12 @@ def _write_current_training_run_context(
         payload["progress_fraction"] = float(progress_fraction)
     if estimated_remaining_seconds is not None:
         payload["estimated_remaining_seconds"] = float(estimated_remaining_seconds)
+    if dataset_integrity_report_path is not None:
+        payload["dataset_integrity_report_path"] = str(Path(dataset_integrity_report_path))
+    if dataset_integrity_verified is not None:
+        payload["dataset_integrity_verified"] = bool(dataset_integrity_verified)
+    if baseline_report_path is not None:
+        payload["baseline_report_path"] = str(Path(baseline_report_path))
     destination = Path(out_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(
@@ -1045,6 +1489,170 @@ def _write_current_training_run_context(
         encoding="utf-8",
     )
     return destination
+
+
+def _resume_model_checkpoint_path(ckpt_dir: Path) -> Path:
+    return ckpt_dir / RESUME_MODEL_NAME
+
+
+def _resume_vecnormalize_checkpoint_path(ckpt_dir: Path) -> Path:
+    return ckpt_dir / RESUME_VECNORMALIZE_NAME
+
+
+def _candidate_scaler_artifact_path(ckpt_dir: Path, symbol: str) -> Path:
+    return ckpt_dir / f"deployment_candidate_scaler_{symbol.upper()}.pkl"
+
+
+def _load_training_resume_state(
+    *,
+    symbol: str,
+    total_timesteps: int,
+    current_run_path: Path = CURRENT_TRAINING_RUN_PATH,
+) -> dict[str, Any] | None:
+    if not current_run_path.exists():
+        return None
+    try:
+        current_run = json.loads(current_run_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    current_symbol = str(current_run.get("symbol", "")).strip().upper()
+    if current_symbol != symbol.strip().upper():
+        return None
+
+    state = str(current_run.get("state", "")).strip().lower()
+    if state in {"completed", "failed_dataset_integrity", "failed_data_minimums", "failed_baseline_gate"}:
+        return None
+
+    checkpoints_root_raw = current_run.get("checkpoints_root")
+    fold_index = current_run.get("fold_index")
+    if not checkpoints_root_raw or fold_index is None:
+        return None
+
+    checkpoints_root = Path(str(checkpoints_root_raw))
+    ckpt_dir = checkpoints_root / f"fold_{int(fold_index)}"
+    resume_model_path = _resume_model_checkpoint_path(ckpt_dir)
+    if not resume_model_path.exists():
+        best_model_path = ckpt_dir / "best_model.zip"
+        if best_model_path.exists():
+            resume_model_path = best_model_path
+        else:
+            return None
+
+    resume_vecnormalize_path = _resume_vecnormalize_checkpoint_path(ckpt_dir)
+    if not resume_vecnormalize_path.exists():
+        fallback_vecnormalize_path = ckpt_dir / BEST_VECNORMALIZE_NAME
+        resume_vecnormalize_path = fallback_vecnormalize_path if fallback_vecnormalize_path.exists() else None
+
+    run_id = str(current_run.get("run_id") or checkpoints_root.name.replace("run_", "", 1) or checkpoints_root.name)
+    num_timesteps = int(current_run.get("num_timesteps", 0) or 0)
+
+    return {
+        "run_id": run_id,
+        "symbol": current_symbol,
+        "state": state,
+        "checkpoints_root": checkpoints_root,
+        "fold_index": int(fold_index),
+        "model_path": resume_model_path,
+        "vecnormalize_path": resume_vecnormalize_path,
+        "num_timesteps": num_timesteps,
+        "remaining_timesteps_hint": max(int(total_timesteps) - num_timesteps, 0),
+    }
+
+
+def _recover_completed_fold_state(
+    *,
+    run_id: str,
+    checkpoints_root: Path,
+    primary_symbol: str,
+) -> tuple[
+    float,
+    dict[str, Any] | None,
+    tuple[float, float, float] | None,
+    dict[str, Any] | None,
+    Path | None,
+    Path | None,
+    Path | None,
+]:
+    best_observed_sharpe = -np.inf
+    best_observed_summary: dict[str, Any] | None = None
+    candidate_rank: tuple[float, float, float] | None = None
+    candidate_summary: dict[str, Any] | None = None
+    candidate_model_source: Path | None = None
+    candidate_vecnormalize_source: Path | None = None
+    candidate_scaler_source: Path | None = None
+
+    for metrics_path in sorted(checkpoints_root.glob("fold_*/training_diagnostics.json")):
+        try:
+            diagnostics = json.loads(metrics_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        ckpt_dir = metrics_path.parent
+        sharpe = float(diagnostics.get("val_sharpe", -np.inf))
+        if sharpe > best_observed_sharpe:
+            best_observed_sharpe = sharpe
+            best_observed_summary = _build_promoted_training_diagnostics(
+                diagnostics,
+                run_id=run_id,
+                artifact_candidate_selected=False,
+                artifact_candidate_reason="Recovered best-evaluated completed fold from resumed run state.",
+            )
+
+        current_candidate_rank = _deployment_candidate_rank(diagnostics)
+        if current_candidate_rank is None:
+            continue
+        recovered_model_source = ckpt_dir / "deployment_candidate_model.zip"
+        recovered_scaler_source = _candidate_scaler_artifact_path(ckpt_dir, primary_symbol)
+        if not recovered_model_source.exists() or not recovered_scaler_source.exists():
+            continue
+        if candidate_rank is None or current_candidate_rank > candidate_rank:
+            candidate_rank = current_candidate_rank
+            candidate_summary = _build_promoted_training_diagnostics(
+                diagnostics,
+                run_id=run_id,
+                artifact_candidate_selected=True,
+                artifact_candidate_reason="Recovered deployment candidate from completed fold in resumed run.",
+            )
+            candidate_model_source = recovered_model_source
+            recovered_vecnormalize_source = ckpt_dir / "deployment_candidate_vecnormalize.pkl"
+            candidate_vecnormalize_source = (
+                recovered_vecnormalize_source if recovered_vecnormalize_source.exists() else None
+            )
+            candidate_scaler_source = recovered_scaler_source
+
+    return (
+        best_observed_sharpe,
+        best_observed_summary,
+        candidate_rank,
+        candidate_summary,
+        candidate_model_source,
+        candidate_vecnormalize_source,
+        candidate_scaler_source,
+    )
+
+
+def _prime_eval_callback_from_history(eval_cb: FullPathEvalCallback) -> None:
+    if eval_cb.history_path is None or not eval_cb.history_path.exists():
+        return
+    try:
+        payload = json.loads(eval_cb.history_path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    history = list(payload.get("evaluations", []) or [])
+    eval_cb.history = history
+    if history:
+        eval_cb.latest_metrics = history[-1]
+    best_metric = -float("inf")
+    for entry in history:
+        raw_value = entry.get(eval_cb.metric_key, -float("inf"))
+        try:
+            numeric_value = float(raw_value)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(numeric_value) and numeric_value > best_metric:
+            best_metric = numeric_value
+    if np.isfinite(best_metric):
+        eval_cb.best_metric = float(best_metric)
 
 
 def _clear_current_run_artifacts(
@@ -1100,13 +1708,14 @@ def _publish_primary_candidate_artifacts(
     vecnormalize_artifact_path: Path,
     candidate_model_source: Path,
     candidate_vecnormalize_source: Path | None,
-    candidate_scalers: dict[str, StandardScaler],
+    candidate_scaler_source: Path,
     holdout_start_utc: str | None,
     dataset_path: str | Path,
+    execution_cost_profile: dict[str, Any] | None = None,
+    reward_profile: dict[str, Any] | None = None,
 ) -> None:
-    primary_scaler = candidate_scalers.get(primary_symbol)
-    if primary_scaler is None:
-        raise RuntimeError(f"Deployment candidate is missing a scaler for {primary_symbol}.")
+    if not candidate_scaler_source.exists():
+        raise RuntimeError(f"Deployment candidate scaler is missing for {primary_symbol}: {candidate_scaler_source}")
 
     shutil.copyfile(candidate_model_source, model_artifact_path)
     if candidate_vecnormalize_source is not None and candidate_vecnormalize_source.exists():
@@ -1115,8 +1724,8 @@ def _publish_primary_candidate_artifacts(
         vecnormalize_artifact_path.unlink()
 
     primary_scaler_path = Path(f"models/scaler_{primary_symbol}.pkl")
-    joblib.dump(primary_scaler, primary_scaler_path)
-    joblib.dump(primary_scaler, SCALER_PATH)
+    shutil.copyfile(candidate_scaler_source, primary_scaler_path)
+    shutil.copyfile(candidate_scaler_source, SCALER_PATH)
 
     action_map = build_action_map(list(ACTION_SL_MULTS), list(ACTION_TP_MULTS))
     observation_shape = [1, len(FEATURE_COLS) + STATE_FEATURE_COUNT]
@@ -1134,6 +1743,8 @@ def _publish_primary_candidate_artifacts(
         action_map=action_map,
         dataset_path=dataset_path,
         bar_construction_ticks_per_bar=BAR_CONSTRUCTION_TICKS_PER_BAR,
+        execution_cost_profile=execution_cost_profile,
+        reward_profile=reward_profile,
     )
     save_manifest(manifest, Path(f"models/artifact_manifest_{primary_symbol}.json"))
     save_manifest(manifest, Path("models") / DEFAULT_MANIFEST_NAME)
@@ -1143,6 +1754,11 @@ def _publish_primary_candidate_artifacts(
 
 def main() -> None:
     ensure_runtime_dirs()
+    log_config = configure_run_logging(
+        "train_agent",
+        symbol=TRAIN_SYMBOL or None,
+        capture_print=True,
+    )
     if TRAIN_ENV_MODE not in {"runtime", "legacy"}:
         raise RuntimeError(f"Unsupported TRAIN_ENV_MODE={TRAIN_ENV_MODE!r}. Expected 'runtime' or 'legacy'.")
     if TRAIN_ENV_MODE == "legacy":
@@ -1178,6 +1794,13 @@ def main() -> None:
     )
     for warning in vec_env_warnings:
         print(f"[WARN] {warning}")
+    if not TRAIN_LEGACY_REQUIRE_BASELINE_GATE and not TRAIN_DEBUG_ALLOW_BASELINE_BYPASS:
+        print(
+            "[WARN] Ignoring deprecated TRAIN_REQUIRE_BASELINE_GATE=0. "
+            "Use TRAIN_DEBUG_ALLOW_BASELINE_BYPASS=1 for an explicit debug-only bypass."
+        )
+    if TRAIN_DEBUG_ALLOW_BASELINE_BYPASS:
+        print("[WARN] TRAIN_DEBUG_ALLOW_BASELINE_BYPASS=1 disables the baseline gate for debug only.")
     if TRAIN_STARTUP_SMOKE_ONLY:
         print("[StartupSmoke] Runtime setup complete; exiting before data load and training by request.")
         return
@@ -1215,19 +1838,74 @@ def main() -> None:
     model_basename = f"model_{primary_symbol.lower()}_best"
     model_artifact_path = Path("models") / f"{model_basename}.zip"
     vecnormalize_artifact_path = Path("models") / f"{model_basename}_vecnormalize.pkl"
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    run_checkpoints_root = Path("checkpoints") / f"run_{run_id}"
-    run_checkpoints_root.mkdir(parents=True, exist_ok=True)
-    dataset_integrity_report = validate_dataset_integrity(
-        dataset_path=data_path,
-        expected_ticks_per_bar=BAR_CONSTRUCTION_TICKS_PER_BAR,
-        metadata_required=True,
-        symbol=primary_symbol,
+    resume_state = (
+        _load_training_resume_state(
+            symbol=primary_symbol,
+            total_timesteps=TOTAL_TIMESTEPS,
+            current_run_path=CURRENT_TRAINING_RUN_PATH,
+        )
+        if TRAIN_RESUME_LATEST
+        else None
     )
+    if resume_state is not None:
+        run_id = str(resume_state["run_id"])
+        run_checkpoints_root = Path(str(resume_state["checkpoints_root"]))
+        print(
+            f"[Resume] Found resumable run {run_id} for {primary_symbol}: "
+            f"fold={resume_state['fold_index']} checkpoint={resume_state['model_path']}"
+        )
+    else:
+        run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        run_checkpoints_root = Path("checkpoints") / f"run_{run_id}"
+    run_checkpoints_root.mkdir(parents=True, exist_ok=True)
+    set_log_context(symbol=primary_symbol, run_id=run_id)
+    log.info(
+        "Training run context established",
+        extra={
+            "event": "training_run_context",
+            "checkpoint_root": run_checkpoints_root,
+            "text_log_path": log_config.text_log_path,
+            "jsonl_log_path": log_config.jsonl_log_path,
+        },
+    )
+    print(f"[INFO] Text log -> {log_config.text_log_path}")
+    print(f"[INFO] Event log -> {log_config.jsonl_log_path}")
     dataset_integrity_report_path = run_checkpoints_root / "dataset_integrity_report.json"
+    point_in_time_verified = bool(TRAIN_POINT_IN_TIME_VERIFIED)
+    _write_current_training_run_context(
+        run_id=run_id,
+        symbol=primary_symbol,
+        checkpoints_root=run_checkpoints_root,
+        state="validating_dataset_integrity",
+        dataset_integrity_report_path=dataset_integrity_report_path,
+    )
+    try:
+        dataset_integrity_report = validate_dataset_integrity(
+            dataset_path=data_path,
+            expected_ticks_per_bar=BAR_CONSTRUCTION_TICKS_PER_BAR,
+            metadata_required=True,
+            symbol=primary_symbol,
+        )
+    except Exception as exc:
+        dataset_integrity_report = {
+            "passed": False,
+            "dataset_path": str(data_path),
+            "expected_ticks_per_bar": int(BAR_CONSTRUCTION_TICKS_PER_BAR),
+            "symbol": primary_symbol,
+            "error": str(exc),
+        }
+        save_json_report(dataset_integrity_report, dataset_integrity_report_path)
+        _write_current_training_run_context(
+            run_id=run_id,
+            symbol=primary_symbol,
+            checkpoints_root=run_checkpoints_root,
+            state="failed_dataset_integrity",
+            dataset_integrity_report_path=dataset_integrity_report_path,
+            dataset_integrity_verified=False,
+        )
+        raise
     save_json_report(dataset_integrity_report, dataset_integrity_report_path)
     dataset_integrity_verified = bool(TRAIN_DATASET_INTEGRITY_VERIFIED or dataset_integrity_report.get("passed", False))
-    point_in_time_verified = bool(TRAIN_POINT_IN_TIME_VERIFIED)
     integrity_symbol_report = dataset_integrity_report["symbol_reports"].get(primary_symbol, {})
     print(
         "[INFO] Dataset integrity OK "
@@ -1236,7 +1914,7 @@ def main() -> None:
         f"max_gap_hours={integrity_symbol_report.get('max_gap_hours', 0.0):.2f}"
     )
     print(f"[INFO] Dataset integrity report -> {dataset_integrity_report_path}")
-    legacy_checkpoint_archives = _clear_legacy_checkpoint_artifacts(run_id=run_id)
+    legacy_checkpoint_archives = [] if resume_state is not None else _clear_legacy_checkpoint_artifacts(run_id=run_id)
     if legacy_checkpoint_archives:
         print(
             f"[INFO] Archived {len(legacy_checkpoint_archives)} legacy checkpoint artifacts "
@@ -1247,6 +1925,8 @@ def main() -> None:
         symbol=primary_symbol,
         checkpoints_root=run_checkpoints_root,
         state="starting",
+        dataset_integrity_report_path=dataset_integrity_report_path,
+        dataset_integrity_verified=dataset_integrity_verified,
     )
 
     # ── Config ───────────────────────────────────────────────────────────────
@@ -1315,6 +1995,8 @@ def main() -> None:
             symbol=primary_symbol,
             checkpoints_root=run_checkpoints_root,
             state="failed_data_minimums",
+            dataset_integrity_report_path=dataset_integrity_report_path,
+            dataset_integrity_verified=dataset_integrity_verified,
         )
         raise RuntimeError(
             "No symbols had enough data. "
@@ -1322,27 +2004,36 @@ def main() -> None:
             f"val>={minimums['min_val_bars']}, holdout>={minimums['min_holdout_bars']} bars."
         )
     feature_cols = FEATURE_COLS
+    baseline_report_path = run_checkpoints_root / f"baseline_diagnostics_{primary_symbol}.json"
     baseline_report = run_baseline_research_gate(
         symbol=primary_symbol,
         trainable_frame=sym_trainable_frames[primary_symbol],
         holdout_frame=sym_holdout_frames[primary_symbol],
         folds=sym_folds[primary_symbol],
         feature_cols=feature_cols,
-        out_path=Path("models") / f"baseline_diagnostics_{primary_symbol}.json",
+        out_path=baseline_report_path,
         horizon_bars=BASELINE_TARGET_HORIZON_BARS,
     )
     print(
         f"[BaselineGate] symbol={primary_symbol} gate_passed={baseline_report['gate_passed']} "
         f"passing_models={baseline_report.get('passing_models', [])}"
     )
-    if TRAIN_REQUIRE_BASELINE_GATE and not bool(baseline_report["gate_passed"]):
+    if not TRAIN_DEBUG_ALLOW_BASELINE_BYPASS and not bool(baseline_report["gate_passed"]):
         _write_current_training_run_context(
             run_id=run_id,
             symbol=primary_symbol,
             checkpoints_root=run_checkpoints_root,
             state="failed_baseline_gate",
+            dataset_integrity_report_path=dataset_integrity_report_path,
+            dataset_integrity_verified=dataset_integrity_verified,
+            baseline_report_path=baseline_report_path,
         )
         raise RuntimeError("RL not justified: baseline gate failed.")
+
+    execution_cost_profile = build_execution_cost_profile(
+        slippage_pips=get_final_slippage_pips(TRAINING_RECOVERY_CONFIG)
+    )
+    reward_profile = build_reward_profile()
 
     archived_paths = _clear_current_run_artifacts(
         primary_symbol=primary_symbol,
@@ -1357,15 +2048,37 @@ def main() -> None:
         )
 
     # ── Training across folds ─────────────────────────────────────────────────
-    best_observed_sharpe = -np.inf
-    best_observed_summary: dict[str, Any] | None = None
-    candidate_rank: tuple[float, float] | None = None
-    candidate_summary: dict[str, Any] | None = None
-    candidate_scalers: dict[str, StandardScaler] = {}
-    candidate_model_source: Path | None = None
-    candidate_vecnormalize_source: Path | None = None
+    resume_fold_index = int(resume_state["fold_index"]) if resume_state is not None else 0
+    if resume_state is not None:
+        (
+            best_observed_sharpe,
+            best_observed_summary,
+            candidate_rank,
+            candidate_summary,
+            candidate_model_source,
+            candidate_vecnormalize_source,
+            candidate_scaler_source,
+        ) = _recover_completed_fold_state(
+            run_id=run_id,
+            checkpoints_root=run_checkpoints_root,
+            primary_symbol=primary_symbol,
+        )
+        recovered_folds = len(list(run_checkpoints_root.glob("fold_*/training_diagnostics.json")))
+        if recovered_folds:
+            print(f"[Resume] Recovered {recovered_folds} completed fold diagnostics from {run_checkpoints_root}.")
+    else:
+        best_observed_sharpe = -np.inf
+        best_observed_summary = None
+        candidate_rank = None
+        candidate_summary = None
+        candidate_model_source = None
+        candidate_vecnormalize_source = None
+        candidate_scaler_source = None
 
     for fold_idx in range(N_FOLDS):
+        if resume_state is not None and fold_idx < resume_fold_index:
+            print(f"[Resume] Skipping completed fold {fold_idx}.")
+            continue
         print(f"\n{'='*60}")
         print(f"FOLD {fold_idx + 1} / {N_FOLDS}")
         print(f"{'='*60}")
@@ -1388,6 +2101,9 @@ def main() -> None:
         print(f"  Train: {len(train_df):,} bars  |  Val (purged): {len(val_df):,} bars")
 
         # Parallel training envs — starts with 0 slippage (Curriculum Phase 1)
+        train_recovery_cfg = build_train_env_recovery_config(TRAINING_RECOVERY_CONFIG, env_workers=effective_envs)
+        initial_curriculum_slippage = get_current_slippage_pips(0, TRAINING_RECOVERY_CONFIG)
+        final_curriculum_slippage = get_final_slippage_pips(TRAINING_RECOVERY_CONFIG)
         sym_list = list(sym_folds.keys())
         def make_parallel(rank: int):
             sym = sym_list[rank % len(sym_list)]
@@ -1405,9 +2121,10 @@ def main() -> None:
                 SL_OPTS,
                 TP_OPTS,
                 random_start=True,
-                initial_slippage=SLIPPAGE_START,
+                initial_slippage=initial_curriculum_slippage,
                 symbol=sym,
                 scaler=fold_scaler,
+                recovery_config=train_recovery_cfg if TRAIN_ENV_MODE == "runtime" else None,
             )
 
         val_symbol = primary_symbol
@@ -1436,12 +2153,33 @@ def main() -> None:
 
         train_fns = [make_parallel(i) for i in range(effective_envs)]
         if vec_env_type == "dummy":
-            train_vec = DummyVecEnv(train_fns)
+            train_base_vec = DummyVecEnv(train_fns)
         else:
-            train_vec = SubprocVecEnv(train_fns)
-        train_vec = wrap_vecnormalize(train_vec, training=True)
+            train_base_vec = SubprocVecEnv(train_fns)
 
-        def build_single_eval_base_vec(source_frame: pd.DataFrame, scaler: StandardScaler | None):
+        ckpt_dir = run_checkpoints_root / f"fold_{fold_idx}"
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+        best_vecnormalize_path = ckpt_dir / BEST_VECNORMALIZE_NAME
+        resume_model_path = _resume_model_checkpoint_path(ckpt_dir)
+        resume_vecnormalize_path = _resume_vecnormalize_checkpoint_path(ckpt_dir)
+        resume_current_fold = bool(
+            resume_state is not None
+            and fold_idx == resume_fold_index
+            and Path(str(resume_state["model_path"])).exists()
+        )
+        if resume_current_fold and resume_state.get("vecnormalize_path") is not None:
+            train_vec = VecNormalize.load(str(resume_state["vecnormalize_path"]), train_base_vec)
+            train_vec.training = True
+            train_vec.norm_reward = False
+        else:
+            train_vec = wrap_vecnormalize(train_base_vec, training=True)
+
+        def build_single_eval_base_vec(
+            source_frame: pd.DataFrame,
+            scaler: StandardScaler | None,
+            *,
+            slippage_pips: float,
+        ):
             return DummyVecEnv(
                 [
                     make_env(
@@ -1450,24 +2188,34 @@ def main() -> None:
                         SL_OPTS,
                         TP_OPTS,
                         random_start=False,
-                        initial_slippage=SLIPPAGE_END,
+                        initial_slippage=slippage_pips,
                         symbol=val_symbol,
                         scaler=scaler,
+                        recovery_config=None,
                     )
                 ]
             )
 
-        def build_single_eval_vec(source_frame: pd.DataFrame, scaler: StandardScaler | None):
-            return wrap_vecnormalize(build_single_eval_base_vec(source_frame, scaler), training=False)
+        def build_single_eval_vec(
+            source_frame: pd.DataFrame,
+            scaler: StandardScaler | None,
+            *,
+            slippage_pips: float,
+        ):
+            return wrap_vecnormalize(
+                build_single_eval_base_vec(source_frame, scaler, slippage_pips=slippage_pips),
+                training=False,
+            )
 
-        val_vec = build_single_eval_vec(val_source, val_scaler)
-        holdout_vec = build_single_eval_vec(holdout_source, holdout_scaler)
+        val_vec = build_single_eval_vec(val_source, val_scaler, slippage_pips=final_curriculum_slippage)
+        holdout_vec = build_single_eval_vec(
+            holdout_source,
+            holdout_scaler,
+            slippage_pips=final_curriculum_slippage,
+        )
         sync_vecnormalize_stats(train_vec, val_vec)
         sync_vecnormalize_stats(train_vec, holdout_vec)
 
-        ckpt_dir = run_checkpoints_root / f"fold_{fold_idx}"
-        ckpt_dir.mkdir(parents=True, exist_ok=True)
-        best_vecnormalize_path = ckpt_dir / BEST_VECNORMALIZE_NAME
         _write_current_training_run_context(
             run_id=run_id,
             symbol=primary_symbol,
@@ -1475,30 +2223,52 @@ def main() -> None:
             state="training",
             fold_index=fold_idx,
             heartbeat_path=ckpt_dir / "training_heartbeat.json",
+            dataset_integrity_report_path=dataset_integrity_report_path,
+            dataset_integrity_verified=dataset_integrity_verified,
+            baseline_report_path=baseline_report_path,
         )
 
         tensorboard_log = "./tensorboard_log" if importlib.util.find_spec("tensorboard") is not None else None
 
-        model = MaskablePPO(
-            "MlpPolicy",
-            train_vec,
-            verbose=1,
-            learning_rate=linear_schedule(PPO_LEARNING_RATE, PPO_MIN_LEARNING_RATE),
-            n_steps=PPO_N_STEPS,
-            batch_size=PPO_BATCH_SIZE,
-            n_epochs=PPO_N_EPOCHS,
-            ent_coef=PPO_ENT_COEF,
-            target_kl=PPO_TARGET_KL,
-            policy_kwargs=dict(net_arch=dict(pi=[POLICY_WIDTH, POLICY_WIDTH], vf=[256, 256, 128])),
-            tensorboard_log=tensorboard_log,
-            device=device,
-            seed=SEED + fold_idx,   # different seed per fold
-        )
+        if resume_current_fold:
+            model = MaskablePPO.load(str(resume_state["model_path"]), env=train_vec, device=device)
+            remaining_timesteps = max(TOTAL_TIMESTEPS - int(getattr(model, "num_timesteps", 0) or 0), 0)
+            print(
+                f"[Resume] Loaded fold {fold_idx} checkpoint {resume_state['model_path']} | "
+                f"num_timesteps={int(getattr(model, 'num_timesteps', 0) or 0):,} | "
+                f"remaining={remaining_timesteps:,}"
+            )
+        else:
+            model = MaskablePPO(
+                "MlpPolicy",
+                train_vec,
+                verbose=1,
+                learning_rate=linear_schedule(PPO_LEARNING_RATE, PPO_MIN_LEARNING_RATE),
+                n_steps=PPO_N_STEPS,
+                batch_size=PPO_BATCH_SIZE,
+                n_epochs=PPO_N_EPOCHS,
+                ent_coef=get_current_ent_coef(0, TRAINING_RECOVERY_CONFIG),
+                target_kl=PPO_TARGET_KL,
+                policy_kwargs=dict(net_arch=dict(pi=[POLICY_WIDTH, POLICY_WIDTH], vf=[256, 256, 128])),
+                tensorboard_log=tensorboard_log,
+                device=device,
+                seed=SEED + fold_idx,   # different seed per fold
+            )
+            remaining_timesteps = TOTAL_TIMESTEPS
 
         # Callbacks: curriculum annealing + checkpoint + eval
-        curriculum_cb = CurriculumCallback(TOTAL_TIMESTEPS, verbose=1)
+        curriculum_cb = CurriculumCallback(
+            TRAINING_RECOVERY_CONFIG,
+            train_env=train_vec,
+            verbose=1,
+        )
         diagnostics_cb = TrainingDiagnosticsCallback(verbose=int(os.environ.get("TRAIN_PROGRESS_VERBOSE", "1")))
-        heartbeat_every = int(os.environ.get("TRAIN_HEARTBEAT_EVERY_STEPS", "5000"))
+        heartbeat_default_steps = (
+            max(int((TRAINING_RECOVERY_CONFIG.get("diagnostics", {}) or {}).get("heartbeat_every_n_updates", 10)), 1)
+            * PPO_N_STEPS
+            * max(effective_envs, 1)
+        )
+        heartbeat_every = int(os.environ.get("TRAIN_HEARTBEAT_EVERY_STEPS", str(heartbeat_default_steps)))
         eval_cb = FullPathEvalCallback(
             val_vec,
             train_vecnormalize=train_vec,
@@ -1509,9 +2279,12 @@ def main() -> None:
             eval_freq=max(TRAIN_EVAL_FREQ // max(effective_envs, 1), 1),
             verbose=1,
         )
+        if resume_current_fold:
+            _prime_eval_callback_from_history(eval_cb)
         heartbeat_cb = TrainingHeartbeatCallback(
             out_path=Path(ckpt_dir) / "training_heartbeat.json",
             diagnostics_cb=diagnostics_cb,
+            curriculum_cb=curriculum_cb,
             eval_cb=eval_cb,
             run_id=run_id,
             symbol=primary_symbol,
@@ -1519,15 +2292,24 @@ def main() -> None:
             fold_index=fold_idx,
             every_steps=heartbeat_every,
             total_timesteps=TOTAL_TIMESTEPS,
+            dataset_integrity_report_path=dataset_integrity_report_path,
+            dataset_integrity_verified=dataset_integrity_verified,
+            baseline_report_path=baseline_report_path,
+            resume_model_path=resume_model_path,
+            resume_vecnormalize_path=resume_vecnormalize_path,
             verbose=0,
         )
 
-        model.learn(
-            total_timesteps=TOTAL_TIMESTEPS,
-            callback=[curriculum_cb, diagnostics_cb, eval_cb, heartbeat_cb],
-            log_interval=max(TRAIN_LOG_INTERVAL, 1),
-            tb_log_name=f"{primary_symbol.lower()}_fold_{fold_idx}",
-        )
+        if remaining_timesteps > 0:
+            model.learn(
+                total_timesteps=remaining_timesteps,
+                callback=[curriculum_cb, diagnostics_cb, eval_cb, heartbeat_cb],
+                log_interval=max(TRAIN_LOG_INTERVAL, 1),
+                tb_log_name=f"{primary_symbol.lower()}_fold_{fold_idx}",
+                reset_num_timesteps=not resume_current_fold,
+            )
+        else:
+            print(f"[Resume] Fold {fold_idx} already reached the requested total timesteps; skipping learn().")
 
         if not best_vecnormalize_path.exists():
             train_vec.save(str(best_vecnormalize_path))
@@ -1538,10 +2320,20 @@ def main() -> None:
         if best_vecnormalize_path.exists():
             val_vec.close()
             holdout_vec.close()
-            val_vec = VecNormalize.load(str(best_vecnormalize_path), build_single_eval_base_vec(val_source, val_scaler))
+            val_vec = VecNormalize.load(
+                str(best_vecnormalize_path),
+                build_single_eval_base_vec(val_source, val_scaler, slippage_pips=final_curriculum_slippage),
+            )
             val_vec.training = False
             val_vec.norm_reward = False
-            holdout_vec = VecNormalize.load(str(best_vecnormalize_path), build_single_eval_base_vec(holdout_source, holdout_scaler))
+            holdout_vec = VecNormalize.load(
+                str(best_vecnormalize_path),
+                build_single_eval_base_vec(
+                    holdout_source,
+                    holdout_scaler,
+                    slippage_pips=final_curriculum_slippage,
+                ),
+            )
             holdout_vec.training = False
             holdout_vec.norm_reward = False
 
@@ -1594,6 +2386,9 @@ def main() -> None:
         diagnostics["holdout_expectancy"] = float(holdout_expectancy)
         diagnostics["holdout_trade_count"] = int(holdout_trade_count)
         diagnostics["baseline_gate_passed"] = bool(baseline_report["gate_passed"])
+        diagnostics["baseline_gate_bypassed_debug"] = bool(TRAIN_DEBUG_ALLOW_BASELINE_BYPASS)
+        diagnostics["baseline_target_horizon_bars"] = int(BASELINE_TARGET_HORIZON_BARS)
+        diagnostics["baseline_report_path"] = str(baseline_report_path)
         diagnostics["eval_protocol_valid"] = True
         diagnostics["full_path_eval_used"] = True
         diagnostics["full_path_validation_metrics"] = evaluation_metrics
@@ -1608,6 +2403,8 @@ def main() -> None:
         diagnostics["point_in_time_verified"] = bool(point_in_time_verified)
         diagnostics["dataset_integrity_verified"] = bool(dataset_integrity_verified)
         diagnostics["dataset_integrity_report_path"] = str(dataset_integrity_report_path)
+        diagnostics["execution_cost_profile"] = dict(execution_cost_profile)
+        diagnostics["reward_profile"] = dict(reward_profile)
         diagnostics["env_workers"] = int(effective_envs)
         diagnostics["vec_env_type"] = vec_env_type
         diagnostics["bar_construction_ticks_per_bar"] = int(BAR_CONSTRUCTION_TICKS_PER_BAR)
@@ -1675,9 +2472,13 @@ def main() -> None:
                 artifact_candidate_selected=True,
                 artifact_candidate_reason="Selected deployment artifact candidate from the current run.",
             )
-            candidate_scalers = fold_scalers
             candidate_model_source = ckpt_dir / "deployment_candidate_model.zip"
+            candidate_scaler_source = _candidate_scaler_artifact_path(ckpt_dir, primary_symbol)
             fold_model.save(str(candidate_model_source.with_suffix("")))
+            primary_scaler = fold_scalers.get(primary_symbol)
+            if primary_scaler is None:
+                raise RuntimeError(f"Deployment candidate is missing a scaler for {primary_symbol}.")
+            joblib.dump(primary_scaler, candidate_scaler_source)
             if best_vecnormalize_path.exists():
                 candidate_vecnormalize_source = ckpt_dir / "deployment_candidate_vecnormalize.pkl"
                 shutil.copyfile(best_vecnormalize_path, candidate_vecnormalize_source)
@@ -1708,20 +2509,25 @@ def main() -> None:
         symbol=primary_symbol,
         checkpoints_root=run_checkpoints_root,
         state="completed",
+        dataset_integrity_report_path=dataset_integrity_report_path,
+        dataset_integrity_verified=dataset_integrity_verified,
+        baseline_report_path=baseline_report_path,
     )
     report_paths = deployment_paths(primary_symbol)
     save_json_report(canonical_summary, report_paths.diagnostics_path)
     print(f"Canonical diagnostics -> {report_paths.diagnostics_path}")
-    if candidate_summary is not None and candidate_model_source is not None:
+    if candidate_summary is not None and candidate_model_source is not None and candidate_scaler_source is not None:
         _publish_primary_candidate_artifacts(
             primary_symbol=primary_symbol,
             model_artifact_path=model_artifact_path,
             vecnormalize_artifact_path=vecnormalize_artifact_path,
             candidate_model_source=candidate_model_source,
             candidate_vecnormalize_source=candidate_vecnormalize_source,
-            candidate_scalers=candidate_scalers,
+            candidate_scaler_source=candidate_scaler_source,
             holdout_start_utc=holdout_starts.get(primary_symbol),
             dataset_path=data_path,
+            execution_cost_profile=execution_cost_profile,
+            reward_profile=reward_profile,
         )
         print(f"Deployment candidate saved -> {model_artifact_path}")
     else:

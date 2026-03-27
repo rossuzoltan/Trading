@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import unittest
 from pathlib import Path
@@ -63,14 +64,15 @@ class TelemetryHardeningTests(unittest.TestCase):
         self.assertIn("schema_mismatch", legacy["contamination_reasons"])
 
     def test_monitor_throughput_prefers_rolling_and_falls_back_to_lifetime(self):
-        command = r"""
+        monitor_ps1 = str(ROOT / "monitor_training.ps1")
+        command = fr"""
         $env:TRAINING_TELEMETRY_TEST = '1'
-        . 'C:\dev\trading\monitor_training.ps1' -NoLoop
-        $current = [pscustomobject]@{ timestamp_utc = '2026-03-26T00:00:10+00:00'; num_timesteps = 200 }
-        $previous = [pscustomobject]@{ timestamp_utc = '2026-03-26T00:00:05+00:00'; num_timesteps = 100 }
+        . '{monitor_ps1}' -NoLoop
+        $current = [pscustomobject]@{{ timestamp_utc = '2026-03-26T00:00:10+00:00'; num_timesteps = 200 }}
+        $previous = [pscustomobject]@{{ timestamp_utc = '2026-03-26T00:00:05+00:00'; num_timesteps = 100 }}
         $rolling = Get-HeartbeatThroughput -CurrentHeartbeat $current -PreviousHeartbeat $previous -NowUtc ([datetime]::Parse('2026-03-26T00:00:10Z').ToUniversalTime()) -ProcessStartTime ([datetime]::Parse('2026-03-26T00:00:00Z').ToUniversalTime()) -TotalTimesteps 1000
         $lifetime = Get-HeartbeatThroughput -CurrentHeartbeat $current -PreviousHeartbeat $null -NowUtc ([datetime]::Parse('2026-03-26T00:00:10Z').ToUniversalTime()) -ProcessStartTime ([datetime]::Parse('2026-03-26T00:00:00Z').ToUniversalTime()) -TotalTimesteps 1000
-        [pscustomobject]@{ rolling = $rolling; lifetime = $lifetime } | ConvertTo-Json -Compress -Depth 5
+        [pscustomobject]@{{ rolling = $rolling; lifetime = $lifetime }} | ConvertTo-Json -Compress -Depth 5
         """
         payload = run_powershell_json(command)
         self.assertEqual("rolling", payload["rolling"]["mode"])
@@ -80,17 +82,18 @@ class TelemetryHardeningTests(unittest.TestCase):
         self.assertIn("20", str(payload["rolling"]["speed_text"]))
 
     def test_watch_classifies_healthy_no_progress_and_stale(self):
-        command = r"""
+        watch_ps1 = str(ROOT / "watch_training.ps1")
+        command = fr"""
         $env:TRAINING_TELEMETRY_TEST = '1'
-        . 'C:\dev\trading\watch_training.ps1' -NoLoop
-        $fresh = [pscustomobject]@{ timestamp_utc = '2026-03-26T00:00:10+00:00'; num_timesteps = 200 }
-        $previous = [pscustomobject]@{ timestamp_utc = '2026-03-26T00:00:05+00:00'; num_timesteps = 100 }
-        $same_steps = [pscustomobject]@{ timestamp_utc = '2026-03-26T00:00:10+00:00'; num_timesteps = 100 }
-        $stale = [pscustomobject]@{ timestamp_utc = '2026-03-25T23:58:30+00:00'; num_timesteps = 200 }
+        . '{watch_ps1}' -NoLoop
+        $fresh = [pscustomobject]@{{ timestamp_utc = '2026-03-26T00:00:10+00:00'; num_timesteps = 200 }}
+        $previous = [pscustomobject]@{{ timestamp_utc = '2026-03-26T00:00:05+00:00'; num_timesteps = 100 }}
+        $same_steps = [pscustomobject]@{{ timestamp_utc = '2026-03-26T00:00:10+00:00'; num_timesteps = 100 }}
+        $stale = [pscustomobject]@{{ timestamp_utc = '2026-03-25T23:58:30+00:00'; num_timesteps = 200 }}
         $healthy = Get-HeartbeatStatus -Heartbeat $fresh -PreviousHeartbeat $previous -NowUtc ([datetime]::Parse('2026-03-26T00:00:10Z').ToUniversalTime()) -StaleAfterSeconds 30
         $noProgress = Get-HeartbeatStatus -Heartbeat $same_steps -PreviousHeartbeat $previous -NowUtc ([datetime]::Parse('2026-03-26T00:00:10Z').ToUniversalTime()) -StaleAfterSeconds 30
         $staleStatus = Get-HeartbeatStatus -Heartbeat $stale -PreviousHeartbeat $previous -NowUtc ([datetime]::Parse('2026-03-26T00:00:10Z').ToUniversalTime()) -StaleAfterSeconds 30
-        [pscustomobject]@{ healthy = $healthy; no_progress = $noProgress; stale = $staleStatus } | ConvertTo-Json -Compress -Depth 5
+        [pscustomobject]@{{ healthy = $healthy; no_progress = $noProgress; stale = $staleStatus }} | ConvertTo-Json -Compress -Depth 5
         """
         payload = run_powershell_json(command)
         self.assertEqual("healthy", payload["healthy"]["status"])
@@ -129,11 +132,7 @@ class TelemetryHardeningTests(unittest.TestCase):
             self.assertIsNotNone(context)
             self.assertEqual(current_root / "training_heartbeat.json", heartbeat_path)
         finally:
-            for child in sorted(tmpdir.rglob("*"), reverse=True):
-                if child.is_file():
-                    child.unlink()
-                elif child.is_dir():
-                    child.rmdir()
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 if __name__ == "__main__":

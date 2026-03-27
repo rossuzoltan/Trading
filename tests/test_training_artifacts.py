@@ -7,13 +7,21 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
+from artifact_manifest import create_manifest, load_manifest, save_manifest
+from evaluate_oos import _resolve_execution_cost_profile, _resolve_reward_profile
+from runtime_common import ActionSpec, ActionType
 from train_agent import (
     TrainingDiagnosticsCallback,
     _archive_paths,
     _build_promoted_training_diagnostics,
+    _candidate_scaler_artifact_path,
     _clear_legacy_checkpoint_artifacts,
     _deployment_candidate_rank,
     _holdout_deployment_blockers,
+    _load_training_resume_state,
+    _recover_completed_fold_state,
+    _resume_model_checkpoint_path,
+    _resume_vecnormalize_checkpoint_path,
 )
 
 
@@ -147,6 +155,171 @@ class TrainingArtifactTests(unittest.TestCase):
             }
         )
         self.assertGreater(strong, weak)
+
+    def test_load_training_resume_state_uses_current_run_checkpoint_paths(self):
+        tmpdir = make_test_dir("resume_state")
+        try:
+            checkpoints_root = tmpdir / "run_resume"
+            ckpt_dir = checkpoints_root / "fold_1"
+            ckpt_dir.mkdir(parents=True, exist_ok=True)
+            resume_model_path = _resume_model_checkpoint_path(ckpt_dir)
+            resume_vecnormalize_path = _resume_vecnormalize_checkpoint_path(ckpt_dir)
+            resume_model_path.write_bytes(b"model")
+            resume_vecnormalize_path.write_bytes(b"vec")
+            current_run_path = tmpdir / "current_training_run.json"
+            current_run_path.write_text(
+                json.dumps(
+                    {
+                        "run_id": "run-resume",
+                        "symbol": "GBPUSD",
+                        "checkpoints_root": str(checkpoints_root),
+                        "fold_index": 1,
+                        "state": "training",
+                        "num_timesteps": 12345,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            state = _load_training_resume_state(
+                symbol="GBPUSD",
+                total_timesteps=50000,
+                current_run_path=current_run_path,
+            )
+
+            self.assertIsNotNone(state)
+            self.assertEqual("run-resume", state["run_id"])
+            self.assertEqual(1, state["fold_index"])
+            self.assertEqual(resume_model_path, state["model_path"])
+            self.assertEqual(resume_vecnormalize_path, state["vecnormalize_path"])
+            self.assertEqual(50000 - 12345, state["remaining_timesteps_hint"])
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_recover_completed_fold_state_reuses_prior_candidate_artifacts(self):
+        tmpdir = make_test_dir("recover_fold_state")
+        try:
+            checkpoints_root = tmpdir / "run_resume"
+            fold_dir = checkpoints_root / "fold_0"
+            fold_dir.mkdir(parents=True, exist_ok=True)
+            diagnostics = {
+                "deploy_ready": True,
+                "val_sharpe": 0.45,
+                "holdout_sharpe": 0.55,
+                "holdout_profit_factor": 1.20,
+                "bar_construction_ticks_per_bar": 2000,
+            }
+            (fold_dir / "training_diagnostics.json").write_text(
+                json.dumps(diagnostics),
+                encoding="utf-8",
+            )
+            candidate_model_path = fold_dir / "deployment_candidate_model.zip"
+            candidate_model_path.write_bytes(b"model")
+            candidate_scaler_path = _candidate_scaler_artifact_path(fold_dir, "EURUSD")
+            candidate_scaler_path.write_bytes(b"scaler")
+
+            (
+                best_observed_sharpe,
+                best_observed_summary,
+                candidate_rank,
+                candidate_summary,
+                candidate_model_source,
+                _candidate_vecnormalize_source,
+                candidate_scaler_source,
+            ) = _recover_completed_fold_state(
+                run_id="run-resume",
+                checkpoints_root=checkpoints_root,
+                primary_symbol="EURUSD",
+            )
+
+            self.assertAlmostEqual(0.45, best_observed_sharpe)
+            self.assertIsNotNone(best_observed_summary)
+            self.assertEqual((0.55, 1.20, 0.45), candidate_rank)
+            self.assertIsNotNone(candidate_summary)
+            self.assertEqual(candidate_model_path, candidate_model_source)
+            self.assertEqual(candidate_scaler_path, candidate_scaler_source)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_manifest_persists_execution_and_reward_profiles(self):
+        tmpdir = make_test_dir("manifest_profiles")
+        try:
+            model_path = tmpdir / "model.zip"
+            scaler_path = tmpdir / "scaler.pkl"
+            dataset_path = tmpdir / "dataset.csv"
+            model_path.write_bytes(b"model")
+            scaler_path.write_bytes(b"scaler")
+            dataset_path.write_text("Gmt time,Symbol,Open,High,Low,Close,Volume\n", encoding="utf-8")
+
+            manifest = create_manifest(
+                strategy_symbol="EURUSD",
+                model_path=model_path,
+                scaler_path=scaler_path,
+                model_version="test-v1",
+                feature_columns=["feature"],
+                observation_shape=[1, 1],
+                action_map=[ActionSpec(ActionType.HOLD)],
+                dataset_path=dataset_path,
+                execution_cost_profile={
+                    "commission_per_lot": 7.0,
+                    "slippage_pips": 0.5,
+                    "partial_fill_ratio": 1.0,
+                },
+                reward_profile={
+                    "reward_scale": 10000.0,
+                    "drawdown_penalty": 2.0,
+                    "transaction_penalty": 1.0,
+                    "reward_clip_low": -5.0,
+                    "reward_clip_high": 5.0,
+                },
+            )
+            manifest_path = tmpdir / "artifact_manifest.json"
+            save_manifest(manifest, manifest_path)
+
+            reloaded = load_manifest(manifest_path)
+
+            self.assertEqual(manifest.execution_cost_profile, reloaded.execution_cost_profile)
+            self.assertEqual(manifest.reward_profile, reloaded.reward_profile)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_evaluate_oos_profile_helpers_fall_back_and_read_manifest_overrides(self):
+        manifest = SimpleNamespace(
+            execution_cost_profile={"commission_per_lot": 6.5, "slippage_pips": 0.5, "partial_fill_ratio": 0.75},
+            reward_profile={
+                "reward_scale": 9000.0,
+                "drawdown_penalty": 1.5,
+                "transaction_penalty": 0.8,
+                "reward_clip_low": -4.0,
+                "reward_clip_high": 4.0,
+            },
+        )
+        self.assertEqual(
+            {
+                "commission_per_lot": 6.5,
+                "slippage_pips": 0.5,
+                "partial_fill_ratio": 0.75,
+            },
+            _resolve_execution_cost_profile(manifest),
+        )
+        self.assertEqual(
+            {
+                "reward_scale": 9000.0,
+                "drawdown_penalty": 1.5,
+                "transaction_penalty": 0.8,
+                "reward_clip_low": -4.0,
+                "reward_clip_high": 4.0,
+            },
+            _resolve_reward_profile(manifest),
+        )
+        self.assertEqual(
+            {
+                "commission_per_lot": 7.0,
+                "slippage_pips": 0.25,
+                "partial_fill_ratio": 1.0,
+            },
+            _resolve_execution_cost_profile(SimpleNamespace(execution_cost_profile=None)),
+        )
 
 
 if __name__ == "__main__":

@@ -25,6 +25,119 @@ def make_test_dir(name: str) -> Path:
 
 
 class LiveReadinessTests(unittest.TestCase):
+    def test_live_broker_normalizes_open_price_and_protective_levels_to_broker_tick_size(self):
+        sent_requests: list[dict] = []
+
+        class FakeMt5Broker:
+            ORDER_TYPE_BUY = 0
+            ORDER_TYPE_SELL = 1
+            TRADE_ACTION_DEAL = 1
+            ORDER_TIME_GTC = 0
+            ORDER_FILLING_IOC = 1
+            ORDER_FILLING_FOK = 2
+            ORDER_FILLING_RETURN = 3
+            TRADE_RETCODE_DONE = 10009
+            SYMBOL_TRADE_MODE_FULL = 4
+
+            def terminal_info(self):
+                return SimpleNamespace(trade_allowed=True)
+
+            def account_info(self):
+                return SimpleNamespace(trade_allowed=True)
+
+            def symbol_info_tick(self, symbol):
+                return SimpleNamespace(bid=1.10002, ask=1.10012)
+
+            def symbol_info(self, symbol):
+                return SimpleNamespace(
+                    point=0.00001,
+                    digits=5,
+                    visible=True,
+                    volume_min=0.01,
+                    volume_max=100.0,
+                    volume_step=0.01,
+                    trade_stops_level=5,
+                    trade_freeze_level=0,
+                    trade_tick_size=0.00005,
+                    trade_tick_value=1.0,
+                    trade_contract_size=100000.0,
+                    trade_mode=self.SYMBOL_TRADE_MODE_FULL,
+                )
+
+            def order_send(self, request):
+                sent_requests.append(dict(request))
+                return SimpleNamespace(retcode=self.TRADE_RETCODE_DONE, order=123, price=request.get("price", 0.0))
+
+        broker = live_bridge.LiveMt5Broker(FakeMt5Broker(), symbol="EURUSD")
+        result = broker.submit_order(
+            live_bridge.OrderIntent(
+                symbol="EURUSD",
+                action=live_bridge.ActionSpec(live_bridge.ActionType.OPEN, direction=1),
+                volume=0.031,
+                submitted_time_msc=0,
+                requested_price=1.10011,
+                sl_price=1.09987,
+                tp_price=1.10088,
+            )
+        )
+        self.assertTrue(result.accepted)
+        self.assertEqual(1, len(sent_requests))
+        self.assertEqual(1.10010, sent_requests[0]["price"])
+        self.assertEqual(1.09985, sent_requests[0]["sl"])
+        self.assertEqual(1.10090, sent_requests[0]["tp"])
+        self.assertEqual(0.03, sent_requests[0]["volume"])
+
+    def test_live_broker_rejects_open_when_symbol_trade_mode_blocks_new_orders(self):
+        class FakeMt5Broker:
+            ORDER_TYPE_BUY = 0
+            ORDER_TYPE_SELL = 1
+            TRADE_ACTION_DEAL = 1
+            ORDER_TIME_GTC = 0
+            ORDER_FILLING_IOC = 1
+            ORDER_FILLING_FOK = 2
+            ORDER_FILLING_RETURN = 3
+            TRADE_RETCODE_DONE = 10009
+            SYMBOL_TRADE_MODE_DISABLED = 0
+            SYMBOL_TRADE_MODE_CLOSEONLY = 3
+
+            def terminal_info(self):
+                return SimpleNamespace(trade_allowed=True)
+
+            def account_info(self):
+                return SimpleNamespace(trade_allowed=True)
+
+            def symbol_info_tick(self, symbol):
+                return SimpleNamespace(bid=1.1000, ask=1.1002)
+
+            def symbol_info(self, symbol):
+                return SimpleNamespace(
+                    point=0.00001,
+                    digits=5,
+                    visible=True,
+                    volume_min=0.01,
+                    volume_max=100.0,
+                    volume_step=0.01,
+                    trade_stops_level=0,
+                    trade_freeze_level=0,
+                    trade_mode=self.SYMBOL_TRADE_MODE_CLOSEONLY,
+                )
+
+            def order_send(self, request):
+                raise AssertionError("order_send should not be called when trade mode blocks opens")
+
+        broker = live_bridge.LiveMt5Broker(FakeMt5Broker(), symbol="EURUSD")
+        result = broker.submit_order(
+            live_bridge.OrderIntent(
+                symbol="EURUSD",
+                action=live_bridge.ActionSpec(live_bridge.ActionType.OPEN, direction=1),
+                volume=0.01,
+                submitted_time_msc=0,
+                requested_price=1.1001,
+            )
+        )
+        self.assertFalse(result.accepted)
+        self.assertIn("trade mode", str(result.error).lower())
+
     def test_live_broker_aggregates_same_direction_strategy_positions_and_closes_all(self):
         sent_requests: list[dict] = []
 
@@ -299,6 +412,109 @@ class LiveReadinessTests(unittest.TestCase):
                 report = mt5_live_preflight.build_report("EURUSD", 2000)
             self.assertFalse(report["approved_for_live_runtime"])
             self.assertTrue(any("non-strategy position" in blocker.lower() for blocker in report["blockers"]))
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_preflight_blocks_symbols_with_disabled_trade_mode(self):
+        tmpdir = make_test_dir("preflight_trade_mode")
+        try:
+            paths = DeploymentPaths(
+                diagnostics_path=tmpdir / "training_diagnostics_eurusd.json",
+                gate_path=tmpdir / "deployment_gate_eurusd.json",
+                ops_attestation_path=tmpdir / "ops_attestation_eurusd.json",
+                live_preflight_path=tmpdir / "live_preflight_eurusd.json",
+                execution_audit_path=tmpdir / "execution_audit_eurusd.jsonl",
+            )
+            paths.gate_path.write_text(json.dumps({"approved_for_live": True, "blockers": []}), encoding="utf-8")
+            paths.ops_attestation_path.write_text(json.dumps({"approved": True, "blockers": []}), encoding="utf-8")
+            paths.execution_audit_path.write_text(
+                "\n".join(json.dumps({"accepted": True, "fill_delta_pips": 0.01, "retcode": 10009}) for _ in range(20)) + "\n",
+                encoding="utf-8",
+            )
+            manifest = ArtifactManifest(
+                manifest_version="1",
+                strategy_symbol="EURUSD",
+                model_path="dummy.zip",
+                scaler_path="dummy.pkl",
+                model_version="dummy-v1",
+                model_sha256="x",
+                scaler_sha256="y",
+                feature_columns=[],
+                observation_shape=[1, 1],
+                action_map=[],
+                dataset_id="dataset",
+                sb3_version="2.5.0",
+                sb3_contrib_version="2.5.0",
+                sklearn_version=__import__("sklearn").__version__,
+                ticks_per_bar=2000,
+            )
+
+            def _terminal_info():
+                payload = SimpleNamespace(connected=True, trade_allowed=True)
+                payload._asdict = lambda: {"connected": True, "trade_allowed": True}
+                return payload
+
+            def _account_info():
+                payload = SimpleNamespace(trade_allowed=True, margin_mode=0)
+                payload._asdict = lambda: {"trade_allowed": True, "margin_mode": 0}
+                return payload
+
+            def _symbol_info():
+                payload = SimpleNamespace(
+                    visible=True,
+                    digits=5,
+                    point=0.00001,
+                    volume_min=0.01,
+                    volume_max=1.0,
+                    volume_step=0.01,
+                    trade_stops_level=0,
+                    trade_freeze_level=0,
+                    trade_tick_size=0.00001,
+                    trade_tick_value=1.0,
+                    trade_contract_size=100000.0,
+                    trade_mode=0,
+                )
+                payload._asdict = lambda: {
+                    "visible": True,
+                    "digits": 5,
+                    "point": 0.00001,
+                    "volume_min": 0.01,
+                    "volume_max": 1.0,
+                    "volume_step": 0.01,
+                    "trade_stops_level": 0,
+                    "trade_freeze_level": 0,
+                    "trade_tick_size": 0.00001,
+                    "trade_tick_value": 1.0,
+                    "trade_contract_size": 100000.0,
+                    "trade_mode": 0,
+                }
+                return payload
+
+            fake_mt5 = SimpleNamespace(
+                ACCOUNT_MARGIN_MODE_RETAIL_HEDGING=2,
+                SYMBOL_TRADE_MODE_DISABLED=0,
+                SYMBOL_TRADE_MODE_CLOSEONLY=3,
+                SYMBOL_TRADE_MODE_LONGONLY=1,
+                SYMBOL_TRADE_MODE_SHORTONLY=2,
+                SYMBOL_TRADE_MODE_FULL=4,
+                initialize=lambda: True,
+                login=lambda *args, **kwargs: True,
+                terminal_info=_terminal_info,
+                account_info=_account_info,
+                symbol_info=lambda symbol: _symbol_info(),
+                positions_get=lambda symbol=None: [],
+                shutdown=lambda: None,
+                symbol_select=lambda symbol, visible: True,
+            )
+            with patch("mt5_live_preflight.deployment_paths", return_value=paths), \
+                patch("mt5_live_preflight.resolve_manifest_path", return_value=tmpdir / "artifact_manifest_EURUSD.json"), \
+                patch("mt5_live_preflight.load_manifest", return_value=manifest), \
+                patch("mt5_live_preflight.importlib.util.find_spec", return_value=object()), \
+                patch.dict("sys.modules", {"MetaTrader5": fake_mt5}):
+                report = mt5_live_preflight.build_report("EURUSD", 2000)
+            self.assertFalse(report["approved_for_live_runtime"])
+            self.assertTrue(any("trade mode blocks new orders" in blocker.lower() for blocker in report["blockers"]))
+            self.assertEqual(0, report["symbol_capabilities"]["trade_mode"])
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 

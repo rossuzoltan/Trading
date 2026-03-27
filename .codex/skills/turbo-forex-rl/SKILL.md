@@ -12,10 +12,12 @@ description: Repository-specific operating guide for the trading project at c:\d
 - Read [references/start-here.md](references/start-here.md) first.
 - Read [references/file-map.md](references/file-map.md) after you identify the subsystem you need.
 - Read [references/research-policy.md](references/research-policy.md) when the task involves strategy quality, deployment readiness, or whether RL is justified.
+- Treat the `docs/NEXT_AGENT_*` handoff docs plus current local tool output as the source of truth when older docs disagree.
 
 ## Follow This Workflow
 
 1. Classify the request before opening code.
+   - Current repo state or runbook guidance: start with [references/start-here.md](references/start-here.md).
    - Data ingest or repair: start with `download_dukascopy.py` and `build_volume_bars.py`.
    - Training or evaluation: start with `train_agent.py`, `evaluate_oos.py`, and related manifests under `models/`.
    - Live trading or ops: start with `live_bridge.py`, `mt5_live_preflight.py`, and ops helpers under `tools/`.
@@ -23,6 +25,7 @@ description: Repository-specific operating guide for the trading project at c:\d
 2. Load the minimum context.
    - For current repo state, verified commands, and known data issues, read [references/start-here.md](references/start-here.md).
    - For file targeting, read [references/file-map.md](references/file-map.md).
+   - Treat `docs/NEXT_AGENT_CONTEXT.md`, `docs/NEXT_AGENT_FILE_MAP.md`, and `docs/NEXT_AGENT_RUNBOOK.md` as higher priority than older handoff packs.
    - Open only the files that match the classified task unless evidence forces a wider audit.
 3. Preserve the supported architecture.
    - Treat `MaskablePPO + RuntimeGymEnv + volume bars + symbol-scoped artifacts` as the supported path.
@@ -30,14 +33,14 @@ description: Repository-specific operating guide for the trading project at c:\d
    - Do not re-audit `event_pipeline.py` or the live runtime unless a failing test, replay mismatch, or the user request forces it.
 4. Keep the edit surface small.
    - For data-repair or training tasks, inspect `download_dukascopy.py`, `build_volume_bars.py`, `train_agent.py`, `evaluate_oos.py`, and directly related tests or tools first.
-   - If you change features or model artifacts, verify the matching scaler, manifest, and model outputs under `models/`.
+   - If you change features or model artifacts, verify the matching symbol-scoped bundle under `models/`: `artifact_manifest_<PAIR>.json`, `model_<pair>_best.zip`, `scaler_<PAIR>.pkl`, and `model_<pair>_best_vecnormalize.pkl` when present.
 5. Verify with project defaults.
    - Use `.\.venv\Scripts\python.exe .\tools\project_healthcheck.py` when runtime health matters.
    - Use `.\.venv\Scripts\python.exe -m unittest discover tests` for repo regression coverage.
-   - Use `.\.venv\Scripts\python.exe .\mt5_live_preflight.py --symbol EURUSD --ticks-per-bar 5000` before treating MT5 live changes as ready.
+   - Use `.\.venv\Scripts\python.exe .\mt5_live_preflight.py --symbol EURUSD --ticks-per-bar 2000` before treating MT5 live changes as ready, unless the current dataset build metadata proves a different active bar spec.
 6. Apply the project decision rules.
    - Optimize for correctness, parity, auditability, and cost realism before speed or model novelty.
-   - Treat thin EURUSD or GBPUSD data coverage as a likely data-quality issue, not a reason to loosen validation.
+   - Use `data/dataset_build_info.json` and `tools/project_healthcheck.py` as the source of truth before assuming a symbol is thin, stale, or built at the wrong bar spec.
    - Assume edge claims are false positives until they survive out-of-sample checks, realistic costs, and live/backtest parity.
    - Prefer simpler baselines over RL unless the evidence clearly justifies RL.
 
@@ -45,6 +48,7 @@ description: Repository-specific operating guide for the trading project at c:\d
 
 - Avoid broad repo re-analysis when the handoff docs already narrow the scope.
 - Prefer symbol-scoped training and evaluation flows when touching current model work.
+- Prefer manifest-first validation over bare artifact filename checks when assessing training/eval/live readiness.
 - If the task touches live trading behavior, confirm artifact parity, manifests, preflight output, and audit trails before declaring success.
 - If the request is about large architectural redesign, justify that expansion from current evidence before touching unrelated subsystems.
 

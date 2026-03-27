@@ -1,4 +1,4 @@
 interface:
   display_name: "Turbo Forex RL Guide"
-  short_description: "Repo workflow for this forex RL stack"
-  default_prompt: "Use $turbo-forex-rl to debug, train, evaluate, or operate this trading repo without re-reading the full codebase."
+  short_description: "Docs-first workflow for the symbol-scoped forex RL stack"
+  default_prompt: "Use $turbo-forex-rl to start from the handoff docs, stay on the supported symbol-scoped runtime path, and avoid re-reading the full codebase."

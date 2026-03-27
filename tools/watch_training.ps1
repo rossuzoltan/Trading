@@ -1,12 +1,17 @@
 param(
-  [string]$WatchPath = "C:\dev\trading\training_watch.log",
+  [string]$WatchPath,
   [string]$CheckpointsRoot = "checkpoints",
   [int]$RefreshSeconds = 10,
   [int]$StaleAfterSeconds = 30,
   [switch]$NoLoop
 )
 
-Set-Location "C:\dev\trading"
+$ProjectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+Set-Location $ProjectRoot
+
+if (-not $WatchPath) {
+    $WatchPath = Join-Path $ProjectRoot "training_watch.log"
+}
 
 function Get-TrainProcess {
   Get-CimInstance Win32_Process |

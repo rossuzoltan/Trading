@@ -1,5 +1,5 @@
 param(
-    [string]$WatchPath = "C:\dev\trading\training_watch.log",
+    [string]$WatchPath,
     [string]$CheckpointsRoot = "checkpoints",
     [int]$RefreshSeconds = 10,
     [int]$StaleAfterSeconds = 30,

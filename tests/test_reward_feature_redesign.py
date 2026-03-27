@@ -10,7 +10,7 @@ from sklearn.preprocessing import StandardScaler
 from event_pipeline import RuntimeEngine, RuntimeSnapshot
 from feature_engine import FEATURE_COLS, FeatureEngine, WARMUP_BARS, _compute_raw
 from runtime_common import ConfirmedPosition, build_action_map, build_state_vector
-from runtime_gym_env import RuntimeGymConfig, RuntimeGymEnv
+from runtime_gym_env import RuntimeGymConfig, RuntimeGymEnv, compute_participation_bonus
 
 
 def _make_history(rows: int = 260) -> pd.DataFrame:
@@ -79,7 +79,7 @@ class RewardFeatureRedesignTests(unittest.TestCase):
         for legacy_col in ("rsi_14", "macd", "macdh", "bb_bw", "bb_pct", "adx", "hurst_exp", "frac_diff_z"):
             self.assertIn(legacy_col, raw.columns)
 
-    def test_reward_is_raw_clipped_log_return_and_components_are_logged(self) -> None:
+    def test_reward_is_netted_and_components_log_the_applied_penalties(self) -> None:
         engine = self._make_runtime_engine()
 
         engine.last_equity = 1_000.0
@@ -91,13 +91,19 @@ class RewardFeatureRedesignTests(unittest.TestCase):
             avg_spread=0.0001,
         )
 
-        expected = float(np.clip(10_000.0 * np.log(1_000.05 / 1_000.0), -5.0, 5.0))
-        self.assertAlmostEqual(expected, reward)
-        self.assertAlmostEqual(expected, components["reward_clipped"])
-        self.assertAlmostEqual(10_000.0 * np.log(1_000.05 / 1_000.0), components["reward_unclipped"])
+        expected_raw = 10_000.0 * np.log(1_000.05 / 1_000.0)
+        expected_transaction_penalty = engine.reward_transaction_penalty * engine.reward_scale * components["estimated_cost_ratio"]
+        expected_net = expected_raw - expected_transaction_penalty
+        expected_clipped = float(np.clip(expected_net, -5.0, 5.0))
+
+        self.assertAlmostEqual(expected_clipped, reward)
+        self.assertAlmostEqual(expected_clipped, components["reward_clipped"])
+        self.assertAlmostEqual(expected_raw, components["reward_raw_unclipped"])
+        self.assertAlmostEqual(expected_net, components["reward_unclipped"])
         self.assertGreater(components["estimated_cost_ratio"], 0.0)
         self.assertEqual(0.0, components["drawdown_penalty_applied"])
-        self.assertEqual(0.0, components["transaction_penalty_applied"])
+        self.assertGreater(components["transaction_penalty_applied"], 0.0)
+        self.assertAlmostEqual(expected_transaction_penalty, components["transaction_penalty_applied"])
 
     def test_short_pnl_sign_matches_actual_short_pnl(self) -> None:
         winning_short = ConfirmedPosition(direction=-1, entry_price=1.1000, volume=0.05)
@@ -156,6 +162,66 @@ class RewardFeatureRedesignTests(unittest.TestCase):
         self.assertNotEqual(info_a["episode_start_index"], info_c["episode_start_index"])
         self.assertGreaterEqual(info_a["episode_start_index"], WARMUP_BARS)
         self.assertLessEqual(info_a["episode_start_index"], len(history) - 2)
+
+    def test_participation_bonus_helper_and_runtime_diagnostics(self) -> None:
+        bonus = compute_participation_bonus(
+            prev_position=0,
+            new_position=1,
+            global_step=10,
+            episode_bonus_count=0,
+            last_bonus_step=-10_000,
+            cfg={
+                "participation_bonus": {
+                    "enabled": True,
+                    "bonus_value": 0.01,
+                    "active_until_step": 500_000,
+                    "cooldown_steps": 8,
+                    "only_from_flat": True,
+                    "max_bonus_per_episode": 50,
+                }
+            },
+        )
+        self.assertAlmostEqual(0.01, bonus)
+
+        history = _make_history(rows=320)
+        raw = _compute_raw(history).dropna(subset=FEATURE_COLS)
+        scaler = StandardScaler().fit(raw.loc[:, FEATURE_COLS])
+        action_map = build_action_map([0.5], [0.5])
+        env = RuntimeGymEnv(
+            symbol="EURUSD",
+            bars_frame=history,
+            scaler=scaler,
+            action_map=action_map,
+            config=RuntimeGymConfig(random_start=False, slippage_pips=0.1),
+            recovery_config={
+                "participation_bonus": {
+                    "enabled": True,
+                    "bonus_value": 0.01,
+                    "active_until_step": 500_000,
+                    "cooldown_steps": 8,
+                    "only_from_flat": True,
+                    "max_bonus_per_episode": 50,
+                }
+            },
+        )
+
+        env.reset(seed=7)
+        env.set_global_step(10)
+        env.set_slippage_pips(0.5)
+        self.assertAlmostEqual(0.5, env._runtime.broker.slippage_pips)
+
+        _, reward, terminated, truncated, info = env.step(2)
+
+        self.assertFalse(terminated)
+        self.assertFalse(truncated)
+        self.assertGreaterEqual(reward, 0.0)
+        self.assertAlmostEqual(0.01, info["reward_components"]["participation_bonus_applied"])
+        diagnostics = env.get_training_diagnostics()
+        self.assertEqual(1, diagnostics["action_counts"]["long"])
+        self.assertEqual(1, diagnostics["trade_stats"]["entry_signal_long_count"])
+        self.assertEqual(1, diagnostics["trade_stats"]["trade_attempt_count"])
+        self.assertEqual(1, diagnostics["trade_stats"]["flat_steps"])
+        self.assertAlmostEqual(0.01, diagnostics["reward_components"]["participation_bonus_sum"])
 
 
 if __name__ == "__main__":

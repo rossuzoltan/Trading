@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import math
 from pathlib import Path
@@ -33,7 +34,8 @@ from event_pipeline import (
     VolumeBar,
 )
 from feature_engine import FEATURE_COLS, FeatureEngine, WARMUP_BARS
-from project_paths import resolve_dataset_path, resolve_manifest_path, validate_dataset_bar_spec
+from project_paths import ensure_runtime_dirs, resolve_dataset_path, resolve_manifest_path, validate_dataset_bar_spec
+from run_logging import configure_run_logging, set_log_context
 from runtime_common import STATE_FEATURE_COUNT, build_action_map, compute_max_drawdown, compute_timed_sharpe, compute_trade_metrics
 from trading_config import ACTION_SL_MULTS, ACTION_TP_MULTS, deployment_paths
 from validation_metrics import build_deployment_gate, load_json_report, save_json_report
@@ -42,6 +44,28 @@ from validation_metrics import build_deployment_gate, load_json_report, save_jso
 TARGET_SYM = os.environ.get("EVAL_SYMBOL", "EURUSD").strip().upper() or "EURUSD"
 SL_OPTS = list(ACTION_SL_MULTS)
 TP_OPTS = list(ACTION_TP_MULTS)
+log = logging.getLogger("evaluate_oos")
+
+
+def _resolve_execution_cost_profile(manifest) -> dict[str, float]:
+    profile = dict(getattr(manifest, "execution_cost_profile", None) or {})
+    return {
+        "commission_per_lot": float(profile.get("commission_per_lot", 7.0)),
+        "slippage_pips": float(profile.get("slippage_pips", 0.25)),
+        "partial_fill_ratio": float(profile.get("partial_fill_ratio", 1.0)),
+    }
+
+
+def _resolve_reward_profile(manifest) -> dict[str, float]:
+    profile = dict(getattr(manifest, "reward_profile", None) or {})
+    return {
+        "reward_scale": float(profile.get("reward_scale", 10_000.0)),
+        "drawdown_penalty": float(profile.get("drawdown_penalty", 2.0)),
+        "transaction_penalty": float(profile.get("transaction_penalty", 1.0)),
+        "reward_clip_low": float(profile.get("reward_clip_low", -5.0)),
+        "reward_clip_high": float(profile.get("reward_clip_high", 5.0)),
+    }
+
 
 def _frame_to_bars(frame: pd.DataFrame) -> list[VolumeBar]:
     bars: list[VolumeBar] = []
@@ -70,6 +94,8 @@ def run_replay() -> tuple[list[float], list[pd.Timestamp], list[dict]]:
     manifest_path = resolve_manifest_path(symbol=TARGET_SYM)
     manifest = load_manifest(manifest_path)
     manifest_ticks = manifest.bar_construction_ticks_per_bar or manifest.ticks_per_bar
+    execution_cost_profile = _resolve_execution_cost_profile(manifest)
+    reward_profile = _resolve_reward_profile(manifest)
     if manifest_ticks is not None:
         validate_dataset_bar_spec(
             dataset_path=dataset_path,
@@ -130,7 +156,7 @@ def run_replay() -> tuple[list[float], list[pd.Timestamp], list[dict]]:
 
     feature_engine = FeatureEngine.from_scaler(scaler)
     feature_engine.warm_up(warmup_frame)
-    broker = ReplayBroker(symbol=TARGET_SYM)
+    broker = ReplayBroker(symbol=TARGET_SYM, **execution_cost_profile)
     snapshot = RuntimeSnapshot(last_equity=1_000.0, high_water_mark=1_000.0, day_start_equity=1_000.0)
     risk_engine = RiskEngine(RiskLimits(), snapshot=snapshot, initial_equity=1_000.0)
     runtime = RuntimeEngine(
@@ -142,6 +168,7 @@ def run_replay() -> tuple[list[float], list[pd.Timestamp], list[dict]]:
         risk_engine=risk_engine,
         snapshot=snapshot,
         state_store=None,
+        **reward_profile,
     )
     runtime.startup_reconcile()
 
@@ -156,6 +183,21 @@ def run_replay() -> tuple[list[float], list[pd.Timestamp], list[dict]]:
 
 
 def main() -> None:
+    ensure_runtime_dirs()
+    log_config = configure_run_logging(
+        "evaluate_oos",
+        symbol=TARGET_SYM,
+        capture_print=True,
+    )
+    set_log_context(symbol=TARGET_SYM)
+    log.info(
+        "Replay evaluation starting",
+        extra={
+            "event": "evaluation_start",
+            "text_log_path": log_config.text_log_path,
+            "jsonl_log_path": log_config.jsonl_log_path,
+        },
+    )
     equity_curve, timestamps, trade_log = run_replay()
     final_equity = equity_curve[-1] if equity_curve else 1_000.0
     timed_sharpe = compute_timed_sharpe(equity_curve, timestamps)
@@ -223,6 +265,18 @@ def main() -> None:
     plt.savefig(out_path)
     print(f"Saved -> {out_path}")
     print(f"Saved -> {report_paths.gate_path}")
+    log.info(
+        "Replay evaluation complete",
+        extra={
+            "event": "evaluation_complete",
+            "equity_curve_path": out_path,
+            "deployment_gate_path": report_paths.gate_path,
+            "trade_count": n_trades,
+            "timed_sharpe": float(timed_sharpe),
+            "max_drawdown": float(max_dd),
+            "final_equity": float(final_equity),
+        },
+    )
 
 
 if __name__ == "__main__":

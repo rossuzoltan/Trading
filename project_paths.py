@@ -11,6 +11,7 @@ DATA_DIR = ROOT_DIR / "data"
 MODELS_DIR = ROOT_DIR / "models"
 CHECKPOINTS_DIR = ROOT_DIR / "checkpoints"
 DOCS_DIR = ROOT_DIR / "docs"
+LOGS_DIR = ROOT_DIR / "logs"
 DATASET_BUILD_INFO_PATH = DATA_DIR / "dataset_build_info.json"
 LEGACY_DATASET_QC_REPORT_PATH = DATA_DIR / "volume_bars_qc_report.json"
 REQUIRED_DATASET_COLUMNS = (
@@ -27,6 +28,9 @@ DEFAULT_DATASET_CANDIDATES = (
     DATA_DIR / "DATA_CLEAN_VOLUME.csv",
     DATA_DIR / "FOREX_MULTI_SET.csv",
 )
+DEFAULT_MODEL_GLOB = "model_*_best.zip"
+DEFAULT_SCALER_GLOB = "scaler_*.pkl"
+DEFAULT_SYMBOL_MANIFEST_GLOB = "artifact_manifest_*.json"
 
 DEFAULT_MODEL_CANDIDATES = (
     MODELS_DIR / "model_eurusd_best.zip",
@@ -39,7 +43,7 @@ DEFAULT_MANIFEST_CANDIDATES = (
 
 
 def ensure_runtime_dirs() -> None:
-    for path in (DATA_DIR, MODELS_DIR, CHECKPOINTS_DIR, DOCS_DIR):
+    for path in (DATA_DIR, MODELS_DIR, CHECKPOINTS_DIR, DOCS_DIR, LOGS_DIR):
         path.mkdir(parents=True, exist_ok=True)
 
 
@@ -48,6 +52,26 @@ def _first_existing(paths: list[Path]) -> Path | None:
         if path.exists():
             return path
     return None
+
+
+def list_model_paths() -> list[Path]:
+    return sorted(MODELS_DIR.glob(DEFAULT_MODEL_GLOB))
+
+
+def list_scaler_paths() -> list[Path]:
+    return sorted(MODELS_DIR.glob(DEFAULT_SCALER_GLOB))
+
+
+def list_manifest_paths() -> list[Path]:
+    ordered_candidates = [MODELS_DIR / "artifact_manifest.json", *sorted(MODELS_DIR.glob(DEFAULT_SYMBOL_MANIFEST_GLOB))]
+    seen: set[Path] = set()
+    discovered: list[Path] = []
+    for path in ordered_candidates:
+        if not path.exists() or path in seen:
+            continue
+        seen.add(path)
+        discovered.append(path)
+    return discovered
 
 
 def resolve_dataset_path(preferred: str | Path | None = None) -> Path:
@@ -264,17 +288,27 @@ def validate_dataset_integrity(
     }
 
 
-def resolve_model_path(preferred: str | Path | None = None) -> Path:
+def resolve_model_path(
+    preferred: str | Path | None = None,
+    *,
+    symbol: str | None = None,
+    required: bool = True,
+) -> Path | None:
     candidates: list[Path] = []
     if preferred is not None:
         candidates.append(Path(preferred))
-    candidates.extend(DEFAULT_MODEL_CANDIDATES)
+    normalized_symbol = symbol.strip().upper() if symbol is not None else ""
+    if normalized_symbol:
+        candidates.append(MODELS_DIR / f"model_{normalized_symbol.lower()}_best.zip")
+    else:
+        candidates.extend(DEFAULT_MODEL_CANDIDATES)
+        candidates.extend(list_model_paths())
 
     resolved = _first_existing(candidates)
-    if resolved is not None:
+    if resolved is not None or not required:
         return resolved
 
-    names = ", ".join(path.name for path in DEFAULT_MODEL_CANDIDATES)
+    names = ", ".join(dict.fromkeys(path.name for path in candidates if path.name))
     raise FileNotFoundError(
         f"No trained model found. Expected one of: {names}. Run train_agent.py first."
     )
@@ -288,9 +322,12 @@ def resolve_scaler_path(
     candidates: list[Path] = []
     if preferred is not None:
         candidates.append(Path(preferred))
-    if symbol:
-        candidates.append(MODELS_DIR / f"scaler_{symbol}.pkl")
+    normalized_symbol = symbol.strip().upper() if symbol is not None else ""
+    if normalized_symbol:
+        candidates.append(MODELS_DIR / f"scaler_{normalized_symbol}.pkl")
     candidates.append(MODELS_DIR / "scaler_features.pkl")
+    if not normalized_symbol:
+        candidates.extend(list_scaler_paths())
 
     resolved = _first_existing(candidates)
     if resolved is not None or not required:

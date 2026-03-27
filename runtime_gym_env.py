@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+from collections import deque
 from dataclasses import dataclass
 from typing import Any, Sequence
 
@@ -17,7 +19,8 @@ except ImportError:
 
 from event_pipeline import ReplayBroker, RiskEngine, RiskLimits, RuntimeEngine, RuntimeSnapshot, VolumeBar
 from feature_engine import FEATURE_COLS, FeatureEngine, WARMUP_BARS
-from runtime_common import STATE_FEATURE_COUNT, ActionSpec, build_action_mask, build_observation
+from runtime_common import STATE_FEATURE_COUNT, ActionSpec, ActionType, build_action_mask, build_observation
+from symbol_utils import pip_value_for_volume
 
 
 @dataclass(frozen=True)
@@ -26,8 +29,206 @@ class RuntimeGymConfig:
     commission_per_lot: float = 7.0
     slippage_pips: float = 0.25
     partial_fill_ratio: float = 1.0
+    reward_scale: float = 10_000.0
+    drawdown_penalty: float = 2.0
+    transaction_penalty: float = 1.0
+    reward_clip_low: float = -5.0
+    reward_clip_high: float = 5.0
     window_size: int = 1
     random_start: bool = False
+
+
+def compute_participation_bonus(
+    *,
+    prev_position: int,
+    new_position: int,
+    global_step: int,
+    episode_bonus_count: int,
+    last_bonus_step: int,
+    cfg: dict[str, Any] | None,
+) -> float:
+    if not cfg:
+        return 0.0
+    pcfg = cfg.get("participation_bonus", {}) or {}
+    if not bool(pcfg.get("enabled", False)):
+        return 0.0
+    if int(global_step) > int(pcfg.get("active_until_step", 0)):
+        return 0.0
+    if int(episode_bonus_count) >= int(pcfg.get("max_bonus_per_episode", 0)):
+        return 0.0
+    if int(global_step) - int(last_bonus_step) < int(pcfg.get("cooldown_steps", 0)):
+        return 0.0
+
+    entry_happened = int(prev_position) == 0 and int(new_position) != 0
+    if bool(pcfg.get("only_from_flat", True)) and not entry_happened:
+        return 0.0
+    if not entry_happened:
+        return 0.0
+    return float(pcfg.get("bonus_value", 0.0))
+
+
+class TrainingDiagnostics:
+    RAPID_REVERSAL_WINDOW_STEPS = 3
+
+    def __init__(self) -> None:
+        self.action_counts: dict[str, int] = {}
+        self.trade_stats: dict[str, float | int] = {}
+        self.reward_stats: dict[str, float] = {}
+        self._position_duration_samples: deque[int] = deque(maxlen=2048)
+        self.reset()
+
+    def reset(self) -> None:
+        self.total_steps = 0
+        self.action_counts = {
+            "hold": 0,
+            "close": 0,
+            "long": 0,
+            "short": 0,
+        }
+        self.trade_stats = {
+            "entered_long_count": 0,
+            "entered_short_count": 0,
+            "entry_signal_long_count": 0,
+            "entry_signal_short_count": 0,
+            "closed_trade_count": 0,
+            "trade_attempt_count": 0,
+            "trade_reject_count": 0,
+            "flat_steps": 0,
+            "long_steps": 0,
+            "short_steps": 0,
+            "position_duration_sum": 0,
+            "position_duration_count": 0,
+            "rapid_reversals": 0,
+        }
+        self.reward_stats = {
+            "pnl_reward_sum": 0.0,
+            "slippage_penalty_sum": 0.0,
+            "participation_bonus_sum": 0.0,
+            "holding_penalty_sum": 0.0,
+            "drawdown_penalty_sum": 0.0,
+            "net_reward_sum": 0.0,
+        }
+        self._position_duration_samples.clear()
+        self.reset_episode_state()
+
+    def reset_episode_state(self) -> None:
+        self._episode_bonus_count = 0
+        self._last_bonus_step = -(10**9)
+        self._last_close_step: int | None = None
+        self._last_closed_direction = 0
+
+    @property
+    def episode_bonus_count(self) -> int:
+        return int(self._episode_bonus_count)
+
+    @property
+    def last_bonus_step(self) -> int:
+        return int(self._last_bonus_step)
+
+    def mark_bonus_awarded(self, global_step: int) -> None:
+        self._last_bonus_step = int(global_step)
+        self._episode_bonus_count += 1
+
+    def _record_action(self, action: ActionSpec) -> None:
+        if action.action_type == ActionType.HOLD:
+            self.action_counts["hold"] += 1
+            return
+        if action.action_type == ActionType.CLOSE:
+            self.action_counts["close"] += 1
+            return
+        if action.direction is not None and int(action.direction) > 0:
+            self.action_counts["long"] += 1
+        elif action.direction is not None and int(action.direction) < 0:
+            self.action_counts["short"] += 1
+
+    def record_step(
+        self,
+        *,
+        action: ActionSpec,
+        submit_result: Any,
+        prev_position: int,
+        new_position: int,
+        prev_position_duration: int,
+        entry_signal_direction: int = 0,
+        entry_filled_direction: int = 0,
+        closed_trade_count_delta: int = 0,
+        reward_components: dict[str, float],
+        reward: float,
+    ) -> None:
+        self.total_steps += 1
+        self._record_action(action)
+        if action.action_type != ActionType.HOLD:
+            self.trade_stats["trade_attempt_count"] += 1
+        if submit_result is not None and not bool(getattr(submit_result, "accepted", False)):
+            self.trade_stats["trade_reject_count"] += 1
+
+        if int(entry_signal_direction) > 0:
+            self.trade_stats["entry_signal_long_count"] += 1
+        elif int(entry_signal_direction) < 0:
+            self.trade_stats["entry_signal_short_count"] += 1
+
+        if int(entry_filled_direction) > 0:
+            self.trade_stats["entered_long_count"] += 1
+            if (
+                self._last_closed_direction < 0
+                and self._last_close_step is not None
+                and (self.total_steps - self._last_close_step) <= self.RAPID_REVERSAL_WINDOW_STEPS
+            ):
+                self.trade_stats["rapid_reversals"] += 1
+        elif int(entry_filled_direction) < 0:
+            self.trade_stats["entered_short_count"] += 1
+            if (
+                self._last_closed_direction > 0
+                and self._last_close_step is not None
+                and (self.total_steps - self._last_close_step) <= self.RAPID_REVERSAL_WINDOW_STEPS
+            ):
+                self.trade_stats["rapid_reversals"] += 1
+
+        if int(closed_trade_count_delta) > 0:
+            self.trade_stats["closed_trade_count"] += int(closed_trade_count_delta)
+            close_direction = int(prev_position) if int(prev_position) != 0 else int(entry_filled_direction)
+            duration = 0
+            if int(prev_position) != 0:
+                duration = max(int(prev_position_duration), 1)
+            elif int(entry_filled_direction) != 0:
+                duration = 1
+            if duration > 0:
+                self.trade_stats["position_duration_sum"] += duration
+                self.trade_stats["position_duration_count"] += 1
+                self._position_duration_samples.append(duration)
+            if close_direction != 0:
+                self._last_close_step = int(self.total_steps)
+                self._last_closed_direction = close_direction
+
+        if int(new_position) == 0:
+            self.trade_stats["flat_steps"] += 1
+        elif int(new_position) > 0:
+            self.trade_stats["long_steps"] += 1
+        else:
+            self.trade_stats["short_steps"] += 1
+
+        self.reward_stats["pnl_reward_sum"] += float(
+            reward_components.get("pnl_reward", reward_components.get("reward_raw_unclipped", 0.0))
+        )
+        self.reward_stats["slippage_penalty_sum"] -= float(reward_components.get("slippage_penalty_applied", 0.0))
+        self.reward_stats["participation_bonus_sum"] += float(
+            reward_components.get("participation_bonus_applied", 0.0)
+        )
+        self.reward_stats["holding_penalty_sum"] -= float(reward_components.get("holding_penalty_applied", 0.0))
+        self.reward_stats["drawdown_penalty_sum"] -= float(reward_components.get("drawdown_penalty_applied", 0.0))
+        self.reward_stats["net_reward_sum"] += float(reward)
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "total_steps": int(self.total_steps),
+            "action_counts": {key: int(value) for key, value in self.action_counts.items()},
+            "trade_stats": {
+                **{key: int(value) for key, value in self.trade_stats.items() if key not in {"position_duration_sum"}},
+                "position_duration_sum": float(self.trade_stats["position_duration_sum"]),
+                "position_durations_sample": list(self._position_duration_samples),
+            },
+            "reward_components": {key: float(value) for key, value in self.reward_stats.items()},
+        }
 
 
 class RuntimeGymEnv(gym.Env):
@@ -36,8 +237,8 @@ class RuntimeGymEnv(gym.Env):
     FeatureEngine + RuntimeEngine + ReplayBroker.
 
     Reward semantics are taken from RuntimeEngine. The optimized reward is the
-    clipped post-cost log-equity delta, while drawdown and estimated transaction
-    costs remain available as telemetry via reward_components.
+    clipped net log-equity delta after drawdown and transaction penalties,
+    while the raw components remain available via reward_components.
     """
 
     metadata = {"render_modes": ["human"]}
@@ -51,6 +252,7 @@ class RuntimeGymEnv(gym.Env):
         action_map: Sequence[ActionSpec],
         risk_limits: RiskLimits | None = None,
         config: RuntimeGymConfig | None = None,
+        recovery_config: dict[str, Any] | None = None,
     ) -> None:
         super().__init__()
         self.symbol = symbol.upper()
@@ -99,6 +301,9 @@ class RuntimeGymEnv(gym.Env):
         self._last_observation: np.ndarray | None = None
         self.max_slippage_pips = float(self.config.slippage_pips)
         self._episode_start_index = 0
+        self._recovery_config = copy.deepcopy(recovery_config) if recovery_config is not None else None
+        self._global_step = 0
+        self._training_diagnostics = TrainingDiagnostics()
 
         self._reset_internal()
 
@@ -107,6 +312,7 @@ class RuntimeGymEnv(gym.Env):
         self._runtime = None
         self._last_observation = None
         self._episode_start_index = 0
+        self._pending_entry_direction = 0
 
     @staticmethod
     def _frame_to_bars(frame: pd.DataFrame) -> list[VolumeBar]:
@@ -158,6 +364,11 @@ class RuntimeGymEnv(gym.Env):
             risk_engine=risk_engine,
             snapshot=snapshot,
             state_store=None,
+            reward_scale=float(self.config.reward_scale),
+            drawdown_penalty=float(self.config.drawdown_penalty),
+            transaction_penalty=float(self.config.transaction_penalty),
+            reward_clip_low=float(self.config.reward_clip_low),
+            reward_clip_high=float(self.config.reward_clip_high),
         )
         runtime.startup_reconcile()
         return runtime
@@ -174,6 +385,33 @@ class RuntimeGymEnv(gym.Env):
         if hasattr(broker, "slippage_pips"):
             setattr(broker, "slippage_pips", float(self.max_slippage_pips))
 
+    def _estimate_slippage_penalty(self, *, turnover_lots: float, current_price: float, equity_base: float) -> float:
+        turnover = max(float(turnover_lots), 0.0)
+        if turnover <= 0 or equity_base <= 0:
+            return 0.0
+        pip_value_per_lot = pip_value_for_volume(
+            self.symbol,
+            price=float(current_price),
+            volume_lots=1.0,
+            account_currency="USD",
+        )
+        slippage_cost_usd = turnover * pip_value_per_lot * max(float(self.max_slippage_pips), 0.0)
+        slippage_ratio = slippage_cost_usd / max(float(equity_base), 1e-6)
+        return float(self._runtime.reward_transaction_penalty * self._runtime.reward_scale * slippage_ratio)
+
+    def set_slippage_pips(self, value: float) -> None:
+        self.max_slippage_pips = float(value)
+        self._apply_runtime_slippage()
+
+    def set_global_step(self, value: int) -> None:
+        self._global_step = int(value)
+
+    def set_recovery_config(self, cfg: dict[str, Any] | None) -> None:
+        self._recovery_config = copy.deepcopy(cfg) if cfg is not None else None
+
+    def get_training_diagnostics(self) -> dict[str, Any]:
+        return self._training_diagnostics.snapshot()
+
     def action_masks(self) -> np.ndarray:
         if self._runtime is None or self._runtime.feature_engine._buffer is None:
             return np.zeros(len(self.action_map), dtype=bool)
@@ -184,6 +422,7 @@ class RuntimeGymEnv(gym.Env):
     def reset(self, seed: int | None = None, options: dict | None = None):
         super().reset(seed=seed)
         self._reset_internal()
+        self._training_diagnostics.reset_episode_state()
         self._episode_start_index = self._resolve_start_index()
         self._runtime = self._bootstrap_runtime(self._episode_start_index)
         self._apply_runtime_slippage()
@@ -206,6 +445,10 @@ class RuntimeGymEnv(gym.Env):
     def step(self, action: int):
         if self._runtime is None:
             raise RuntimeError("Environment not reset.")
+        prev_equity = float(self._runtime.last_equity)
+        prev_position = int(self._runtime.confirmed_position.direction)
+        prev_position_duration = int(self._runtime.confirmed_position.time_in_trade_bars)
+        trade_log_before = len(getattr(self._runtime.broker, "trade_log", []))
         self._apply_runtime_slippage()
         action = int(action)
         if not (0 <= action < len(self.action_map)):
@@ -229,19 +472,77 @@ class RuntimeGymEnv(gym.Env):
         bar = self._bars[self._bar_index]
         result = self._runtime.process_bar(bar, action_index_override=action)
         self._last_observation = result.observation
+        reward_components = dict(result.reward_components)
+        turnover_lots = float(reward_components.get("turnover_lots", 0.0))
+        entry_filled_direction = 0
+        if int(prev_position) == 0 and self._pending_entry_direction != 0 and turnover_lots > 0.0:
+            entry_filled_direction = int(self._pending_entry_direction)
+        self._pending_entry_direction = 0
+
+        entry_signal_direction = 0
+        if (
+            result.action.action_type == ActionType.OPEN
+            and int(prev_position) == 0
+            and result.action.direction is not None
+            and result.submit_result is not None
+            and bool(getattr(result.submit_result, "accepted", False))
+        ):
+            entry_signal_direction = int(result.action.direction)
+            self._pending_entry_direction = entry_signal_direction
+
+        trade_log_after = len(getattr(self._runtime.broker, "trade_log", []))
+        closed_trade_count_delta = max(int(trade_log_after - trade_log_before), 0)
+        reward_components.setdefault("holding_penalty_applied", 0.0)
+        reward_components["pnl_reward"] = float(
+            reward_components.get("reward_raw_unclipped", reward_components.get("pnl_reward", 0.0))
+        )
+        reward_components["slippage_penalty_applied"] = self._estimate_slippage_penalty(
+            turnover_lots=turnover_lots,
+            current_price=float(bar.close),
+            equity_base=prev_equity,
+        )
+        bonus_direction = entry_signal_direction if entry_signal_direction != 0 else int(result.position_direction)
+        participation_bonus = compute_participation_bonus(
+            prev_position=prev_position,
+            new_position=bonus_direction,
+            global_step=self._global_step,
+            episode_bonus_count=self._training_diagnostics.episode_bonus_count,
+            last_bonus_step=self._training_diagnostics.last_bonus_step,
+            cfg=self._recovery_config,
+        )
+        reward_components["participation_bonus_applied"] = float(participation_bonus)
+        final_reward = float(result.reward) + float(participation_bonus)
+        reward_components["net_reward_with_bonus"] = float(final_reward)
+        if participation_bonus > 0.0:
+            self._training_diagnostics.mark_bonus_awarded(self._global_step)
+            self._runtime.confirmed_position.last_reward = float(final_reward)
+        result.reward = float(final_reward)
+        result.reward_components = reward_components
+        self._training_diagnostics.record_step(
+            action=result.action,
+            submit_result=result.submit_result,
+            prev_position=prev_position,
+            new_position=int(result.position_direction),
+            prev_position_duration=prev_position_duration,
+            entry_signal_direction=entry_signal_direction,
+            entry_filled_direction=entry_filled_direction,
+            closed_trade_count_delta=closed_trade_count_delta,
+            reward_components=reward_components,
+            reward=float(final_reward),
+        )
 
         terminated = bool(self._bar_index >= len(self._bars) - 1 or result.kill_switch_active)
         truncated = False
         info = {
             "equity": float(result.equity),
             "total_equity_usd": float(result.equity),
-            "reward": float(result.reward),
-            "reward_components": dict(result.reward_components),
+            "reward": float(final_reward),
+            "reward_components": dict(reward_components),
             "kill_switch_active": bool(result.kill_switch_active),
             "kill_switch_reason": result.kill_switch_reason,
             "episode_start_index": int(self._episode_start_index),
             "timestamp_utc": pd.Timestamp(bar.timestamp).isoformat(),
         }
         if _GYM:
-            return result.observation, float(result.reward), terminated, truncated, info
-        return result.observation, float(result.reward), bool(terminated or truncated), info
+            return result.observation, float(final_reward), terminated, truncated, info
+        return result.observation, float(final_reward), bool(terminated or truncated), info

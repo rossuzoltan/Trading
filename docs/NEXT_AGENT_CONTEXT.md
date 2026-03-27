@@ -6,7 +6,7 @@
 
 ## Do Not Re-Audit
 - The shared event-driven runtime refactor is already in place.
-- The regression suite for the runtime passes in the project venv.
+- The regression suite scope has expanded; always rerun tests in the local workspace before assuming green state.
 - The current blocker is strategy/data quality, not the live-bridge architecture.
 
 ## Current Repo State
@@ -18,8 +18,8 @@
 ## Verified Commands
 - Tests:
   - `.\.venv\Scripts\python.exe -m unittest discover tests`
-- Result:
-  - `Ran 9 tests ... OK`
+- Note:
+  - Treat older handoff test counts as historical only; use the current local run output as source of truth.
 
 ## Current Data Snapshot
 - `data/EURUSD_ticks.parquet`: `67,477,967` ticks

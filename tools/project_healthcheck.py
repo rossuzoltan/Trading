@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -10,13 +11,22 @@ if str(ROOT) not in sys.path:
 
 import subprocess
 import pandas as pd
+from artifact_manifest import (
+    dataset_id_for_path,
+    load_manifest,
+    load_validated_model,
+    load_validated_scaler,
+    load_validated_vecnormalize,
+)
 from dataset_validation import validate_symbol_bar_spec
+from feature_engine import FEATURE_COLS
 from interpreter_guard import ensure_project_venv
 from project_paths import (
     ROOT_DIR,
     DATA_DIR,
     MODELS_DIR,
     dataset_build_info_ticks_per_bar,
+    list_manifest_paths,
     load_dataset_build_info,
     resolve_dataset_path,
     resolve_model_path,
@@ -24,7 +34,8 @@ from project_paths import (
     validate_dataset_bar_spec,
     validate_dataset_integrity,
 )
-from trading_config import resolve_bar_construction_ticks_per_bar
+from runtime_common import STATE_FEATURE_COUNT, build_action_map
+from trading_config import ACTION_SL_MULTS, ACTION_TP_MULTS, resolve_bar_construction_ticks_per_bar
 
 ensure_project_venv(project_root=ROOT, script_path=__file__)
 
@@ -57,11 +68,22 @@ REQUIRED_PACKAGES = {
 OPTIONAL_PACKAGES = {
     "MetaTrader5": "MetaTrader5",
 }
+DEFAULT_RUNTIME_MODEL_NAME = "models/model_<symbol>_best.zip"
+DEFAULT_RUNTIME_SCALER_NAME = "models/scaler_<SYMBOL>.pkl"
+RUNTIME_ACTION_MAP = build_action_map(list(ACTION_SL_MULTS), list(ACTION_TP_MULTS))
+RUNTIME_OBSERVATION_SHAPE = [1, len(FEATURE_COLS) + STATE_FEATURE_COUNT]
 
 
 def _print_header(title: str) -> None:
     print(f"\n{title}")
     print("-" * len(title))
+
+
+def _display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(ROOT_DIR))
+    except ValueError:
+        return str(path)
 
 
 def _read_requirements() -> set[str]:
@@ -103,12 +125,89 @@ def _check_file_presence() -> list[str]:
     return issues
 
 
-def _check_runtime_assets() -> list[str]:
+def _manifest_priority(path: Path, symbol: str) -> int:
+    normalized_symbol = symbol.strip().upper()
+    if path.name.lower() == f"artifact_manifest_{normalized_symbol.lower()}.json":
+        return 0
+    if path.name == "artifact_manifest.json":
+        return 1
+    return 2
+
+
+def _select_runtime_manifests() -> tuple[list[tuple[Path, object]], list[str]]:
+    selected: dict[str, tuple[int, Path, object]] = {}
     issues: list[str] = []
+
+    for manifest_path in list_manifest_paths():
+        try:
+            manifest = load_manifest(manifest_path)
+        except Exception as exc:
+            issues.append(f"Invalid artifact manifest {_display_path(manifest_path)}: {exc}")
+            continue
+
+        symbol = str(getattr(manifest, "strategy_symbol", "")).strip().upper()
+        if not symbol:
+            issues.append(f"Artifact manifest {_display_path(manifest_path)} is missing strategy_symbol.")
+            continue
+
+        priority = _manifest_priority(manifest_path, symbol)
+        current = selected.get(symbol)
+        if current is None or priority < current[0]:
+            selected[symbol] = (priority, manifest_path, manifest)
+
+    bundles = [(path, manifest) for _, path, manifest in sorted(selected.values(), key=lambda item: item[2].strategy_symbol)]
+    return bundles, issues
+
+
+def _validate_runtime_manifest_bundle(
+    manifest_path: Path,
+    manifest,
+    *,
+    expected_ticks: int,
+    expected_dataset_id: str,
+) -> None:
+    manifest_ticks = getattr(manifest, "bar_construction_ticks_per_bar", None) or getattr(manifest, "ticks_per_bar", None)
+    if manifest_ticks is not None and int(manifest_ticks) != int(expected_ticks):
+        raise RuntimeError(
+            f"Manifest bar_construction_ticks_per_bar={int(manifest_ticks)} does not match active dataset spec {int(expected_ticks)}."
+        )
+
+    symbol = str(manifest.strategy_symbol).strip().upper()
+    load_validated_model(
+        manifest,
+        expected_symbol=symbol,
+        expected_action_map=RUNTIME_ACTION_MAP,
+        expected_observation_shape=RUNTIME_OBSERVATION_SHAPE,
+        expected_dataset_id=expected_dataset_id,
+    )
+    load_validated_scaler(
+        manifest,
+        expected_symbol=symbol,
+        expected_action_map=RUNTIME_ACTION_MAP,
+        expected_observation_shape=RUNTIME_OBSERVATION_SHAPE,
+        expected_dataset_id=expected_dataset_id,
+    )
+    load_validated_vecnormalize(
+        manifest,
+        expected_symbol=symbol,
+        expected_action_map=RUNTIME_ACTION_MAP,
+        expected_observation_shape=RUNTIME_OBSERVATION_SHAPE,
+        expected_dataset_id=expected_dataset_id,
+    )
+
+
+def _check_runtime_assets(*, strict_runtime_assets: bool = False) -> tuple[list[str], list[str]]:
+    issues: list[str] = []
+    warnings: list[str] = []
+    dataset_path: Path | None = None
+    expected_ticks: int | None = None
+    expected_dataset_id: str | None = None
 
     try:
         dataset_path = resolve_dataset_path()
-        print(f"Dataset: {dataset_path.relative_to(ROOT_DIR)}")
+        expected_dataset_id = dataset_id_for_path(dataset_path)
+        print(f"Dataset: {_display_path(dataset_path)}")
+        expected_ticks = resolve_bar_construction_ticks_per_bar("BAR_SPEC_TICKS_PER_BAR", "TRADING_TICKS_PER_BAR")
         dataset_build_info = load_dataset_build_info(required=False)
         if dataset_build_info is None:
             issues.append("Dataset build metadata missing: data/dataset_build_info.json")
@@ -116,7 +215,6 @@ def _check_runtime_assets() -> list[str]:
             actual_ticks = dataset_build_info_ticks_per_bar(dataset_build_info)
             if actual_ticks is not None:
                 print(f"Bar spec: {actual_ticks} ticks/bar")
-            expected_ticks = resolve_bar_construction_ticks_per_bar("BAR_SPEC_TICKS_PER_BAR", "TRADING_TICKS_PER_BAR")
             try:
                 validate_dataset_bar_spec(
                     dataset_path=dataset_path,
@@ -152,27 +250,74 @@ def _check_runtime_assets() -> list[str]:
     except FileNotFoundError as exc:
         issues.append(str(exc))
 
-    try:
-        model_path = resolve_model_path()
-        print(f"Model:   {model_path.relative_to(ROOT_DIR)}")
-    except FileNotFoundError as exc:
-        issues.append(str(exc))
-
-    scaler_path = resolve_scaler_path(symbol="EURUSD", required=False)
-    if scaler_path is None:
-        issues.append(
-            "No scaler found. Expected models/scaler_EURUSD.pkl or models/scaler_features.pkl."
-        )
+    manifest_bundles, manifest_issues = _select_runtime_manifests()
+    issues.extend(manifest_issues)
+    if manifest_bundles:
+        if expected_ticks is not None and expected_dataset_id is not None:
+            for manifest_path, manifest in manifest_bundles:
+                symbol = str(manifest.strategy_symbol).strip().upper()
+                try:
+                    _validate_runtime_manifest_bundle(
+                        manifest_path,
+                        manifest,
+                        expected_ticks=expected_ticks,
+                        expected_dataset_id=expected_dataset_id,
+                    )
+                    print(f"Runtime bundle {symbol}: OK ({_display_path(manifest_path)})")
+                except Exception as exc:
+                    issues.append(
+                        f"Runtime bundle {symbol} failed validation from {_display_path(manifest_path)}: {exc}"
+                    )
+        else:
+            warnings.append("Artifact manifests were found, but runtime bundle validation was skipped because the active dataset could not be resolved.")
     else:
-        print(f"Scaler:  {scaler_path.relative_to(ROOT_DIR)}")
+        message = (
+            "No artifact manifest found. Expected a symbol-scoped manifest like "
+            "models/artifact_manifest_EURUSD.json or the compatibility alias models/artifact_manifest.json."
+        )
+        if strict_runtime_assets:
+            issues.append(message)
+        else:
+            warnings.append(message)
+
+        model_path = resolve_model_path(required=False)
+        if model_path is None:
+            message = f"No trained model found. Expected a symbol-scoped artifact like {DEFAULT_RUNTIME_MODEL_NAME}."
+            if strict_runtime_assets:
+                issues.append(message)
+            else:
+                warnings.append(message)
+        else:
+            print(f"Model:   {_display_path(model_path)}")
+
+        scaler_path = resolve_scaler_path(required=False)
+        if scaler_path is None:
+            message = (
+                "No scaler found. Expected a symbol-scoped scaler like "
+                f"{DEFAULT_RUNTIME_SCALER_NAME} or the compatibility alias models/scaler_features.pkl."
+            )
+            if strict_runtime_assets:
+                issues.append(message)
+            else:
+                warnings.append(message)
+        else:
+            print(f"Scaler:  {_display_path(scaler_path)}")
 
     if not (DATA_DIR / "FOREX_MULTI_SET.csv").exists():
-        issues.append("Compatibility dataset alias missing: data/FOREX_MULTI_SET.csv")
+        message = "Compatibility dataset alias missing: data/FOREX_MULTI_SET.csv"
+        if strict_runtime_assets:
+            issues.append(message)
+        else:
+            warnings.append(message)
 
     if not list(MODELS_DIR.glob("*.zip")):
-        issues.append("No zipped model artifacts found in models/.")
+        message = "No zipped model artifacts found in models/."
+        if strict_runtime_assets:
+            issues.append(message)
+        else:
+            warnings.append(message)
 
-    return issues
+    return issues, warnings
 
 
 def _check_venv_layout() -> list[str]:
@@ -226,7 +371,7 @@ def _check_requirements() -> list[str]:
     return issues
 
 
-def main() -> None:
+def main(*, strict_runtime_assets: bool = False) -> int:
     print("Trading Project Health Check")
     print("============================")
 
@@ -242,11 +387,13 @@ def main() -> None:
         print("Core repo files are present.")
 
     _print_header("Runtime Assets")
-    asset_issues = _check_runtime_assets()
+    asset_issues, asset_warnings = _check_runtime_assets(strict_runtime_assets=strict_runtime_assets)
     all_issues.extend(asset_issues)
     if asset_issues:
         for issue in asset_issues:
             print(f"[ISSUE] {issue}")
+    for warning in asset_warnings:
+        print(f"[WARN] {warning}")
 
     _print_header("Virtual Environment")
     venv_issues = _check_venv_layout()
@@ -275,7 +422,17 @@ def main() -> None:
             print("Recommended next step: address the runtime asset or dependency issues above, then rerun this script.")
     else:
         print("No obvious file or dependency issues detected.")
+    if asset_warnings:
+        print(f"Runtime asset warnings: {len(asset_warnings)}")
+    return 1 if all_issues else 0
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Trading project health checks")
+    parser.add_argument(
+        "--strict-runtime-assets",
+        action="store_true",
+        help="Treat missing model/scaler/compatibility dataset artifacts as hard issues.",
+    )
+    args = parser.parse_args()
+    raise SystemExit(main(strict_runtime_assets=args.strict_runtime_assets))

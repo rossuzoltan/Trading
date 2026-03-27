@@ -37,7 +37,14 @@ For data repair:
 
 - Continue hardening or operating the supported runtime, not redesigning the architecture from scratch.
 - Prefer per-symbol training and per-symbol OOS evaluation.
-- Treat EURUSD and GBPUSD as potentially under-covered until fresh downloads prove otherwise.
+- Use `data/dataset_build_info.json` plus `.\tools\project_healthcheck.py` as the source of truth for active bar spec and symbol coverage.
+- Do not treat older low-count handoff notes as current evidence once the latest dataset rebuild and healthcheck disagree.
+
+## Current Artifact Expectations
+
+- Symbol-scoped training writes artifacts under `models/`, including `artifact_manifest_<PAIR>.json`, `model_<pair>_best.zip`, and `scaler_<PAIR>.pkl`.
+- Evaluation and live flows are manifest-first; do not treat a bare model zip as sufficient runtime readiness evidence.
+- If a task changes training artifacts or deployment readiness, inspect the manifest alongside the model, scaler, VecNormalize file, diagnostics, and preflight output.
 
 ## Guardrails
 

@@ -23,6 +23,8 @@ from event_pipeline import (
     JsonStateStore,
     ModelPolicy,
     Mt5CursorTickSource,
+    OrderIntent,
+    ReplayBroker,
     RiskEngine,
     RiskLimits,
     RuntimeEngine,
@@ -397,6 +399,62 @@ class RuntimeRefactorTests(unittest.TestCase):
         self.assertEqual(action.action_type, ActionType.HOLD)
         np.testing.assert_allclose(normalizer.seen, observation)
         np.testing.assert_allclose(model.last_observation, observation + 0.5)
+
+    def test_replay_broker_marks_to_liquidation_and_charges_full_round_trip_spread(self):
+        broker = ReplayBroker(symbol="EURUSD", initial_equity=1000.0, commission_per_lot=0.0, slippage_pips=0.0)
+        fill_bar = replace(make_bar(0, 1.1000), open=1.1000, high=1.1000, low=1.1000, avg_spread=0.0002)
+        open_intent = OrderIntent(
+            symbol="EURUSD",
+            action=ActionSpec(ActionType.OPEN, direction=1, sl_value=1.0, tp_value=1.0),
+            volume=0.01,
+            submitted_time_msc=fill_bar.end_time_msc,
+            requested_price=fill_bar.close,
+        )
+        broker.submit_order(open_intent)
+        broker.advance_bar(fill_bar)
+
+        marked_equity = broker.current_equity("EURUSD", mark_price=fill_bar.close, avg_spread=fill_bar.avg_spread)
+        self.assertAlmostEqual(999.8, marked_equity, places=4)
+
+        close_intent = OrderIntent(
+            symbol="EURUSD",
+            action=ActionSpec(ActionType.CLOSE),
+            volume=0.01,
+            submitted_time_msc=fill_bar.end_time_msc,
+            requested_price=fill_bar.close,
+        )
+        broker.submit_order(close_intent)
+        broker.advance_bar(fill_bar)
+
+        self.assertAlmostEqual(999.8, broker.current_equity("EURUSD"), places=4)
+        self.assertEqual(1, len(broker.trade_log))
+        self.assertAlmostEqual(-2.0, float(broker.trade_log[0]["net_pips"]), places=6)
+
+    def test_replay_broker_recomputes_volume_and_protective_levels_from_fill_price(self):
+        broker = ReplayBroker(symbol="EURUSD", initial_equity=1000.0, commission_per_lot=0.0, slippage_pips=0.0)
+        fill_bar = replace(make_bar(0, 1.1010), open=1.1010, high=1.1010, low=1.1010, avg_spread=0.0002)
+        open_intent = OrderIntent(
+            symbol="EURUSD",
+            action=ActionSpec(ActionType.OPEN, direction=1, sl_value=1.0, tp_value=2.0),
+            volume=0.01,
+            submitted_time_msc=fill_bar.end_time_msc,
+            requested_price=1.1000,
+            sl_price=1.0990,
+            tp_price=1.1020,
+            sl_distance_price=0.0010,
+            tp_distance_price=0.0020,
+            risk_fraction=0.01,
+            lot_size_min=0.01,
+            lot_size_max=1.0,
+        )
+        broker.submit_order(open_intent)
+        broker.advance_bar(fill_bar)
+
+        position = broker.current_position("EURUSD")
+        self.assertAlmostEqual(1.1011, float(position.entry_price), places=6)
+        self.assertAlmostEqual(float(position.entry_price) - 0.0010, float(position.sl_price), places=6)
+        self.assertAlmostEqual(float(position.entry_price) + 0.0020, float(position.tp_price), places=6)
+        self.assertAlmostEqual(0.1, float(position.volume), places=6)
 
     def test_training_env_reward_is_bounded_and_tracks_risk_terms(self):
         frame = pd.DataFrame(

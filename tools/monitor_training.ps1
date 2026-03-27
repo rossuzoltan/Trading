@@ -7,7 +7,8 @@ param(
     [switch]$NoLoop
 )
 
-Set-Location "C:\dev\trading"
+$ProjectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+Set-Location $ProjectRoot
 
 function Get-TrainProcess {
   Get-CimInstance Win32_Process |
