@@ -14,7 +14,8 @@ URL:    https://datafeed.dukascopy.com/datafeed/{PAIR}/{YEAR}/{MONTH:02}/{DAY:02
 
 Output:
     data/{PAIR}_ticks.parquet     raw tick data
-    data/{PAIR}_volbars.csv       volume bars (drop-in for FOREX_MULTI_SET.csv)
+    data/{PAIR}_volbars_{N}.csv   volume bars for the requested bar spec
+    data/{PAIR}_volbars.csv       compatibility alias to the latest requested bar spec
 
 Usage:
     python download_dukascopy.py
@@ -26,6 +27,7 @@ from __future__ import annotations
 import argparse
 import io
 import os
+import shutil
 import struct
 import sys
 import time as time_mod
@@ -37,10 +39,15 @@ import pandas as pd
 import requests
 import concurrent.futures
 
+from trading_config import (
+    DEFAULT_BAR_CONSTRUCTION_TICKS_PER_BAR,
+    resolve_bar_construction_ticks_per_bar,
+)
+
 # ── Config ─────────────────────────────────────────────────────────────────────
 PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD"]
 DAYS_BACK = 1095          # 3 years of history by default
-TICKS_PER_BAR = 2000      # 2000 individual ticks per bar (standard for FX)
+TICKS_PER_BAR = DEFAULT_BAR_CONSTRUCTION_TICKS_PER_BAR
 OUTPUT_DIR   = "data"
 
 DUKA_BASE    = "https://datafeed.dukascopy.com/datafeed"
@@ -316,11 +323,15 @@ def main(
             all_vbars.append(vbars)
 
             # Per-pair CSV
-            vbar_path = os.path.join(OUTPUT_DIR, f"{pair}_volbars.csv")
+            vbar_path = os.path.join(OUTPUT_DIR, f"{pair}_volbars_{int(ticks_per_bar)}.csv")
             vbars_out = vbars.reset_index()
             vbars_out["Gmt time"] = vbars_out["Gmt time"].dt.strftime("%Y.%m.%d %H:%M:%S")
             vbars_out.to_csv(vbar_path, index=False)
             print(f"  Volume bars saved -> {vbar_path}")
+            legacy_vbar_path = os.path.join(OUTPUT_DIR, f"{pair}_volbars.csv")
+            if legacy_vbar_path != vbar_path:
+                shutil.copyfile(vbar_path, legacy_vbar_path)
+                print(f"  Volume bars alias -> {legacy_vbar_path}")
 
     if all_vbars:
         combined = pd.concat(all_vbars)
@@ -337,8 +348,12 @@ if __name__ == "__main__":
     parser.add_argument("--pairs",      nargs="+", default=PAIRS)
     parser.add_argument("--days",       type=int,  default=DAYS_BACK,
                         help="Days of history (default 1095 = 3 years)")
-    parser.add_argument("--ticks-per-bar", type=int, default=TICKS_PER_BAR,
-                        help="Ticks per bar (default 2000)")
+    parser.add_argument(
+        "--ticks-per-bar",
+        type=int,
+        default=resolve_bar_construction_ticks_per_bar("BAR_SPEC_TICKS_PER_BAR", "TRADING_TICKS_PER_BAR"),
+        help="Ticks per bar (defaults to BAR_SPEC_TICKS_PER_BAR / TRADING_TICKS_PER_BAR / 2000)",
+    )
     parser.add_argument("--bar-volume", type=float, default=None,
                         help="Deprecated alias for --ticks-per-bar (kept for compatibility)")
     parser.add_argument("--start", type=str, default=None, help="Optional UTC start timestamp (ISO-like)")

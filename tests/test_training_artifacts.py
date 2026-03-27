@@ -12,6 +12,8 @@ from train_agent import (
     _archive_paths,
     _build_promoted_training_diagnostics,
     _clear_legacy_checkpoint_artifacts,
+    _deployment_candidate_rank,
+    _holdout_deployment_blockers,
 )
 
 
@@ -113,6 +115,38 @@ class TrainingArtifactTests(unittest.TestCase):
         self.assertEqual([0.02], callback.metrics["train/approx_kl"])
         self.assertEqual([0.15], callback.metrics["train/explained_variance"])
         self.assertEqual([1.5], callback.metrics["train/value_loss"])
+
+    def test_holdout_blockers_include_trade_quality_checks(self):
+        blockers = _holdout_deployment_blockers(
+            holdout_sharpe=0.35,
+            holdout_max_drawdown=0.10,
+            holdout_final_equity=1005.0,
+            holdout_profit_factor=1.02,
+            holdout_expectancy=-0.01,
+            holdout_trade_count=3,
+        )
+        self.assertTrue(any("profit factor" in blocker.lower() for blocker in blockers))
+        self.assertTrue(any("expectancy" in blocker.lower() for blocker in blockers))
+        self.assertTrue(any("trades" in blocker.lower() for blocker in blockers))
+
+    def test_candidate_rank_prefers_holdout_profit_factor_after_sharpe(self):
+        strong = _deployment_candidate_rank(
+            {
+                "deploy_ready": True,
+                "holdout_sharpe": 0.40,
+                "holdout_profit_factor": 1.25,
+                "val_sharpe": 0.10,
+            }
+        )
+        weak = _deployment_candidate_rank(
+            {
+                "deploy_ready": True,
+                "holdout_sharpe": 0.40,
+                "holdout_profit_factor": 1.05,
+                "val_sharpe": 0.20,
+            }
+        )
+        self.assertGreater(strong, weak)
 
 
 if __name__ == "__main__":

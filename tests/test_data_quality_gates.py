@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
 
 from build_h1_dataset import _coverage_summary
+from dataset_validation import validate_symbol_bar_spec
+from project_paths import validate_dataset_bar_spec
 from trading_config import resolve_bar_construction_ticks_per_bar
 from validation_metrics import assess_training_data_sufficiency, build_deployment_gate
 
@@ -205,6 +210,81 @@ class DataQualityGateTests(unittest.TestCase):
     def test_bar_spec_default_is_2000(self):
         with patch.dict("os.environ", {}, clear=True):
             self.assertEqual(2000, resolve_bar_construction_ticks_per_bar("BAR_SPEC_TICKS_PER_BAR", "TRADING_TICKS_PER_BAR"))
+
+    def test_validate_dataset_bar_spec_accepts_matching_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dataset_path = Path(tmp) / "DATA_CLEAN_VOLUME.csv"
+            dataset_path.write_text("Gmt time,Symbol\n", encoding="utf-8")
+            metadata_path = Path(tmp) / "dataset_build_info.json"
+            metadata_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "bar_construction_ticks_per_bar": 2000,
+                        "ticks_per_bar": 2000,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            build_info = validate_dataset_bar_spec(
+                dataset_path=dataset_path,
+                expected_ticks_per_bar=2000,
+                metadata_path=metadata_path,
+                metadata_required=True,
+            )
+        self.assertEqual(2000, build_info["bar_construction_ticks_per_bar"])
+
+    def test_validate_dataset_bar_spec_rejects_mismatched_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dataset_path = Path(tmp) / "DATA_CLEAN_VOLUME.csv"
+            dataset_path.write_text("Gmt time,Symbol\n", encoding="utf-8")
+            metadata_path = Path(tmp) / "dataset_build_info.json"
+            metadata_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "bar_construction_ticks_per_bar": 2000,
+                        "ticks_per_bar": 2000,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaises(RuntimeError) as ctx:
+                validate_dataset_bar_spec(
+                    dataset_path=dataset_path,
+                    expected_ticks_per_bar=250,
+                    metadata_path=metadata_path,
+                    metadata_required=True,
+                )
+        self.assertIn("built with bar_construction_ticks_per_bar=2000", str(ctx.exception))
+
+    def test_validate_symbol_bar_spec_allows_single_tail_partial_row(self):
+        frame = pd.DataFrame(
+            {
+                "Gmt time": pd.to_datetime(
+                    ["2026-01-01T00:00:00Z", "2026-01-01T01:00:00Z", "2026-01-01T02:00:00Z"],
+                    utc=True,
+                ),
+                "Volume": [2000, 2000, 1556],
+            }
+        )
+        summary = validate_symbol_bar_spec(frame, expected_ticks_per_bar=2000, symbol="EURUSD")
+        self.assertEqual(1, summary["partial_rows"])
+        self.assertTrue(summary["partial_only_at_tail"])
+
+    def test_validate_symbol_bar_spec_rejects_mixed_bar_sizes(self):
+        frame = pd.DataFrame(
+            {
+                "Gmt time": pd.to_datetime(
+                    ["2026-01-01T00:00:00Z", "2026-01-01T01:00:00Z", "2026-01-01T02:00:00Z"],
+                    utc=True,
+                ),
+                "Volume": [250, 250, 250],
+            }
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            validate_symbol_bar_spec(frame, expected_ticks_per_bar=2000, symbol="USDJPY")
+        self.assertIn("mix bar sizes", str(ctx.exception))
 
 
 if __name__ == "__main__":

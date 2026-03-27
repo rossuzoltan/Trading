@@ -9,7 +9,7 @@ Use this checklist after a training run, restart drill, and shadow session.
 2. Build the ops attestation from the execution audit and restart evidence:
    - `.\.venv\Scripts\python.exe .\ops_attestation_helper.py --symbol EURUSD --attested-by "ops" --shadow-days-completed 14 --notes "shadow run evidence"`
 3. Print the operating checklist:
-   - `.\.venv\Scripts\python.exe .\live_operating_checklist.py --symbol EURUSD --ticks-per-bar 5000`
+   - `.\.venv\Scripts\python.exe .\live_operating_checklist.py --symbol EURUSD`
 
 ## What the checklist enforces
 

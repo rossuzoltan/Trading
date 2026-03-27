@@ -9,15 +9,22 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import subprocess
+import pandas as pd
+from dataset_validation import validate_symbol_bar_spec
 from interpreter_guard import ensure_project_venv
 from project_paths import (
     ROOT_DIR,
     DATA_DIR,
     MODELS_DIR,
+    dataset_build_info_ticks_per_bar,
+    load_dataset_build_info,
     resolve_dataset_path,
     resolve_model_path,
     resolve_scaler_path,
+    validate_dataset_bar_spec,
+    validate_dataset_integrity,
 )
+from trading_config import resolve_bar_construction_ticks_per_bar
 
 ensure_project_venv(project_root=ROOT, script_path=__file__)
 
@@ -102,6 +109,46 @@ def _check_runtime_assets() -> list[str]:
     try:
         dataset_path = resolve_dataset_path()
         print(f"Dataset: {dataset_path.relative_to(ROOT_DIR)}")
+        dataset_build_info = load_dataset_build_info(required=False)
+        if dataset_build_info is None:
+            issues.append("Dataset build metadata missing: data/dataset_build_info.json")
+        else:
+            actual_ticks = dataset_build_info_ticks_per_bar(dataset_build_info)
+            if actual_ticks is not None:
+                print(f"Bar spec: {actual_ticks} ticks/bar")
+            expected_ticks = resolve_bar_construction_ticks_per_bar("BAR_SPEC_TICKS_PER_BAR", "TRADING_TICKS_PER_BAR")
+            try:
+                validate_dataset_bar_spec(
+                    dataset_path=dataset_path,
+                    expected_ticks_per_bar=expected_ticks,
+                    metadata_required=True,
+                )
+                integrity = validate_dataset_integrity(
+                    dataset_path=dataset_path,
+                    expected_ticks_per_bar=expected_ticks,
+                    metadata_required=True,
+                )
+                symbols = ", ".join(integrity.get("symbols", []))
+                print(f"Dataset integrity: OK ({symbols})")
+            except RuntimeError as exc:
+                issues.append(str(exc))
+            try:
+                dataset_frame = pd.read_csv(dataset_path, usecols=["Symbol", "Gmt time", "Volume"])
+                for symbol in sorted(dataset_frame["Symbol"].astype(str).str.upper().unique().tolist()):
+                    symbol_frame = dataset_frame[dataset_frame["Symbol"].astype(str).str.upper() == symbol].copy()
+                    summary = validate_symbol_bar_spec(
+                        symbol_frame,
+                        expected_ticks_per_bar=expected_ticks,
+                        symbol=symbol,
+                    )
+                    partial_rows = int(summary["partial_rows"])
+                    if partial_rows:
+                        print(
+                            f"Bar spec audit {symbol}: {summary['exact_match_rows']} exact, "
+                            f"{partial_rows} partial tail row(s)"
+                        )
+            except RuntimeError as exc:
+                issues.append(str(exc))
     except FileNotFoundError as exc:
         issues.append(str(exc))
 

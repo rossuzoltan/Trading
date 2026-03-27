@@ -39,7 +39,7 @@ from event_pipeline import (
     VolumeBarBuilder,
 )
 from feature_engine import FEATURE_COLS, FeatureEngine, WARMUP_BARS
-from project_paths import resolve_dataset_path, resolve_manifest_path
+from project_paths import resolve_dataset_path, resolve_manifest_path, validate_dataset_bar_spec
 from runtime_common import STATE_FEATURE_COUNT, ActionSpec, ActionType, build_action_map
 from symbol_utils import pip_size_for_symbol
 from trading_config import (
@@ -151,6 +151,11 @@ def _load_warmup_bars(symbol: str, ticks_per_bar: int) -> pd.DataFrame:
                 "Set LIVE_ALLOW_WARMUP_DATASET_FALLBACK=1 only if you have separately verified bar-spec parity."
             )
         dataset_path = resolve_dataset_path()
+        validate_dataset_bar_spec(
+            dataset_path=dataset_path,
+            expected_ticks_per_bar=ticks_per_bar,
+            metadata_required=True,
+        )
         frame = pd.read_csv(dataset_path, low_memory=False, parse_dates=["Gmt time"])
         if "Symbol" in frame.columns:
             frame = frame[frame["Symbol"].astype(str).str.upper() == symbol.upper()].copy()
@@ -553,15 +558,21 @@ def bootstrap_live_runtime(
 ) -> tuple[RuntimeEngine, VolumeBarBuilder, JsonStateStore, Mt5CursorTickSource]:
     symbol = symbol.upper()
     dataset_path = resolve_dataset_path()
-    dataset_id = dataset_id_for_path(dataset_path)
     manifest_path = resolve_manifest_path(symbol=symbol)
     manifest = load_manifest(manifest_path)
     manifest_ticks = manifest.bar_construction_ticks_per_bar or manifest.ticks_per_bar
+    if manifest_ticks is not None:
+        validate_dataset_bar_spec(
+            dataset_path=dataset_path,
+            expected_ticks_per_bar=int(manifest_ticks),
+            metadata_required=True,
+        )
     if manifest_ticks is not None and int(manifest_ticks) != int(ticks_per_bar) and not LIVE_ALLOW_BAR_SPEC_MISMATCH:
         raise RuntimeError(
             f"Manifest bar_construction_ticks_per_bar={manifest_ticks} does not match live bar_construction_ticks_per_bar={ticks_per_bar}. "
             "Retrain/rebuild manifests or set LIVE_ALLOW_BAR_SPEC_MISMATCH=1 for an explicit override."
         )
+    dataset_id = dataset_id_for_path(dataset_path)
 
     action_map = build_action_map(ATR_MULT_SL, ATR_MULT_TP)
     observation_shape = [1, len(FEATURE_COLS) + STATE_FEATURE_COUNT]

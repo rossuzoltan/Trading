@@ -44,6 +44,7 @@ usage is still the least ambiguous path.
 ## Bar Spec
 
 - `BAR_SPEC_TICKS_PER_BAR` is the explicit volume-bar construction setting used for train/live/runtime parity.
+- `download_dukascopy.py` and `build_volume_bars.py` now default to that same resolved bar spec, so build/train/live stay aligned unless you explicitly override them.
 - `TRAIN_BAR_TICKS`, `TRAIN_TICKS_PER_BAR`, and `TRADING_TICKS_PER_BAR` are still accepted as fallbacks for compatibility.
 - This setting describes how the volume bars were built. It is not an inner-loop training speed knob in `train_agent.py`.
 - Training throughput is primarily driven by dataset size, `TRAIN_TOTAL_TIMESTEPS`, `TRAIN_PPO_N_STEPS`, `TRAIN_NUM_ENVS`, CPU/GPU availability, and whether `SubprocVecEnv` can be used.
@@ -63,7 +64,7 @@ usage is still the least ambiguous path.
 
 ## MT5 Live Readiness
 
-- Run `.\.venv\Scripts\python.exe .\mt5_live_preflight.py --symbol EURUSD --ticks-per-bar 5000` before any live MT5 session.
+- Run `.\.venv\Scripts\python.exe .\mt5_live_preflight.py --symbol EURUSD` before any live MT5 session.
 - The preflight writes `models/live_preflight_eurusd.json` and fails closed when gate approval, MT5 connectivity, bar-spec parity, or ops evidence is missing.
 - Live orders now append a structured execution audit to `models/execution_audit_eurusd.jsonl`.
 - Summarize real fill drift with `.\.venv\Scripts\python.exe .\tools\summarize_execution_audit.py --symbol EURUSD`.
