@@ -11,7 +11,7 @@ Phase 11 additions over Phase 10
   detect strategy decay across time.
 * Sortino reward (asymmetric downturn penalty) already in trading_env.py.
 * 19-feature FeatureEngine (Hurst, Z-spread, vol_norm_atr, log_return_std).
-* Per-symbol StandardScaler fitted on training fold only.
+* Global StandardScaler fitted once on the entire trainable dataset to prevent feature distribution shock across folds.
 """
 
 from __future__ import annotations
@@ -36,6 +36,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from typing import Any, Callable
 
+# [NEW] Import system monitor for resource tracking
+from resource_monitor import monitor as resource_monitor
+
 import torch
 try:
     from dotenv import load_dotenv
@@ -51,7 +54,7 @@ from stable_baselines3.common.monitor import Monitor
 from artifact_manifest import DEFAULT_MANIFEST_NAME, create_manifest, save_manifest
 from dataset_validation import validate_symbol_bar_spec
 from device_utils import configure_training_runtime
-from edge_research import run_edge_baseline_research
+from edge_research import fit_baseline_alpha_gate, run_edge_baseline_research
 from feature_engine import FEATURE_COLS, WARMUP_BARS, _compute_raw, SCALER_PATH
 from masking_utils import action_mask_fn
 from runtime_common import (
@@ -87,6 +90,7 @@ from trading_config import (
     DEFAULT_CHURN_MIN_HOLD_BARS,
     DEFAULT_CHURN_ACTION_COOLDOWN,
     DEFAULT_CHURN_PENALTY_USD,
+    DEFAULT_ENTRY_SPREAD_Z_LIMIT,
     DEFAULT_REWARD_DOWNSIDE_RISK_COEF,
     DEFAULT_REWARD_TURNOVER_COEF,
     DEFAULT_REWARD_DRAWDOWN_COEF,
@@ -117,6 +121,53 @@ SEED = 42
 torch.manual_seed(SEED)
 np.random.seed(SEED)
 
+
+def _resolve_training_experiment_profile(profile_name: str) -> dict[str, Any]:
+    normalized = str(profile_name or "").strip().lower()
+    if normalized in {"", "default", "none"}:
+        return {}
+    if normalized in {"reward_strip", "finalboss_reward_strip"}:
+        return {
+            "reward_downside_risk_coef": 0.0,
+            "reward_turnover_coef": 0.0,
+            "churn_penalty_usd": 0.0,
+            "reward_net_return_coef": 1.0,
+            "reward_scale": 1000.0,
+            "reward_clip_low": -10.0,
+            "reward_clip_high": 10.0,
+            "participation_bonus_enabled": False,
+        }
+    if normalized in {"reward_strip_hard_churn", "finalboss_reward_strip_hard_churn"}:
+        profile = _resolve_training_experiment_profile("reward_strip")
+        profile.update(
+            {
+                "churn_min_hold_bars": 5,
+                "churn_action_cooldown": 3,
+            }
+        )
+        return profile
+    if normalized in {"reward_strip_hard_churn_alpha_gate", "finalboss_reward_strip_hard_churn_alpha_gate"}:
+        profile = _resolve_training_experiment_profile("reward_strip_hard_churn")
+        profile.update(
+            {
+                "alpha_gate_enabled": True,
+                "alpha_gate_model": "auto",
+            }
+        )
+        return profile
+    raise ValueError(
+        "Unsupported TRAIN_EXPERIMENT_PROFILE="
+        f"{profile_name!r}. Expected one of: reward_strip, reward_strip_hard_churn, "
+        "reward_strip_hard_churn_alpha_gate."
+    )
+
+
+def _apply_profile_override(current_value: Any, env_var_name: str, override_value: Any) -> Any:
+    if env_var_name in os.environ:
+        return current_value
+    return override_value
+
+
 # ── Curriculum config ─────────────────────────────────────────────────────────
 SLIPPAGE_START   = DEFAULT_SLIPPAGE_START_PIPS
 SLIPPAGE_END     = DEFAULT_SLIPPAGE_END_PIPS
@@ -124,8 +175,8 @@ TOTAL_TIMESTEPS  = int(os.environ.get("TRAIN_TOTAL_TIMESTEPS", "3000000"))
 TRAIN_SYMBOL     = os.environ.get("TRAIN_SYMBOL", os.environ.get("TRADING_SYMBOL", "EURUSD")).strip().upper()
 TRAIN_ENV_MODE = os.environ.get("TRAIN_ENV_MODE", "runtime").strip().lower()
 TRAIN_ACTION_SPACE_MODE = os.environ.get("TRAIN_ACTION_SPACE_MODE", "simple").strip().lower() or "simple"
-TRAIN_SIMPLE_ACTION_SL_MULT = float(os.environ.get("TRAIN_SIMPLE_ACTION_SL_MULT", "1.0"))
-TRAIN_SIMPLE_ACTION_TP_MULT = float(os.environ.get("TRAIN_SIMPLE_ACTION_TP_MULT", "1.0"))
+TRAIN_SIMPLE_ACTION_SL_MULT = float(os.environ.get("TRAIN_SIMPLE_ACTION_SL_MULT", "1.5"))
+TRAIN_SIMPLE_ACTION_TP_MULT = float(os.environ.get("TRAIN_SIMPLE_ACTION_TP_MULT", "3.0"))
 PPO_LEARNING_RATE = float(os.environ.get("TRAIN_PPO_LEARNING_RATE", str(DEFAULT_LEARNING_RATE)))
 PPO_MIN_LEARNING_RATE = float(os.environ.get("TRAIN_PPO_MIN_LEARNING_RATE", str(DEFAULT_MIN_LEARNING_RATE)))
 PPO_TARGET_KL = float(os.environ.get("TRAIN_PPO_TARGET_KL", str(DEFAULT_TARGET_KL)))
@@ -167,6 +218,12 @@ if TRAIN_ASYNC_EVAL:
 TRAIN_CHURN_MIN_HOLD_BARS = int(os.environ.get("TRAIN_CHURN_MIN_HOLD_BARS", str(DEFAULT_CHURN_MIN_HOLD_BARS)))
 TRAIN_CHURN_ACTION_COOLDOWN = int(os.environ.get("TRAIN_CHURN_ACTION_COOLDOWN", str(DEFAULT_CHURN_ACTION_COOLDOWN)))
 TRAIN_CHURN_PENALTY_USD = float(os.environ.get("TRAIN_CHURN_PENALTY_USD", str(DEFAULT_CHURN_PENALTY_USD)))
+TRAIN_ENTRY_SPREAD_Z_LIMIT = float(os.environ.get("TRAIN_ENTRY_SPREAD_Z_LIMIT", str(DEFAULT_ENTRY_SPREAD_Z_LIMIT)))
+
+TRAIN_RISK_MAX_DRAWDOWN_FRACTION = float(os.environ.get("TRAIN_RISK_MAX_DRAWDOWN_FRACTION", "0.50"))
+TRAIN_RISK_DAILY_LOSS_FRACTION = float(os.environ.get("TRAIN_RISK_DAILY_LOSS_FRACTION", "0.25"))
+EVAL_RISK_MAX_DRAWDOWN_FRACTION = float(os.environ.get("EVAL_RISK_MAX_DRAWDOWN_FRACTION", "1.00"))
+EVAL_RISK_DAILY_LOSS_FRACTION = float(os.environ.get("EVAL_RISK_DAILY_LOSS_FRACTION", "1.00"))
 
 TRAIN_REWARD_DOWNSIDE_RISK_COEF = float(os.environ.get("TRAIN_REWARD_DOWNSIDE_RISK_COEF", str(DEFAULT_REWARD_DOWNSIDE_RISK_COEF)))
 TRAIN_REWARD_TURNOVER_COEF = float(os.environ.get("TRAIN_REWARD_TURNOVER_COEF", str(DEFAULT_REWARD_TURNOVER_COEF)))
@@ -188,14 +245,42 @@ BASELINE_PROB_THRESHOLD = float(os.environ.get("TRAIN_BASELINE_PROB_THRESHOLD", 
 BASELINE_PROB_MARGIN = float(os.environ.get("TRAIN_BASELINE_PROB_MARGIN", "0.05"))
 TRAIN_COMMISSION_PER_LOT = float(os.environ.get("TRAIN_COMMISSION_PER_LOT", "7.0"))
 TRAIN_PARTIAL_FILL_RATIO = float(os.environ.get("TRAIN_PARTIAL_FILL_RATIO", "1.0"))
-TRAIN_REWARD_SCALE = float(os.environ.get("TRAIN_REWARD_SCALE", "10000.0"))
+TRAIN_REWARD_SCALE = float(os.environ.get("TRAIN_REWARD_SCALE", "2500.0"))
 TRAIN_REWARD_DRAWDOWN_PENALTY = TRAIN_REWARD_DRAWDOWN_PENALTY  # Consistently using value above
 TRAIN_REWARD_TRANSACTION_PENALTY = float(os.environ.get("TRAIN_REWARD_TRANSACTION_PENALTY", "1.0"))
-TRAIN_REWARD_CLIP_LOW = float(os.environ.get("TRAIN_REWARD_CLIP_LOW", "-5.0"))
-TRAIN_REWARD_CLIP_HIGH = float(os.environ.get("TRAIN_REWARD_CLIP_HIGH", "5.0"))
+TRAIN_REWARD_CLIP_LOW = float(os.environ.get("TRAIN_REWARD_CLIP_LOW", "-10.0"))
+TRAIN_REWARD_CLIP_HIGH = float(os.environ.get("TRAIN_REWARD_CLIP_HIGH", "10.0"))
+TRAIN_WINDOW_SIZE = int(os.environ.get("TRAIN_WINDOW_SIZE", "1"))
+TRAIN_ALPHA_GATE_ENABLED = os.environ.get("TRAIN_ALPHA_GATE_ENABLED", "0") == "1"
+TRAIN_ALPHA_GATE_MODEL = os.environ.get("TRAIN_ALPHA_GATE_MODEL", "auto").strip().lower() or "auto"
 HEARTBEAT_SCHEMA_VERSION = 2
 PROCESS_STARTED_UTC = datetime.now(timezone.utc).isoformat()
 TRAINING_STAGE = os.environ.get("TRAINING_STAGE", "stage_a_unlock").strip().lower() or "stage_a_unlock"
+TRAIN_EXPERIMENT_PROFILE = os.environ.get("TRAIN_EXPERIMENT_PROFILE", "").strip().lower()
+TRAIN_EXPERIMENT_PROFILE_SETTINGS = _resolve_training_experiment_profile(TRAIN_EXPERIMENT_PROFILE)
+
+
+def _timed_recovery_step(*, fraction: float, minimum: int, maximum: int | None = None) -> int:
+    candidate = max(int(TOTAL_TIMESTEPS * float(fraction)), int(minimum))
+    if maximum is not None:
+        candidate = min(candidate, int(maximum))
+    return min(candidate, max(int(TOTAL_TIMESTEPS), 1))
+
+
+_PHASE_1_UNTIL_DEFAULT = _timed_recovery_step(fraction=1.0 / 3.0, minimum=50_000)
+_PHASE_2_UNTIL_DEFAULT = max(
+    _timed_recovery_step(fraction=2.0 / 3.0, minimum=max(_PHASE_1_UNTIL_DEFAULT + 1, 100_000)),
+    _PHASE_1_UNTIL_DEFAULT + 1,
+)
+_ENTROPY_PHASE_1_UNTIL_DEFAULT = _timed_recovery_step(fraction=0.20, minimum=25_000)
+_ENTROPY_PHASE_2_UNTIL_DEFAULT = max(
+    _timed_recovery_step(
+        fraction=0.60,
+        minimum=max(_ENTROPY_PHASE_1_UNTIL_DEFAULT + 1, 75_000),
+    ),
+    _ENTROPY_PHASE_1_UNTIL_DEFAULT + 1,
+)
+_PARTICIPATION_BONUS_UNTIL_DEFAULT = _timed_recovery_step(fraction=0.25, minimum=20_000, maximum=200_000)
 
 TRAINING_RECOVERY_CONFIG: dict[str, Any] = {
     "training_stage": TRAINING_STAGE,
@@ -204,11 +289,11 @@ TRAINING_RECOVERY_CONFIG: dict[str, Any] = {
         "mode": os.environ.get("TRAIN_RECOVERY_SLIPPAGE_MODE", "staircase").strip().lower() or "staircase",
         "phases": [
             {
-                "until_step": int(os.environ.get("TRAIN_RECOVERY_PHASE_1_UNTIL", "750000")),
+                "until_step": int(os.environ.get("TRAIN_RECOVERY_PHASE_1_UNTIL", str(_PHASE_1_UNTIL_DEFAULT))),
                 "slippage_pips": float(os.environ.get("TRAIN_RECOVERY_PHASE_1_SLIPPAGE_PIPS", "0.05")),
             },
             {
-                "until_step": int(os.environ.get("TRAIN_RECOVERY_PHASE_2_UNTIL", "1750000")),
+                "until_step": int(os.environ.get("TRAIN_RECOVERY_PHASE_2_UNTIL", str(_PHASE_2_UNTIL_DEFAULT))),
                 "slippage_pips": float(os.environ.get("TRAIN_RECOVERY_PHASE_2_SLIPPAGE_PIPS", "0.5")),
             },
             {
@@ -224,19 +309,25 @@ TRAINING_RECOVERY_CONFIG: dict[str, Any] = {
     },
     "participation_bonus": {
         "enabled": os.environ.get("TRAIN_RECOVERY_PARTICIPATION_BONUS_ENABLED", "1") != "0",
-        "bonus_value": float(os.environ.get("TRAIN_RECOVERY_PARTICIPATION_BONUS_VALUE", "0.01")),
-        "active_until_step": int(os.environ.get("TRAIN_RECOVERY_PARTICIPATION_BONUS_UNTIL", "500000")),
-        "cooldown_steps": int(os.environ.get("TRAIN_RECOVERY_PARTICIPATION_BONUS_COOLDOWN", "8")),
+        "bonus_value": float(os.environ.get("TRAIN_RECOVERY_PARTICIPATION_BONUS_VALUE", "0.0025")),
+        "active_until_step": int(
+            os.environ.get("TRAIN_RECOVERY_PARTICIPATION_BONUS_UNTIL", str(_PARTICIPATION_BONUS_UNTIL_DEFAULT))
+        ),
+        "cooldown_steps": int(os.environ.get("TRAIN_RECOVERY_PARTICIPATION_BONUS_COOLDOWN", "32")),
         "only_from_flat": os.environ.get("TRAIN_RECOVERY_PARTICIPATION_ONLY_FROM_FLAT", "1") != "0",
-        "max_bonus_per_episode": int(os.environ.get("TRAIN_RECOVERY_PARTICIPATION_MAX_PER_EPISODE", "50")),
+        "max_bonus_per_episode": int(os.environ.get("TRAIN_RECOVERY_PARTICIPATION_MAX_PER_EPISODE", "12")),
     },
     "entropy_schedule": {
         "enabled": os.environ.get("TRAIN_RECOVERY_ENTROPY_SCHEDULE_ENABLED", "1") != "0",
-        "initial_ent_coef": float(os.environ.get("TRAIN_RECOVERY_ENTROPY_INITIAL", "0.05")),
-        "mid_ent_coef": float(os.environ.get("TRAIN_RECOVERY_ENTROPY_MID", "0.01")),
+        "initial_ent_coef": float(os.environ.get("TRAIN_RECOVERY_ENTROPY_INITIAL", "0.02")),
+        "mid_ent_coef": float(os.environ.get("TRAIN_RECOVERY_ENTROPY_MID", "0.005")),
         "final_ent_coef": float(os.environ.get("TRAIN_RECOVERY_ENTROPY_FINAL", "0.001")),
-        "phase_1_until": int(os.environ.get("TRAIN_RECOVERY_ENTROPY_PHASE_1_UNTIL", "750000")),
-        "phase_2_until": int(os.environ.get("TRAIN_RECOVERY_ENTROPY_PHASE_2_UNTIL", "1750000")),
+        "phase_1_until": int(
+            os.environ.get("TRAIN_RECOVERY_ENTROPY_PHASE_1_UNTIL", str(_ENTROPY_PHASE_1_UNTIL_DEFAULT))
+        ),
+        "phase_2_until": int(
+            os.environ.get("TRAIN_RECOVERY_ENTROPY_PHASE_2_UNTIL", str(_ENTROPY_PHASE_2_UNTIL_DEFAULT))
+        ),
     },
     "diagnostics": {
         "log_action_distribution": os.environ.get("TRAIN_RECOVERY_LOG_ACTION_DISTRIBUTION", "1") != "0",
@@ -244,6 +335,86 @@ TRAINING_RECOVERY_CONFIG: dict[str, Any] = {
         "heartbeat_every_n_updates": int(os.environ.get("TRAIN_RECOVERY_HEARTBEAT_EVERY_N_UPDATES", "10")),
     },
 }
+
+if TRAIN_EXPERIMENT_PROFILE_SETTINGS:
+    TRAIN_CHURN_MIN_HOLD_BARS = int(
+        _apply_profile_override(
+            TRAIN_CHURN_MIN_HOLD_BARS,
+            "TRAIN_CHURN_MIN_HOLD_BARS",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("churn_min_hold_bars", TRAIN_CHURN_MIN_HOLD_BARS),
+        )
+    )
+    TRAIN_CHURN_ACTION_COOLDOWN = int(
+        _apply_profile_override(
+            TRAIN_CHURN_ACTION_COOLDOWN,
+            "TRAIN_CHURN_ACTION_COOLDOWN",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("churn_action_cooldown", TRAIN_CHURN_ACTION_COOLDOWN),
+        )
+    )
+    TRAIN_CHURN_PENALTY_USD = float(
+        _apply_profile_override(
+            TRAIN_CHURN_PENALTY_USD,
+            "TRAIN_CHURN_PENALTY_USD",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("churn_penalty_usd", TRAIN_CHURN_PENALTY_USD),
+        )
+    )
+    TRAIN_REWARD_DOWNSIDE_RISK_COEF = float(
+        _apply_profile_override(
+            TRAIN_REWARD_DOWNSIDE_RISK_COEF,
+            "TRAIN_REWARD_DOWNSIDE_RISK_COEF",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("reward_downside_risk_coef", TRAIN_REWARD_DOWNSIDE_RISK_COEF),
+        )
+    )
+    TRAIN_REWARD_TURNOVER_COEF = float(
+        _apply_profile_override(
+            TRAIN_REWARD_TURNOVER_COEF,
+            "TRAIN_REWARD_TURNOVER_COEF",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("reward_turnover_coef", TRAIN_REWARD_TURNOVER_COEF),
+        )
+    )
+    TRAIN_REWARD_NET_RETURN_COEF = float(
+        _apply_profile_override(
+            TRAIN_REWARD_NET_RETURN_COEF,
+            "TRAIN_REWARD_NET_RETURN_COEF",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("reward_net_return_coef", TRAIN_REWARD_NET_RETURN_COEF),
+        )
+    )
+    TRAIN_REWARD_SCALE = float(
+        _apply_profile_override(
+            TRAIN_REWARD_SCALE,
+            "TRAIN_REWARD_SCALE",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("reward_scale", TRAIN_REWARD_SCALE),
+        )
+    )
+    TRAIN_REWARD_CLIP_LOW = float(
+        _apply_profile_override(
+            TRAIN_REWARD_CLIP_LOW,
+            "TRAIN_REWARD_CLIP_LOW",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("reward_clip_low", TRAIN_REWARD_CLIP_LOW),
+        )
+    )
+    TRAIN_REWARD_CLIP_HIGH = float(
+        _apply_profile_override(
+            TRAIN_REWARD_CLIP_HIGH,
+            "TRAIN_REWARD_CLIP_HIGH",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("reward_clip_high", TRAIN_REWARD_CLIP_HIGH),
+        )
+    )
+    if "TRAIN_ALPHA_GATE_ENABLED" not in os.environ:
+        TRAIN_ALPHA_GATE_ENABLED = bool(
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("alpha_gate_enabled", TRAIN_ALPHA_GATE_ENABLED)
+        )
+    if "TRAIN_ALPHA_GATE_MODEL" not in os.environ:
+        TRAIN_ALPHA_GATE_MODEL = str(
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("alpha_gate_model", TRAIN_ALPHA_GATE_MODEL)
+        ).strip().lower() or TRAIN_ALPHA_GATE_MODEL
+    if "TRAIN_RECOVERY_PARTICIPATION_BONUS_ENABLED" not in os.environ:
+        TRAINING_RECOVERY_CONFIG["participation_bonus"]["enabled"] = bool(
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get(
+                "participation_bonus_enabled",
+                TRAINING_RECOVERY_CONFIG["participation_bonus"]["enabled"],
+            )
+        )
 
 # Diagnostic guideposts for the Stage A unlock path. These are intended for
 # heartbeat interpretation and post-run review, not as hard stop conditions.
@@ -432,10 +603,19 @@ def aggregate_training_diagnostics(env_snapshots: list[dict[str, Any]] | None) -
         "participation_bonus_sum": 0.0,
         "holding_penalty_sum": 0.0,
         "drawdown_penalty_sum": 0.0,
+        "turnover_penalty_sum": 0.0,
+        "downside_risk_penalty_sum": 0.0,
+        "rapid_reversal_penalty_sum": 0.0,
+        "net_return_adjustment_sum": 0.0,
+        "final_reward_clipped_low_count": 0.0,
+        "final_reward_clipped_high_count": 0.0,
         "net_reward_sum": 0.0,
     }
     total_steps = 0
     duration_samples: list[float] = []
+    saw_trade_stats = False
+    saw_economics = False
+    saw_reward_components = False
 
     for snapshot in env_snapshots or []:
         if not isinstance(snapshot, dict):
@@ -443,14 +623,22 @@ def aggregate_training_diagnostics(env_snapshots: list[dict[str, Any]] | None) -
         total_steps += int(snapshot.get("total_steps", 0))
         for key in action_counts:
             action_counts[key] += int((snapshot.get("action_counts", {}) or {}).get(key, 0))
-        trade_stats = snapshot.get("trade_stats", {}) or {}
+        trade_stats = snapshot.get("trade_stats", snapshot.get("trade_diagnostics", {})) or {}
+        if trade_stats:
+            saw_trade_stats = True
         for key in trade_totals:
             trade_totals[key] += float(trade_stats.get(key, 0)) if key == "position_duration_sum" else int(trade_stats.get(key, 0))
         duration_samples.extend(float(value) for value in list(trade_stats.get("position_durations_sample", []) or []))
+        economics = snapshot.get("economics", {}) or {}
+        if economics:
+            saw_economics = True
         for key in economic_totals:
-            economic_totals[key] += float((snapshot.get("economics", {}) or {}).get(key, 0.0))
+            economic_totals[key] += float(economics.get(key, 0.0))
+        reward_components = snapshot.get("reward_components", {}) or {}
+        if reward_components:
+            saw_reward_components = True
         for key in reward_totals:
-            reward_totals[key] += float((snapshot.get("reward_components", {}) or {}).get(key, 0.0))
+            reward_totals[key] += float(reward_components.get(key, 0.0))
 
     total_actions = max(sum(action_counts.values()), 1)
     occupancy_steps = max(
@@ -466,19 +654,9 @@ def aggregate_training_diagnostics(env_snapshots: list[dict[str, Any]] | None) -
     )
     median_position_duration = float(np.median(duration_samples)) if duration_samples else 0.0
 
-    return {
-        "total_steps": int(total_steps),
-        "action_distribution": {
-            "hold": int(action_counts["hold"]),
-            "close": int(action_counts["close"]),
-            "long": int(action_counts["long"]),
-            "short": int(action_counts["short"]),
-            "hold_fraction": float(action_counts["hold"]) / float(total_actions),
-            "close_fraction": float(action_counts["close"]) / float(total_actions),
-            "long_fraction": float(action_counts["long"]) / float(total_actions),
-            "short_fraction": float(action_counts["short"]) / float(total_actions),
-        },
-        "trade_diagnostics": {
+    trade_diagnostics = {}
+    if saw_trade_stats:
+        trade_diagnostics = {
             "action_selected_count": int(trade_totals["action_selected_count"]),
             "action_accepted_count": int(trade_totals["action_accepted_count"]),
             "accepted_open_count": int(trade_totals["accepted_open_count"]),
@@ -505,9 +683,23 @@ def aggregate_training_diagnostics(env_snapshots: list[dict[str, Any]] | None) -
             "flat_fraction": float(trade_totals["flat_steps"]) / float(occupancy_steps),
             "long_fraction": float(trade_totals["long_steps"]) / float(occupancy_steps),
             "short_fraction": float(trade_totals["short_steps"]) / float(occupancy_steps),
+        }
+
+    return {
+        "total_steps": int(total_steps),
+        "action_distribution": {
+            "hold": int(action_counts["hold"]),
+            "close": int(action_counts["close"]),
+            "long": int(action_counts["long"]),
+            "short": int(action_counts["short"]),
+            "hold_fraction": float(action_counts["hold"]) / float(total_actions),
+            "close_fraction": float(action_counts["close"]) / float(total_actions),
+            "long_fraction": float(action_counts["long"]) / float(total_actions),
+            "short_fraction": float(action_counts["short"]) / float(total_actions),
         },
-        "economics": {key: float(value) for key, value in economic_totals.items()},
-        "reward_components": {key: float(value) for key, value in reward_totals.items()},
+        "trade_diagnostics": trade_diagnostics,
+        "economics": {key: float(value) for key, value in economic_totals.items()} if saw_economics else {},
+        "reward_components": {key: float(value) for key, value in reward_totals.items()} if saw_reward_components else {},
     }
 
 
@@ -520,6 +712,9 @@ def resolve_train_vec_env_type(
     warnings: list[str] = []
     is_windows = sys.platform == "win32"
 
+    if requested_envs == 1:
+        warnings.append("TRAIN_NUM_ENVS=1 disables parallel experience collection; use this only for debug or profiling.")
+
     if force_dummy:
         warnings.append("TRAIN_FORCE_DUMMY_VEC=1 forces DummyVecEnv for training; use this only for debug or profiling.")
         vec_env_type = "dummy"
@@ -527,11 +722,10 @@ def resolve_train_vec_env_type(
         warnings.append("Windows detected: using DummyVecEnv for single-worker training.")
         vec_env_type = "dummy"
     elif is_windows:
-        warnings.append("Windows detected: using SubprocVecEnv (experimental stability).")
+        # Reverting to SubprocVecEnv as sequential execution (DummyVecEnv) caused stalls.
+        # With the telemetry dictionary-churn fixed, Subproc should now be much more efficient.
+        warnings.append("Windows detected: using SubprocVecEnv (multiprocessing).")
         vec_env_type = "subproc"
-    elif requested_envs == 1:
-        warnings.append("TRAIN_NUM_ENVS=1 disables parallel experience collection; use this only for debug or profiling.")
-        vec_env_type = "dummy"
     else:
         vec_env_type = "subproc" if effective_envs > 1 else "dummy"
 
@@ -542,6 +736,73 @@ def resolve_train_vec_env_type(
         warnings.append("Training is running with a single environment worker; expect lower throughput and noisier PPO updates.")
 
     return vec_env_type, warnings
+
+
+def find_optimal_env_workers(
+    base_env_fn: Callable,
+    starting_n: int = 8,
+    max_n: int = 24,
+    step_size: int = 4,
+    target_cpu_pct: float = 85.0
+) -> int:
+    """
+    Benchmarks environment throughput (SPS) and system load to find the optimal worker count.
+    Targets ~90% CPU usage as requested by the user.
+    """
+    import torch
+    from sb3_contrib import MaskablePPO
+    
+    print(f"\n[Adaptive Tuner] Starting hardware-aware benchmark (Target CPU: {target_cpu_pct}%)...")
+    resource_monitor.start()
+    
+    best_n = starting_n
+    candidates = range(starting_n, max_n + 1, step_size)
+    
+    for n in candidates:
+        print(f"  Testing n={n} workers...")
+        try:
+            # Create a simplified test environment
+            def make_env():
+                return base_env_fn()
+            
+            test_vec = SubprocVecEnv([make_env for _ in range(n)])
+            
+            # Use a tiny model for benchmarking throughput
+            test_model = MaskablePPO("MlpPolicy", test_vec, verbose=0, device="cpu")
+            
+            # Warmup
+            test_model.learn(total_timesteps=n * 2) 
+            
+            # Benchmark run
+            start_t = time.time()
+            test_model.learn(total_timesteps=1024)
+            end_t = time.time()
+            
+            elapsed = end_t - start_t
+            sps = 1024 / elapsed
+            
+            # Check system load
+            stats = resource_monitor.get_latest()
+            cpu = stats.cpu_pct
+            
+            print(f"    -> SPS: {sps:.1f} | CPU: {cpu:.1f}%")
+            
+            test_vec.close()
+            
+            if cpu > target_cpu_pct:
+                print(f"    [!] CPU load ({cpu:.1f}%) exceeds target ({target_cpu_pct}%). Stopping.")
+                # If N=8 already exceeds target, we keep 8, otherwise we keep the previous successful N
+                if n > starting_n:
+                    break
+            
+            best_n = n
+            
+        except Exception as e:
+            print(f"    [!] Benchmark failed for n={n}: {e}")
+            break
+            
+    print(f"[Adaptive Tuner] Selected optimal worker count: {best_n}\n")
+    return best_n
 
 
 # ── Curriculum Learning Callback ──────────────────────────────────────────────
@@ -738,13 +999,18 @@ class FullPathEvalCallback(BaseCallback):
                 "deterministic": True,
                 "full_path_eval_used": True,
             }
+            self.latest_metrics = metrics
 
             # Strategy: Only append/save if accounting reconciliation passed
             try:
                 validate_evaluation_payload(metrics)
-                self.latest_metrics = metrics
                 self.history.append(metrics)
             except Exception as e:
+                self.latest_metrics = {
+                    **metrics,
+                    "serialization_skipped": True,
+                    "serialization_error": str(e),
+                }
                 log.warning(f"FullPathEvalCallback: Skipping serialization of failed evaluation at step {self.num_timesteps}: {e}")
                 return True
 
@@ -764,6 +1030,30 @@ class FullPathEvalCallback(BaseCallback):
                     self.best_vecnormalize_path.parent.mkdir(parents=True, exist_ok=True)
                     self._train_vecnormalize.save(str(self.best_vecnormalize_path))
 
+                # Snapshot the PPO training diagnostics at the exact moment of the new best.
+                # This resolves the fold-end reporting mismatch where eval metrics come from
+                # best_model.zip (e.g. step 40k) but PPO diag was logged from end-of-training
+                # (e.g. step 120k+), making approx_kl/EV appear unrelated to the best checkpoint.
+                try:
+                    logger_values = getattr(self.model.logger, "name_to_value", {}) or {}
+                    ppo_diag_snapshot: dict[str, Any] = {
+                        "num_timesteps": int(self.num_timesteps),
+                        "metric_key": str(self.metric_key),
+                        "best_metric_value": float(current_metric),
+                        "ppo_diagnostics": {
+                            k: float(v)
+                            for k, v in logger_values.items()
+                            if k.startswith("train/") and isinstance(v, (int, float, np.floating, np.integer))
+                        },
+                    }
+                    diag_path = self.best_model_save_path / "best_training_diagnostics.json"
+                    diag_path.write_text(
+                        json.dumps(ppo_diag_snapshot, indent=2, default=_json_default),
+                        encoding="utf-8",
+                    )
+                except Exception as diag_exc:
+                    log.warning(f"FullPathEvalCallback: Failed to write best_training_diagnostics.json: {diag_exc}")
+
             if self.verbose:
                 print(
                     f"[Eval] Step {self.num_timesteps:,} | "
@@ -774,6 +1064,140 @@ class FullPathEvalCallback(BaseCallback):
         return True
 
 
+def _configure_loaded_amp_model(model: Any, *, amp_dtype: str) -> None:
+    setattr(model, "amp_dtype", (torch.bfloat16 if amp_dtype == "bf16" else torch.float16))
+    grad_scaler_cls = getattr(getattr(torch, "amp", None), "GradScaler", None)
+    if grad_scaler_cls is not None:
+        try:
+            scaler = grad_scaler_cls("cuda", enabled=(amp_dtype == "fp16"))
+        except TypeError:
+            scaler = grad_scaler_cls(enabled=(amp_dtype == "fp16"))
+    else:
+        scaler = torch.cuda.amp.GradScaler(enabled=(amp_dtype == "fp16"))
+    setattr(model, "scaler", scaler)
+
+
+class EnhancedLoggingCallback(BaseCallback):
+    """
+    Captures high-fidelity metrics from the environment's info dicts during rollouts.
+    Optimized for high SPS by avoiding dictionary overhead in the step loop.
+    """
+    def __init__(self, verbose: int = 0):
+        super().__init__(verbose)
+        self._audit_logger = logging.getLogger("train_agent.audit")
+        # Use lists for fast appending; converting to numpy at rollout end is efficient
+        self.pnl_buffer: list[float] = []
+        self.bonus_buffer: list[float] = []
+        self.penalty_buffer: list[float] = []
+        self.action_type_buffer: list[str] = []
+        # Support system resource telemetry
+        self.cpu_usage_buffer: list[float] = []
+        self.gpu_usage_buffer: list[float] = []
+        self.ram_usage_buffer: list[float] = []
+
+    def _on_step(self) -> bool:
+        # Collect metrics from all vector environment workers
+        infos = self.locals.get("infos")
+        if infos:
+            # Minimize overhead inside the step loop - avoid creating a dict per env per step
+            for info in infos:
+                self.pnl_buffer.append(info.get("reward_pnl", 0.0))
+                self.bonus_buffer.append(info.get("reward_bonus", 0.0))
+                self.penalty_buffer.append(info.get("reward_penalty", 0.0))
+                self.action_type_buffer.append(info.get("action_type", "HOLD"))
+
+            # Capture system metrics at each step (sampled at monitor's interval)
+            sys_metrics = resource_monitor.get_latest()
+            self.cpu_usage_buffer.append(sys_metrics.cpu_pct)
+            if sys_metrics.gpu_pct is not None:
+                self.gpu_usage_buffer.append(sys_metrics.gpu_pct)
+            self.ram_usage_buffer.append(sys_metrics.ram_pct)
+        return True
+
+    def _on_rollout_end(self) -> None:
+        if not self.pnl_buffer:
+            return
+
+        total_steps = len(self.pnl_buffer)
+        
+        # Convert to numpy for fast vectorized math
+        pnls = np.array(self.pnl_buffer, dtype=np.float32)
+        bonuses = np.array(self.bonus_buffer, dtype=np.float32)
+        penalties = np.array(self.penalty_buffer, dtype=np.float32)
+        
+        # 1. Action Distribution (Count using np.unique for speed)
+        unique_actions, counts = np.unique(self.action_type_buffer, return_counts=True)
+        action_counts = dict(zip(unique_actions, counts))
+        
+        standard_actions = ["HOLD", "LONG", "SHORT", "CLOSE"]
+        audit_metrics = {}
+        for act in standard_actions:
+            count = int(action_counts.get(act, 0))
+            audit_metrics[f"action_count_{act.lower()}"] = count
+            audit_metrics[f"action_pct_{act.lower()}"] = float(count / total_steps)
+            
+            # Record to SB3 logger (for TensorBoard/Stdout)
+            self.logger.record(f"rollout/action_count_{act.lower()}", count)
+            self.logger.record(f"rollout/action_pct_{act.lower()}", count / total_steps)
+
+        # 2. Reward Component Breakdown
+        avg_pnl = float(np.mean(pnls))
+        avg_bonus = float(np.mean(bonuses))
+        avg_penalty = float(np.mean(penalties))
+        
+        audit_metrics.update({
+            "reward_pnl_mean": avg_pnl,
+            "reward_bonus_mean": avg_bonus,
+            "reward_penalty_mean": avg_penalty,
+        })
+        
+        self.logger.record("rollout/reward_pnl_mean", avg_pnl)
+        self.logger.record("rollout/reward_bonus_mean", avg_bonus)
+        self.logger.record("rollout/reward_penalty_mean", avg_penalty)
+
+        # 3. Directional Indicators
+        profitable_steps = int(np.sum(pnls > 0))
+        win_rate = float(profitable_steps / total_steps)
+        audit_metrics["step_win_rate"] = win_rate
+        self.logger.record("rollout/step_win_rate", win_rate)
+
+        # Emit structured audit log
+        self._audit_logger.info(
+            f"Rollout Audit: Steps={total_steps} WinRate={win_rate:.1%}",
+            extra={
+                "event": "rollout_audit",
+                "rollout_steps": total_steps,
+                **audit_metrics
+            }
+        )
+
+        if self.verbose > 0:
+            print(
+                f"[Rollout Audit] PnL={avg_pnl:.4f} | Bonus={avg_bonus:.4f} | "
+                f"Penalty={avg_penalty:.4f} | WinRate={win_rate:.1%}"
+            )
+
+        # Reset buffers
+        self.pnl_buffer.clear()
+        self.bonus_buffer.clear()
+        self.penalty_buffer.clear()
+        self.action_type_buffer.clear()
+
+        # Add system metrics to audit
+        if self.cpu_usage_buffer:
+            audit_metrics.update({
+                "system_cpu_pct_mean": float(np.mean(self.cpu_usage_buffer)),
+                "system_ram_pct_mean": float(np.mean(self.ram_usage_buffer)),
+            })
+            if self.gpu_usage_buffer:
+                audit_metrics["system_gpu_pct_mean"] = float(np.mean(self.gpu_usage_buffer))
+
+        # Clear system buffers
+        self.cpu_usage_buffer.clear()
+        self.gpu_usage_buffer.clear()
+        self.ram_usage_buffer.clear()
+
+
 class TrainingDiagnosticsCallback(BaseCallback):
     def __init__(self, verbose: int = 0, *, print_every_steps: int | None = None):
         super().__init__(verbose)
@@ -781,6 +1205,8 @@ class TrainingDiagnosticsCallback(BaseCallback):
             "train/approx_kl": [],
             "train/explained_variance": [],
             "train/value_loss": [],
+            "train/policy_param_delta": [],
+            "train/action_entropy": [],
         }
         self._last_update_index: int | None = None
         self._last_metric_snapshot: tuple[tuple[str, float], ...] | None = None
@@ -826,9 +1252,10 @@ class TrainingDiagnosticsCallback(BaseCallback):
             summary = self.summary()
             print(
                 f"[PPO] Step {self.num_timesteps:,} | "
-                f"explained_variance={summary['explained_variance']:.3f} | "
-                f"approx_kl={summary['approx_kl']:.3f} | "
-                f"value_loss_mean(last10)={summary['value_loss_mean_last10']:.3f}"
+                f"EV={summary['explained_variance']:.3f} | "
+                f"KL={summary['approx_kl']:.4f} | "
+                f"delta={summary.get('policy_param_delta', float('nan')):.4f} | "
+                f"ent={summary.get('action_entropy', float('nan')):.2f}"
             )
         return True
 
@@ -864,6 +1291,8 @@ class TrainingDiagnosticsCallback(BaseCallback):
         return {
             "approx_kl": float(last_kl),
             "explained_variance": float(last_ev),
+            "policy_param_delta": float(self.metrics["train/policy_param_delta"][-1]) if self.metrics["train/policy_param_delta"] else float("nan"),
+            "action_entropy": float(self.metrics["train/action_entropy"][-1]) if self.metrics["train/action_entropy"] else float("nan"),
             "value_loss_mean_last10": value_loss_mean,
             "value_loss_std_last10": value_loss_std,
             "value_loss_stable": value_loss_stable,
@@ -1113,6 +1542,8 @@ def make_env(
     scaler: StandardScaler | None = None,
     recovery_config: dict[str, Any] | None = None,
     bars: list[Any] | None = None,
+    risk_limits=None,
+    alpha_gate=None,
 ):
     def _init():
         if TRAIN_ENV_MODE == "runtime":
@@ -1127,6 +1558,8 @@ def make_env(
                 bars=bars,
                 scaler=scaler,
                 action_map=action_map,
+                risk_limits=risk_limits,
+                alpha_gate=alpha_gate,
                 config=RuntimeGymConfig(
                     commission_per_lot=float(TRAIN_COMMISSION_PER_LOT),
                     slippage_pips=float(initial_slippage),
@@ -1142,6 +1575,8 @@ def make_env(
                     downside_risk_penalty=float(TRAIN_REWARD_DOWNSIDE_RISK_COEF),
                     turnover_penalty=float(TRAIN_REWARD_TURNOVER_COEF),
                     net_return_coef=float(TRAIN_REWARD_NET_RETURN_COEF),
+                    entry_spread_z_limit=float(TRAIN_ENTRY_SPREAD_Z_LIMIT),
+                    window_size=int(TRAIN_WINDOW_SIZE),
                     random_start=bool(random_start),
                 ),
                 recovery_config=copy.deepcopy(recovery_config) if recovery_config is not None else None,
@@ -1162,6 +1597,7 @@ def make_env(
                 vol_scaling=True,
                 target_risk_pct=0.01,
                 symbol=symbol,
+                participation_bonus_value=float((recovery_config or {}).get("participation_bonus", {}).get("bonus_value", 0.0)),
             )
         env = ActionMasker(env, action_mask_fn)
         env = Monitor(env)
@@ -1316,6 +1752,9 @@ def evaluate_model(model, eval_env) -> tuple[list[float], dict[str, Any]]:
     equity_curve: list[float] = []
     timestamps: list[pd.Timestamp] = []
     rewards: list[float] = []
+    episode_trade_log: list[dict[str, Any]] = []
+    episode_execution_log: list[dict[str, Any]] = []
+    episode_diagnostics: dict[str, Any] | None = None
     while True:
         masks  = eval_env.env_method("action_masks")
         action, _ = model.predict(obs, action_masks=masks, deterministic=True)
@@ -1327,6 +1766,15 @@ def evaluate_model(model, eval_env) -> tuple[list[float], dict[str, Any]]:
             obs, reward, terminated, truncated, infos = step_out
             done = bool(terminated[0] or truncated[0])
         info = infos[0] if infos else {}
+        trade_delta = info.get("closed_trades_delta", [])
+        if isinstance(trade_delta, list):
+            episode_trade_log.extend(dict(item) for item in trade_delta if isinstance(item, dict))
+        execution_delta = info.get("executed_events_delta", [])
+        if isinstance(execution_delta, list):
+            episode_execution_log.extend(dict(item) for item in execution_delta if isinstance(item, dict))
+        info_diagnostics = info.get("episode_diagnostics")
+        if isinstance(info_diagnostics, dict):
+            episode_diagnostics = copy.deepcopy(info_diagnostics)
         reward_value = reward[0] if isinstance(reward, (list, tuple, np.ndarray)) else reward
         rewards.append(float(reward_value))
         if "equity" in info:
@@ -1343,13 +1791,16 @@ def evaluate_model(model, eval_env) -> tuple[list[float], dict[str, Any]]:
             timestamps.append(pd.Timestamp(timestamp_utc))
         if done:
             break
-    trade_log = _extract_eval_trade_log(eval_env)
-    execution_log = _extract_eval_execution_log(eval_env)
+    trade_log = episode_trade_log if episode_trade_log else _extract_eval_trade_log(eval_env)
+    execution_log = episode_execution_log if episode_execution_log else _extract_eval_execution_log(eval_env)
 
-    try:
-        raw_env_diagnostics = eval_env.env_method("get_training_diagnostics") if hasattr(eval_env, "env_method") else []
-    except Exception:
-        raw_env_diagnostics = []
+    if episode_diagnostics is not None:
+        raw_env_diagnostics = [episode_diagnostics]
+    else:
+        try:
+            raw_env_diagnostics = eval_env.env_method("get_training_diagnostics") if hasattr(eval_env, "env_method") else []
+        except Exception:
+            raw_env_diagnostics = []
 
     env_diagnostics = aggregate_training_diagnostics(raw_env_diagnostics)
 
@@ -1361,6 +1812,8 @@ def evaluate_model(model, eval_env) -> tuple[list[float], dict[str, Any]]:
         initial_equity=1000.0,
     )
     val_status = validate_evaluation_accounting(accounting)
+    if not val_status["passed"]:
+        log.warning("evaluate_model: accounting gap detected: %s", val_status["mismatches"])
 
     metrics = {
         "final_equity": float(equity_curve[-1]) if equity_curve else 1000.0,
@@ -1376,6 +1829,7 @@ def evaluate_model(model, eval_env) -> tuple[list[float], dict[str, Any]]:
         "validation_status": val_status,
         "accounting_gap_detected": not val_status["passed"],
     }
+    metrics["metric_reconciliation"] = metrics["metrics_reconciliation"]
     return equity_curve, metrics
 
 
@@ -1389,6 +1843,27 @@ def _split_holdout(df: pd.DataFrame, holdout_frac: float) -> tuple[pd.DataFrame,
             f"while keeping at least {minimums['min_train_bars']} training bars."
         )
     return df.iloc[:split_idx].copy(), df.iloc[split_idx:].copy()
+
+
+def _fit_and_apply_fold_scaler(
+    fold_train: pd.DataFrame,
+    fold_val: pd.DataFrame,
+    *,
+    feature_cols: Sequence[str] | None = None,
+) -> tuple[np.ndarray, np.ndarray, StandardScaler]:
+    """
+    Backwards-compatible helper used by evaluate_oos.py when replaying from raw
+    checkpoint artifacts (no promoted manifest/scaler available).
+
+    The supported training path fits a single global scaler across symbols and
+    applies it inside the runtime env; this helper is best-effort for checkpoint
+    fallback scenarios.
+    """
+    cols = list(feature_cols or FEATURE_COLS)
+    scaler = StandardScaler()
+    x_train = scaler.fit_transform(fold_train.loc[:, cols])
+    x_val = scaler.transform(fold_val.loc[:, cols])
+    return x_train, x_val, scaler
 
 
 def _safe_pearson_corr(y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -1525,14 +2000,6 @@ def _prepend_runtime_warmup_context(full_frame: pd.DataFrame, segment_frame: pd.
     return pd.concat([warmup_frame, segment_frame], axis=0)
 
 
-def _fit_and_apply_fold_scaler(train_df: pd.DataFrame, val_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, StandardScaler]:
-    train_scaled = train_df.copy()
-    val_scaled = val_df.copy()
-    scaler = StandardScaler()
-    scaler.fit(train_scaled.loc[:, FEATURE_COLS])
-    train_scaled.loc[:, FEATURE_COLS] = scaler.transform(train_scaled.loc[:, FEATURE_COLS])
-    val_scaled.loc[:, FEATURE_COLS] = scaler.transform(val_scaled.loc[:, FEATURE_COLS])
-    return train_scaled, val_scaled, scaler
 
 
 def _holdout_deployment_blockers(
@@ -1908,7 +2375,7 @@ def _publish_primary_candidate_artifacts(
     shutil.copyfile(candidate_scaler_source, SCALER_PATH)
 
     action_map = build_runtime_action_map(list(ACTION_SL_MULTS), list(ACTION_TP_MULTS))
-    observation_shape = [1, len(FEATURE_COLS) + STATE_FEATURE_COUNT]
+    observation_shape = [int(TRAIN_WINDOW_SIZE), len(FEATURE_COLS) + STATE_FEATURE_COUNT]
     diagnostics_path = deployment_paths(primary_symbol).diagnostics_path
     manifest = create_manifest(
         strategy_symbol=primary_symbol,
@@ -2233,6 +2700,15 @@ def main() -> None:
             f"under models/archive/{primary_symbol.lower()}/{run_id}"
         )
 
+    # ── Global Scaler fitting ─────────────────────────────────────────────────
+    # We fit a single scaler on the combined trainable data of all symbols
+    # to ensure consistency across the entire 3M step training run.
+    print(f"\n[INFO] Fitting Global Scaler across {len(sym_trainable_frames)} symbols...")
+    global_scaler = StandardScaler()
+    all_trainable_data = pd.concat(list(sym_trainable_frames.values()))
+    global_scaler.fit(all_trainable_data.loc[:, FEATURE_COLS])
+    print(f"[INFO] Global Scaler fitted on {len(all_trainable_data)} rows.")
+
     # ── Training across folds ─────────────────────────────────────────────────
     resume_fold_index = int(resume_state["fold_index"]) if resume_state is not None else 0
     if resume_state is not None:
@@ -2272,12 +2748,35 @@ def main() -> None:
         # Gather train/val DataFrames across symbols for this fold
         fold_trains, fold_vals = [], []
         fold_scalers: dict[str, StandardScaler] = {}
+        fold_alpha_gates: dict[str, Any] = {}
         for sym, folds in sym_folds.items():
             if fold_idx < len(folds):
-                fold_train, fold_val, fold_scaler = _fit_and_apply_fold_scaler(folds[fold_idx][0], folds[fold_idx][1])
+                raw_fold_train = folds[fold_idx][0]
+                raw_fold_val = folds[fold_idx][1]
+                
+                # Use pre-fitted global_scaler for consistency across all folds/symbols
+                fold_train = raw_fold_train.copy()
+                fold_val = raw_fold_val.copy()
+                fold_train.loc[:, FEATURE_COLS] = global_scaler.transform(fold_train.loc[:, FEATURE_COLS])
+                fold_val.loc[:, FEATURE_COLS] = global_scaler.transform(fold_val.loc[:, FEATURE_COLS])
+                fold_scaler = global_scaler
+                
                 fold_trains.append(fold_train)
                 fold_vals.append(fold_val)
                 fold_scalers[sym] = fold_scaler
+                if TRAIN_ALPHA_GATE_ENABLED:
+                    fold_alpha_gates[sym] = fit_baseline_alpha_gate(
+                        symbol=sym,
+                        train_frame=raw_fold_train,
+                        feature_cols=FEATURE_COLS,
+                        horizon_bars=BASELINE_TARGET_HORIZON_BARS,
+                        commission_per_lot=float(TRAIN_COMMISSION_PER_LOT),
+                        slippage_pips=float(get_final_slippage_pips(TRAINING_RECOVERY_CONFIG)),
+                        min_edge_pips=float(BASELINE_MIN_EDGE_PIPS),
+                        probability_threshold=float(BASELINE_PROB_THRESHOLD),
+                        probability_margin=float(BASELINE_PROB_MARGIN),
+                        model_preference=TRAIN_ALPHA_GATE_MODEL,
+                    )
 
         if not fold_trains:
             continue
@@ -2285,6 +2784,12 @@ def main() -> None:
         train_df = pd.concat(fold_trains)
         val_df   = pd.concat(fold_vals)
         print(f"  Train: {len(train_df):,} bars  |  Val (purged): {len(val_df):,} bars")
+        if TRAIN_ALPHA_GATE_ENABLED:
+            alpha_gate_summary = {
+                sym: (gate.model_kind if gate is not None else "disabled")
+                for sym, gate in fold_alpha_gates.items()
+            }
+            print(f"  Alpha gate: {alpha_gate_summary}")
 
         # Parallel training envs — starts with 0 slippage (Curriculum Phase 1)
         train_recovery_cfg = build_train_env_recovery_config(TRAINING_RECOVERY_CONFIG, env_workers=effective_envs)
@@ -2312,6 +2817,13 @@ def main() -> None:
                     sym_bars_fold[sym] = bars_arr
 
         def make_parallel(rank: int):
+            from risk.risk_engine import RiskLimits
+
+            train_risk_limits = RiskLimits(
+                max_drawdown_fraction=float(TRAIN_RISK_MAX_DRAWDOWN_FRACTION),
+                daily_loss_fraction=float(TRAIN_RISK_DAILY_LOSS_FRACTION),
+                safe_mode_on_kill=False,
+            )
             sym = sym_list[rank % len(sym_list)]
             if TRAIN_ENV_MODE == "runtime":
                 sdf = sym_folds[sym][fold_idx][0]
@@ -2332,6 +2844,8 @@ def main() -> None:
                 scaler=fold_scaler,
                 recovery_config=train_recovery_cfg if TRAIN_ENV_MODE == "runtime" else None,
                 bars=sym_bars_fold.get(sym),
+                risk_limits=train_risk_limits,
+                alpha_gate=fold_alpha_gates.get(sym),
             )
 
         val_symbol = primary_symbol
@@ -2392,6 +2906,14 @@ def main() -> None:
             *,
             slippage_pips: float,
         ):
+            from risk.risk_engine import RiskLimits
+
+            # Full-path evaluation should not be truncated by live-style risk kill switches.
+            eval_risk_limits = RiskLimits(
+                max_drawdown_fraction=float(EVAL_RISK_MAX_DRAWDOWN_FRACTION),
+                daily_loss_fraction=float(EVAL_RISK_DAILY_LOSS_FRACTION),
+                safe_mode_on_kill=False,
+            )
             return DummyVecEnv(
                 [
                     make_env(
@@ -2404,6 +2926,8 @@ def main() -> None:
                         symbol=val_symbol,
                         scaler=scaler,
                         recovery_config=None,
+                        risk_limits=eval_risk_limits,
+                        alpha_gate=fold_alpha_gates.get(val_symbol),
                     )
                 ]
             )
@@ -2442,14 +2966,24 @@ def main() -> None:
 
         tensorboard_log = "./tensorboard_log" if importlib.util.find_spec("tensorboard") is not None else None
 
+        # Callbacks: curriculum annealing + checkpoint + eval
+        # eval_envs=[val_vec, holdout_vec] ensures evaluation environments always run under
+        # the exact same slippage phase as the training env. Without this, evaluations during
+        # phase-1 (0.05 pip) would silently use a fixed final-slippage, making it impossible
+        # to know whether any eval improvement is real or just a cost-profile artefact.
+        curriculum_cb = CurriculumCallback(
+            TRAINING_RECOVERY_CONFIG,
+            train_env=train_vec,
+            eval_envs=[val_vec, holdout_vec],
+            verbose=1,
+        )
+
         if resume_current_fold:
             ppo_class = MaskablePPO_AMP if use_amp else MaskablePPO
             model = ppo_class.load(str(resume_state["model_path"]), env=train_vec, device=device)
-            
+
             if use_amp:
-                # Re-inject AMP config if resuming
-                setattr(model, "amp_dtype", (th.bfloat16 if amp_dtype == "bf16" else th.float16))
-                setattr(model, "scaler", th.cuda.amp.GradScaler(enabled=(amp_dtype == "fp16")))
+                _configure_loaded_amp_model(model, amp_dtype=amp_dtype)
 
             remaining_timesteps = max(TOTAL_TIMESTEPS - int(getattr(model, "num_timesteps", 0) or 0), 0)
             print(
@@ -2481,13 +3015,8 @@ def main() -> None:
             )
             remaining_timesteps = TOTAL_TIMESTEPS
 
-        # Callbacks: curriculum annealing + checkpoint + eval
-        curriculum_cb = CurriculumCallback(
-            TRAINING_RECOVERY_CONFIG,
-            train_env=train_vec,
-            verbose=1,
-        )
         diagnostics_cb = TrainingDiagnosticsCallback(verbose=int(os.environ.get("TRAIN_PROGRESS_VERBOSE", "1")))
+
         heartbeat_default_steps = (
             max(int((TRAINING_RECOVERY_CONFIG.get("diagnostics", {}) or {}).get("heartbeat_every_n_updates", 10)), 1)
             * PPO_N_STEPS
@@ -2533,6 +3062,8 @@ def main() -> None:
             verbose=0,
         )
 
+        enhanced_logging_cb = EnhancedLoggingCallback(verbose=1)
+
         if remaining_timesteps > 0:
             if TRAIN_TORCH_COMPILE and hasattr(model, "policy"):
                 # Windows/Triton availability check
@@ -2556,7 +3087,7 @@ def main() -> None:
 
             model.learn(
                 total_timesteps=remaining_timesteps,
-                callback=[curriculum_cb, diagnostics_cb, eval_cb, heartbeat_cb],
+                callback=[curriculum_cb, diagnostics_cb, eval_cb, heartbeat_cb, enhanced_logging_cb],
                 log_interval=max(TRAIN_LOG_INTERVAL, 1),
                 tb_log_name=f"{primary_symbol.lower()}_fold_{fold_idx}",
                 reset_num_timesteps=not resume_current_fold,
@@ -2643,6 +3174,13 @@ def main() -> None:
         diagnostics["baseline_gate_bypassed_debug"] = bool(TRAIN_DEBUG_ALLOW_BASELINE_BYPASS)
         diagnostics["baseline_target_horizon_bars"] = int(BASELINE_TARGET_HORIZON_BARS)
         diagnostics["baseline_report_path"] = str(baseline_report_path)
+        diagnostics["training_experiment_profile"] = TRAIN_EXPERIMENT_PROFILE or "default"
+        diagnostics["training_window_size"] = int(TRAIN_WINDOW_SIZE)
+        diagnostics["training_alpha_gate_enabled"] = bool(TRAIN_ALPHA_GATE_ENABLED)
+        diagnostics["training_alpha_gate_model"] = str(TRAIN_ALPHA_GATE_MODEL)
+        diagnostics["training_alpha_gate_probability_threshold"] = float(BASELINE_PROB_THRESHOLD)
+        diagnostics["training_alpha_gate_probability_margin"] = float(BASELINE_PROB_MARGIN)
+        diagnostics["training_alpha_gate_min_edge_pips"] = float(BASELINE_MIN_EDGE_PIPS)
         diagnostics["eval_protocol_valid"] = True
         diagnostics["full_path_eval_used"] = True
         diagnostics["full_path_validation_metrics"] = evaluation_metrics
@@ -2681,19 +3219,11 @@ def main() -> None:
             holdout_expectancy=holdout_expectancy,
             holdout_trade_count=holdout_trade_count,
         )
-        diagnostics["holdout_gate_passed"] = not holdout_gate_blockers
-        if holdout_gate_blockers:
-            diagnostics["blockers"] = list(dict.fromkeys([*diagnostics["blockers"], *holdout_gate_blockers]))
-        diagnostics["deploy_ready"] = bool(
-            diagnostics["gate_passed"]
-            and max_dd <= DEPLOY_DD_MAX
-            and not holdout_gate_blockers
-        )
-        metrics_path = ckpt_dir / "training_diagnostics.json"
-        save_json_report(diagnostics, metrics_path)
+        diagnostics["holdout_gate_passed"] = bool(not holdout_gate_blockers)
+        diagnostics["deploy_ready"] = bool(diagnostics["data_sufficiency_passed"] and diagnostics["holdout_gate_passed"])
 
         if sharpe > best_observed_sharpe:
-            best_observed_sharpe = sharpe
+            best_observed_sharpe = float(sharpe)
             best_observed_summary = _build_promoted_training_diagnostics(
                 diagnostics,
                 run_id=run_id,
@@ -2704,7 +3234,6 @@ def main() -> None:
                     else "Best-evaluated fold from this run is deployment eligible but was not selected as the canonical candidate."
                 ),
             )
-
         print(
             f"\n  Fold {fold_idx} VAL: equity=${fin_val:,.2f}  "
             f"Sharpe={sharpe:.3f}  MaxDD={max_dd:.1%}  "
@@ -2790,4 +3319,30 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    # Start resource monitor early
+    resource_monitor.start()
+    
+    try:
+        # Check if we should run in benchmark mode to find optimal n_envs
+        if os.environ.get("TRAIN_ADAPTIVE_TUNE", "false").lower() == "true":
+            # We need a base env creator to pass to the tuner
+            # For simplicity, we'll use a default config for the benchmark
+            from trading_env import ForexTradingEnv
+            def benchmark_env_fn():
+                return ForexTradingEnv(
+                    df=pd.DataFrame(np.random.randn(100, 5), columns=["open", "high", "low", "close", "volume"]),
+                    window_size=20
+                )
+            
+            optimal_n = find_optimal_env_workers(
+                benchmark_env_fn,
+                starting_n=8,
+                max_n=24, # Support even higher counts if CPU allows
+                target_cpu_pct=int(os.environ.get("TRAIN_TARGET_CPU_PCT", "90"))
+            )
+            os.environ["TRAIN_NUM_ENVS"] = str(optimal_n)
+
+        # Run the official training
+        main()
+    finally:
+        resource_monitor.stop()

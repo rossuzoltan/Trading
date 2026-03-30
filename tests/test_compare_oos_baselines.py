@@ -76,6 +76,7 @@ class CompareOosBaselinesTests(unittest.TestCase):
             diagnostics_path=None,
             manifest_path=None,
             artifact_metadata={},
+            runtime_options={"window_size": 1, "alpha_gate_enabled": False},
         )
 
     def test_flat_baseline_zero_trade_accounting(self) -> None:

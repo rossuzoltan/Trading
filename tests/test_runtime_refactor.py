@@ -36,10 +36,10 @@ from event_pipeline import (
     VolumeBarBuilder,
 )
 from feature_engine import FEATURE_COLS, WARMUP_BARS
-from runtime_common import ActionSpec, ActionType, ConfirmedPosition, build_action_map
+from runtime_common import ActionSpec, ActionType, ConfirmedPosition, build_action_map, build_action_mask
 from symbol_utils import pip_size_for_symbol, pip_value_for_volume
 from trading_env import ForexTradingEnv
-from train_agent import sync_vecnormalize_stats, wrap_vecnormalize
+from train_agent import _configure_loaded_amp_model, sync_vecnormalize_stats, wrap_vecnormalize
 
 
 TEST_TMP_ROOT = Path("tests/tmp")
@@ -151,6 +151,11 @@ class StubFeatureEngine:
     @property
     def latest_observation(self) -> np.ndarray:
         return self._latest
+
+    def recent_observation_window(self, window_size: int) -> np.ndarray:
+        window = max(int(window_size or 1), 1)
+        latest = np.asarray(self._latest, dtype=np.float32)
+        return np.repeat(latest.reshape(1, -1), window, axis=0)
 
 
 class SequencePolicy:
@@ -298,6 +303,18 @@ class RuntimeRefactorTests(unittest.TestCase):
             sb3_version="2.5.0",
             sb3_contrib_version="2.5.0",
             sklearn_version=__import__("sklearn").__version__,
+            execution_cost_profile={
+                "commission_per_lot": 6.5,
+                "slippage_pips": 0.5,
+                "partial_fill_ratio": 0.8,
+            },
+            reward_profile={
+                "reward_scale": 9000.0,
+                "drawdown_penalty": 1.5,
+                "transaction_penalty": 0.8,
+                "reward_clip_low": -4.0,
+                "reward_clip_high": 4.0,
+            },
         )
         fake_mt5 = FakeMt5()
         tmpdir = make_test_dir("live_startup")
@@ -323,6 +340,13 @@ class RuntimeRefactorTests(unittest.TestCase):
         self.assertEqual(builder.state.ticks_per_bar, 2000)
         self.assertIsInstance(store, JsonStateStore)
         self.assertIsInstance(source, Mt5CursorTickSource)
+        self.assertAlmostEqual(9000.0, runtime.reward_scale)
+        self.assertAlmostEqual(1.5, runtime.reward_drawdown_penalty)
+        self.assertAlmostEqual(0.8, runtime.reward_transaction_penalty)
+        self.assertAlmostEqual(-4.0, runtime.reward_clip_low)
+        self.assertAlmostEqual(4.0, runtime.reward_clip_high)
+        self.assertAlmostEqual(6.5, runtime.broker.commission_per_lot)
+        self.assertAlmostEqual(0.5, runtime.broker.slippage_pips)
 
     def test_tick_ingestion_processes_every_tick_once(self):
         ticks = [
@@ -399,6 +423,25 @@ class RuntimeRefactorTests(unittest.TestCase):
         self.assertEqual(action.action_type, ActionType.HOLD)
         np.testing.assert_allclose(normalizer.seen, observation)
         np.testing.assert_allclose(model.last_observation, observation + 0.5)
+
+    def test_action_mask_disallows_open_while_position_is_active(self):
+        action_map = build_action_map([0.5], [1.0])
+        position = ConfirmedPosition(direction=1, entry_price=1.1, volume=0.01)
+
+        mask = build_action_mask(action_map, position=position, spread_z=0.0)
+
+        self.assertTrue(mask[0])
+        self.assertTrue(mask[1])
+        self.assertFalse(mask[2])
+        self.assertFalse(mask[3])
+
+    def test_configure_loaded_amp_model_uses_torch_symbols(self):
+        model = SimpleNamespace()
+
+        _configure_loaded_amp_model(model, amp_dtype="bf16")
+
+        self.assertEqual(__import__("torch").bfloat16, model.amp_dtype)
+        self.assertTrue(hasattr(model, "scaler"))
 
     def test_replay_broker_marks_to_liquidation_and_charges_full_round_trip_spread(self):
         broker = ReplayBroker(symbol="EURUSD", initial_equity=1000.0, commission_per_lot=0.0, slippage_pips=0.0)

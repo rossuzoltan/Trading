@@ -25,6 +25,7 @@ from domain.models import (
     VolumeBar,
 )
 from execution.broker import BaseBroker
+from edge_research import BaselineAlphaGate
 from feature_engine import FeatureEngine
 from risk.risk_engine import RiskEngine, sync_confirmed_position
 from runtime_common import (
@@ -283,7 +284,10 @@ class ModelPolicy:
     def decide(self, observation: np.ndarray, mask: np.ndarray) -> tuple[int, Any]:
         obs = observation
         if self.obs_normalizer is not None:
-            obs = self.obs_normalizer.normalize(observation)
+            if hasattr(self.obs_normalizer, "normalize_obs"):
+                obs = self.obs_normalizer.normalize_obs(observation)
+            else:
+                obs = self.obs_normalizer.normalize(observation)
         from sb3_contrib.common.maskable.utils import get_action_masks
         action_idx, _ = self.model.predict(obs, action_masks=mask, deterministic=True)
         return int(action_idx), self.action_map[int(action_idx)]
@@ -305,6 +309,7 @@ class ProcessResult:
     executed_events: list[dict[str, Any]] = field(default_factory=list)
     closed_trades: list[dict[str, Any]] = field(default_factory=list)
     reward_components: dict[str, float] = field(default_factory=dict)
+    policy_mode: str = "RL"
 
 
 class RuntimeEngine:
@@ -321,10 +326,14 @@ class RuntimeEngine:
         state_store: JsonStateStore | None = None,
         account_currency: str = "USD",
         reward_scale: float = 10_000.0,
-        reward_drawdown_penalty: float = 0.0,
-        reward_transaction_penalty: float = 0.0,
+        reward_drawdown_penalty: float = 2.0,
+        reward_transaction_penalty: float = 1.0,
         reward_clip_low: float = -5.0,
         reward_clip_high: float = 5.0,
+        window_size: int = 1,
+        alpha_gate: BaselineAlphaGate | None = None,
+        drawdown_penalty: float | None = None,
+        transaction_penalty: float | None = None,
     ) -> None:
         self.symbol = symbol.upper()
         self.feature_engine = feature_engine
@@ -335,15 +344,23 @@ class RuntimeEngine:
         self.snapshot = snapshot
         self.state_store = state_store
         self.account_currency = account_currency
+        if drawdown_penalty is not None:
+            reward_drawdown_penalty = float(drawdown_penalty)
+        if transaction_penalty is not None:
+            reward_transaction_penalty = float(transaction_penalty)
         self.reward_scale = float(reward_scale)
         self.reward_drawdown_penalty = float(reward_drawdown_penalty)
         self.reward_transaction_penalty = float(reward_transaction_penalty)
         self.reward_clip_low = float(reward_clip_low)
         self.reward_clip_high = float(reward_clip_high)
+        self.window_size = max(int(window_size), 1)
+        self.alpha_gate = alpha_gate
+        self.last_alpha_gate_scores: dict[str, float] | None = None
         self.confirmed_position = snapshot.confirmed_position
         self.last_equity = float(snapshot.last_equity)
         self.processed_bars_count = 0
         self.last_close_bar_index = None
+        self.policy_mode = "RL"  # Default to Reinforcement Learning
 
     def startup_reconcile(self) -> None:
         pos_snapshot = self.broker.current_position(self.symbol)
@@ -607,13 +624,15 @@ class RuntimeEngine:
         executed_turnover_lots = float(self.broker.advance_bar(bar) or 0.0)
         self._refresh_confirmed_position(last_reward=self.confirmed_position.last_reward)
         
-        # Optimization: Use push_record if available on feature_engine
-        if hasattr(self.feature_engine, "push_record"):
-            self.feature_engine.push_record(getattr(bar, "row", bar))
+        # Use the structured-array fast path only when the bar actually carries a raw record.
+        raw_record = getattr(bar, "row", None)
+        if hasattr(self.feature_engine, "push_record") and isinstance(raw_record, np.void):
+            self.feature_engine.push_record(raw_record)
         else:
             self.feature_engine.push(bar.to_series() if hasattr(bar, "to_series") else bar)
 
-        feature_vector = self.feature_engine.latest_observation
+        feature_rows = self.feature_engine.recent_observation_window(self.window_size)
+        feature_vector = feature_rows[-1]
         latest_row = self.feature_engine._buffer.iloc[-1] if self.feature_engine._buffer is not None else pd.Series()
         spread_z = float(latest_row.get("spread_z", 0.0))
         
@@ -621,14 +640,26 @@ class RuntimeEngine:
         prev_exposure_lots = abs(float(self.broker.current_position(self.symbol).volume))
         
         observation = build_observation(
-            feature_vector,
+            feature_rows,
             position=self.confirmed_position,
             current_price=close_price,
             symbol=self.symbol,
-            window_size=1,
+            window_size=self.window_size,
         )
 
         mask = build_action_mask(self.action_map, position=self.confirmed_position, spread_z=spread_z)
+        self.last_alpha_gate_scores = None
+        if self.confirmed_position.is_flat and self.alpha_gate is not None:
+            allow_long, allow_short, scores = self.alpha_gate.allowed_directions(latest_row)
+            self.last_alpha_gate_scores = dict(scores)
+            for idx, candidate in enumerate(self.action_map):
+                if candidate.action_type != ActionType.OPEN:
+                    continue
+                direction = int(candidate.direction or 0)
+                if direction > 0 and not allow_long:
+                    mask[idx] = False
+                if direction < 0 and not allow_short:
+                    mask[idx] = False
         if self.risk_engine.kill_switch_active or self.risk_engine.safe_mode_active:
             action = ActionSpec(ActionType.CLOSE) if not self.confirmed_position.is_flat else ActionSpec(ActionType.HOLD)
             action_index = 1 if action.action_type == ActionType.CLOSE else 0
@@ -642,6 +673,8 @@ class RuntimeEngine:
                 action = self.action_map[action_index]
         else:
             action_index, action = self.policy.decide(observation, mask)
+            
+        used_policy_mode = self.policy_mode
 
         submit_result: SubmitResult | None = None
         if action.action_type == ActionType.OPEN and self.confirmed_position.is_flat:
@@ -721,6 +754,7 @@ class RuntimeEngine:
             executed_events=self._execution_events_since(execution_log_start),
             closed_trades=self._closed_trades_since(trade_log_start),
             reward_components=reward_components,
+            policy_mode=used_policy_mode,
         )
 
     def flatten_open_position(self, bar: VolumeBar) -> SubmitResult | None:
@@ -774,8 +808,15 @@ class RuntimeEngine:
         """Provides internal metrics for centralized diagnostic aggregation."""
         return {
             "processed_bars": int(self.processed_bars_count),
-            "last_close_bar_index": int(self.last_close_bar_index),
+            "last_close_bar_index": (
+                int(self.last_close_bar_index) if self.last_close_bar_index is not None else None
+            ),
             "risk_kill_switch": bool(self.risk_engine.kill_switch_active),
             "confirmed_position_type": int(self.confirmed_position.direction) if self.confirmed_position else 0,
             "confirmed_position_volume": float(self.confirmed_position.volume if self.confirmed_position else 0.0),
+            "alpha_gate": {
+                "enabled": bool(self.alpha_gate is not None),
+                "model_kind": getattr(self.alpha_gate, "model_kind", None),
+                "last_scores": dict(self.last_alpha_gate_scores or {}),
+            },
         }

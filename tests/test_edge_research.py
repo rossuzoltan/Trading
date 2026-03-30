@@ -8,7 +8,7 @@ from uuid import uuid4
 import numpy as np
 import pandas as pd
 
-from edge_research import run_edge_baseline_research
+from edge_research import fit_baseline_alpha_gate, run_edge_baseline_research
 from feature_engine import FEATURE_COLS
 
 
@@ -54,6 +54,30 @@ def make_supervised_frame(*, rows: int, predictive: bool) -> pd.DataFrame:
 
 
 class EdgeResearchTests(unittest.TestCase):
+    def test_fit_baseline_alpha_gate_prefers_logistic_pair_when_available(self):
+        frame = make_supervised_frame(rows=900, predictive=True)
+        gate = fit_baseline_alpha_gate(
+            symbol="EURUSD",
+            train_frame=frame.iloc[:700].copy(),
+            feature_cols=FEATURE_COLS,
+            horizon_bars=10,
+            commission_per_lot=0.0,
+            slippage_pips=0.0,
+            min_edge_pips=0.0,
+            probability_threshold=0.55,
+            probability_margin=0.05,
+            model_preference="auto",
+        )
+
+        self.assertIsNotNone(gate)
+        assert gate is not None
+        self.assertEqual("logistic_pair", gate.model_kind)
+        allow_long, allow_short, scores = gate.allowed_directions(frame.iloc[650])
+        self.assertIn("long_score", scores)
+        self.assertIn("short_score", scores)
+        self.assertIsInstance(allow_long, bool)
+        self.assertIsInstance(allow_short, bool)
+
     def test_cost_adjusted_gate_passes_on_predictive_data(self):
         frame = make_supervised_frame(rows=900, predictive=True)
         trainable = frame.iloc[:700].copy()

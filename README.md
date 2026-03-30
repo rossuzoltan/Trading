@@ -10,6 +10,7 @@ This repo is a Python-based Forex reinforcement-learning pipeline with four main
 ## Documentation
 
 - [docs/README.md](docs/README.md) is the current documentation index.
+- [docs/CURRENT_USAGE_GUIDE.md](docs/CURRENT_USAGE_GUIDE.md) is the practical how-to guide for the current workflow.
 - [docs/NEXT_AGENT_CONTEXT.md](docs/NEXT_AGENT_CONTEXT.md) captures the current repo and data state.
 - [docs/NEXT_AGENT_FILE_MAP.md](docs/NEXT_AGENT_FILE_MAP.md) points to the files that matter for each task.
 - [docs/NEXT_AGENT_RUNBOOK.md](docs/NEXT_AGENT_RUNBOOK.md) keeps the verified commands in one place.

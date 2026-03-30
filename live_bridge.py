@@ -78,6 +78,26 @@ LIVE_KILL_SWITCH_PATH = os.environ.get("LIVE_KILL_SWITCH_PATH", "live.kill")
 LIVE_SHADOW_MODE = os.environ.get("LIVE_SHADOW_MODE", "0") == "1"
 LIVE_STATE_FLUSH_EVERY_TICKS = int(os.environ.get("LIVE_STATE_FLUSH_EVERY_TICKS", "250"))
 MAX_DRAWDOWN_FRACTION = float(os.environ.get("TRADING_MAX_DRAWDOWN_FRACTION", "0.15"))
+
+
+def _resolve_execution_cost_profile(manifest) -> dict[str, float]:
+    profile = dict(getattr(manifest, "execution_cost_profile", None) or {})
+    return {
+        "commission_per_lot": float(profile.get("commission_per_lot", 7.0)),
+        "slippage_pips": float(profile.get("slippage_pips", 0.25)),
+        "partial_fill_ratio": float(profile.get("partial_fill_ratio", 1.0)),
+    }
+
+
+def _resolve_reward_profile(manifest) -> dict[str, float]:
+    profile = dict(getattr(manifest, "reward_profile", None) or {})
+    return {
+        "reward_scale": float(profile.get("reward_scale", 10_000.0)),
+        "drawdown_penalty": float(profile.get("drawdown_penalty", 2.0)),
+        "transaction_penalty": float(profile.get("transaction_penalty", 1.0)),
+        "reward_clip_low": float(profile.get("reward_clip_low", -5.0)),
+        "reward_clip_high": float(profile.get("reward_clip_high", 5.0)),
+    }
 DAILY_LOSS_FRACTION = float(os.environ.get("TRADING_DAILY_LOSS_FRACTION", "0.05"))
 STALE_FEED_MS = int(os.environ.get("TRADING_STALE_FEED_MS", "30000"))
 MAX_BROKER_FAILURES = int(os.environ.get("TRADING_MAX_BROKER_FAILURES", "3"))
@@ -254,10 +274,21 @@ def _emergency_flatten(runtime: RuntimeEngine, reason: str) -> SubmitResult | No
 
 
 class LiveMt5Broker(BaseBroker):
-    def __init__(self, mt5_module: Any, *, symbol: str) -> None:
+    def __init__(
+        self,
+        mt5_module: Any,
+        *,
+        symbol: str,
+        commission_per_lot: float = 7.0,
+        slippage_pips: float = 0.25,
+        partial_fill_ratio: float = 1.0,
+    ) -> None:
         self.mt5 = mt5_module
         self.symbol = symbol.upper()
         self.paths = deployment_paths(self.symbol)
+        self.commission_per_lot = float(commission_per_lot)
+        self.slippage_pips = float(slippage_pips)
+        self.partial_fill_ratio = float(partial_fill_ratio)
 
     def _raw_positions(self, symbol: str) -> list[Any]:
         return list(self.mt5.positions_get(symbol=symbol) or [])
@@ -629,6 +660,8 @@ def bootstrap_live_runtime(
     dataset_path = resolve_dataset_path()
     manifest_path = resolve_manifest_path(symbol=symbol)
     manifest = load_manifest(manifest_path)
+    execution_cost_profile = _resolve_execution_cost_profile(manifest)
+    reward_profile = _resolve_reward_profile(manifest)
     manifest_ticks = manifest.bar_construction_ticks_per_bar or manifest.ticks_per_bar
     if manifest_ticks is not None:
         validate_dataset_bar_spec(
@@ -644,7 +677,7 @@ def bootstrap_live_runtime(
     dataset_id = dataset_id_for_path(dataset_path)
 
     action_map = deserialize_action_map(manifest.action_map)
-    observation_shape = [1, len(FEATURE_COLS) + STATE_FEATURE_COUNT]
+    observation_shape = list(getattr(manifest, "observation_shape", None) or [1, len(FEATURE_COLS) + STATE_FEATURE_COUNT])
     model = load_validated_model(
         manifest,
         expected_symbol=symbol,
@@ -673,7 +706,13 @@ def bootstrap_live_runtime(
         raise RuntimeError("MetaTrader5 is not available in this environment.")
     broker_module = mt5_module or mt5
     _connect_mt5(broker_module)
-    broker = LiveMt5Broker(broker_module, symbol=symbol)
+    broker = LiveMt5Broker(
+        broker_module,
+        symbol=symbol,
+        commission_per_lot=execution_cost_profile["commission_per_lot"],
+        slippage_pips=execution_cost_profile["slippage_pips"],
+        partial_fill_ratio=execution_cost_profile["partial_fill_ratio"],
+    )
     account_info = broker_module.account_info()
     if account_info is None:
         raise RuntimeError("MT5 account_info() returned None during live bootstrap.")
@@ -708,6 +747,11 @@ def bootstrap_live_runtime(
         risk_engine=risk_engine,
         state_store=state_store,
         snapshot=snapshot,
+        reward_scale=reward_profile["reward_scale"],
+        reward_drawdown_penalty=reward_profile["drawdown_penalty"],
+        reward_transaction_penalty=reward_profile["transaction_penalty"],
+        reward_clip_low=reward_profile["reward_clip_low"],
+        reward_clip_high=reward_profile["reward_clip_high"],
     )
     runtime.startup_reconcile()
     source = Mt5CursorTickSource(broker_module)

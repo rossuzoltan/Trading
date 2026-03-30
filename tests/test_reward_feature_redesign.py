@@ -10,7 +10,13 @@ from sklearn.preprocessing import StandardScaler
 from event_pipeline import RuntimeEngine, RuntimeSnapshot
 from feature_engine import FEATURE_COLS, FeatureEngine, WARMUP_BARS, _compute_raw
 from runtime_common import ConfirmedPosition, build_action_map, build_state_vector
-from runtime_gym_env import RuntimeGymConfig, RuntimeGymEnv, compute_participation_bonus
+from runtime_gym_env import (
+    RuntimeGymConfig,
+    RuntimeGymEnv,
+    TrainingDiagnostics,
+    compose_final_reward,
+    compute_participation_bonus,
+)
 
 
 def _make_history(rows: int = 260) -> pd.DataFrame:
@@ -36,6 +42,15 @@ def _make_history(rows: int = 260) -> pd.DataFrame:
 
 
 class RewardFeatureRedesignTests(unittest.TestCase):
+    class _DummyAlphaGate:
+        def __init__(self, *, allow_long: bool, allow_short: bool) -> None:
+            self.model_kind = "dummy"
+            self._allow_long = bool(allow_long)
+            self._allow_short = bool(allow_short)
+
+        def allowed_directions(self, row):
+            return self._allow_long, self._allow_short, {"long_score": 0.9 if self._allow_long else 0.1, "short_score": 0.9 if self._allow_short else 0.1}
+
     def _make_runtime_engine(self) -> RuntimeEngine:
         snapshot = RuntimeSnapshot(
             last_equity=1_000.0,
@@ -43,7 +58,7 @@ class RewardFeatureRedesignTests(unittest.TestCase):
             day_start_equity=1_000.0,
         )
         broker = SimpleNamespace(commission_per_lot=7.0, slippage_pips=0.25)
-        risk_engine = SimpleNamespace(high_water_mark=1_000.0)
+        risk_engine = SimpleNamespace(high_water_mark=1_000.0, kill_switch_active=False)
         return RuntimeEngine(
             symbol="EURUSD",
             feature_engine=FeatureEngine(),
@@ -105,6 +120,40 @@ class RewardFeatureRedesignTests(unittest.TestCase):
         self.assertGreater(components["transaction_penalty_applied"], 0.0)
         self.assertAlmostEqual(expected_transaction_penalty, components["transaction_penalty_applied"])
 
+    def test_compose_final_reward_uses_unclipped_base_and_clips_once(self) -> None:
+        final_reward, fields = compose_final_reward(
+            base_reward_unclipped=-6.0,
+            net_return_coef=1.0,
+            turnover_penalty=0.0,
+            downside_risk_penalty=0.0,
+            rapid_reversal_penalty=0.0,
+            holding_penalty=0.0,
+            participation_bonus=0.0,
+            clip_low=-10.0,
+            clip_high=10.0,
+        )
+
+        self.assertAlmostEqual(-6.0, final_reward)
+        self.assertAlmostEqual(-6.0, fields["final_reward_unclipped"])
+        self.assertEqual(0.0, fields["final_reward_clipped_low"])
+
+    def test_compose_final_reward_records_clip_hits(self) -> None:
+        final_reward, fields = compose_final_reward(
+            base_reward_unclipped=-4.0,
+            net_return_coef=1.0,
+            turnover_penalty=5.0,
+            downside_risk_penalty=4.0,
+            rapid_reversal_penalty=0.0,
+            holding_penalty=0.0,
+            participation_bonus=0.0,
+            clip_low=-10.0,
+            clip_high=10.0,
+        )
+
+        self.assertAlmostEqual(-10.0, final_reward)
+        self.assertEqual(1.0, fields["final_reward_clipped_low"])
+        self.assertEqual(0.0, fields["final_reward_clipped_high"])
+
     def test_short_pnl_sign_matches_actual_short_pnl(self) -> None:
         winning_short = ConfirmedPosition(direction=-1, entry_price=1.1000, volume=0.05)
         losing_short = ConfirmedPosition(direction=-1, entry_price=1.1000, volume=0.05)
@@ -114,6 +163,123 @@ class RewardFeatureRedesignTests(unittest.TestCase):
 
         self.assertGreater(winning_state[2], 0.0)
         self.assertLess(losing_state[2], 0.0)
+
+    def test_runtime_engine_diagnostics_allow_missing_close_index(self) -> None:
+        engine = self._make_runtime_engine()
+
+        diagnostics = engine.get_training_diagnostics()
+
+        self.assertEqual(0, diagnostics["processed_bars"])
+        self.assertIsNone(diagnostics["last_close_bar_index"])
+        self.assertFalse(diagnostics["risk_kill_switch"])
+
+    def test_rapid_reversal_counts_long_reentry_once(self) -> None:
+        diagnostics = TrainingDiagnostics()
+        diagnostics._last_close_step = 0
+        diagnostics._last_closed_direction = -1
+        long_open = build_action_map([0.5], [0.5])[2]
+
+        diagnostics.record_step(
+            action=long_open,
+            submit_result=SimpleNamespace(accepted=True),
+            prev_position=0,
+            new_position=1,
+            prev_position_duration=0,
+            entry_signal_direction=1,
+            entry_filled_direction=1,
+            executed_events=[],
+            closed_trades=[],
+            reward_components={},
+            reward=0.0,
+        )
+
+        self.assertEqual(1, diagnostics.trade_stats["rapid_reversals"])
+
+    def test_training_diagnostics_snapshot_delta_is_episode_scoped(self) -> None:
+        diagnostics = TrainingDiagnostics()
+        action_map = build_action_map([0.5], [0.5])
+        baseline_a = diagnostics.snapshot()
+
+        diagnostics.record_step(
+            action=action_map[2],
+            submit_result=SimpleNamespace(accepted=True),
+            prev_position=0,
+            new_position=1,
+            prev_position_duration=0,
+            entry_signal_direction=1,
+            entry_filled_direction=1,
+            executed_events=[{"side": "open"}],
+            closed_trades=[],
+            reward_components={"pnl_reward": 0.2},
+            reward=0.2,
+        )
+        diagnostics.record_step(
+            action=action_map[1],
+            submit_result=SimpleNamespace(accepted=True),
+            prev_position=1,
+            new_position=0,
+            prev_position_duration=2,
+            executed_events=[{"side": "close"}],
+            closed_trades=[
+                {
+                    "gross_pnl_usd": 1.0,
+                    "net_pnl_usd": 0.8,
+                    "transaction_cost_usd": 0.2,
+                    "commission_usd": 0.1,
+                    "spread_slippage_cost_usd": 0.1,
+                    "spread_cost_usd": 0.05,
+                    "slippage_cost_usd": 0.05,
+                    "holding_bars": 2,
+                }
+            ],
+            reward_components={"pnl_reward": 0.1},
+            reward=0.1,
+        )
+        episode_a = diagnostics.snapshot_delta(baseline_a)
+        self.assertEqual(1, episode_a["trade_stats"]["closed_trade_count"])
+        self.assertEqual(2, episode_a["trade_stats"]["order_executed_count"])
+
+        diagnostics.reset_episode_state()
+        baseline_b = diagnostics.snapshot()
+        diagnostics.record_step(
+            action=action_map[3],
+            submit_result=SimpleNamespace(accepted=True),
+            prev_position=0,
+            new_position=-1,
+            prev_position_duration=0,
+            entry_signal_direction=-1,
+            entry_filled_direction=-1,
+            executed_events=[{"side": "open"}],
+            closed_trades=[],
+            reward_components={"pnl_reward": -0.2},
+            reward=-0.2,
+        )
+        diagnostics.record_step(
+            action=action_map[1],
+            submit_result=SimpleNamespace(accepted=True),
+            prev_position=-1,
+            new_position=0,
+            prev_position_duration=1,
+            executed_events=[{"side": "close"}],
+            closed_trades=[
+                {
+                    "gross_pnl_usd": -0.4,
+                    "net_pnl_usd": -0.6,
+                    "transaction_cost_usd": 0.2,
+                    "commission_usd": 0.1,
+                    "spread_slippage_cost_usd": 0.1,
+                    "spread_cost_usd": 0.05,
+                    "slippage_cost_usd": 0.05,
+                    "holding_bars": 1,
+                }
+            ],
+            reward_components={"pnl_reward": -0.1},
+            reward=-0.1,
+        )
+        episode_b = diagnostics.snapshot_delta(baseline_b)
+        self.assertEqual(1, episode_b["trade_stats"]["closed_trade_count"])
+        self.assertEqual(2, episode_b["trade_stats"]["order_executed_count"])
+        self.assertAlmostEqual(-0.6, episode_b["economics"]["net_pnl_usd"])
 
     def test_persisted_scaler_changes_live_observation(self) -> None:
         history = _make_history(rows=320)
@@ -222,6 +388,66 @@ class RewardFeatureRedesignTests(unittest.TestCase):
         self.assertEqual(1, diagnostics["trade_stats"]["trade_attempt_count"])
         self.assertEqual(1, diagnostics["trade_stats"]["flat_steps"])
         self.assertAlmostEqual(0.01, diagnostics["reward_components"]["participation_bonus_sum"])
+
+    def test_runtime_env_entry_spread_limit_blocks_open_actions(self) -> None:
+        history = _make_history(rows=320)
+        raw = _compute_raw(history).dropna(subset=FEATURE_COLS)
+        scaler = StandardScaler().fit(raw.loc[:, FEATURE_COLS])
+        action_map = build_action_map([0.5], [0.5])
+        env = RuntimeGymEnv(
+            symbol="EURUSD",
+            bars_frame=history,
+            scaler=scaler,
+            action_map=action_map,
+            config=RuntimeGymConfig(random_start=False, slippage_pips=0.1, entry_spread_z_limit=0.25),
+        )
+
+        env.reset(seed=7)
+        env._runtime.feature_engine._buffer.iloc[-1, env._runtime.feature_engine._buffer.columns.get_loc("spread_z")] = 0.5
+        mask = env.action_masks()
+
+        self.assertTrue(mask[0])
+        self.assertFalse(mask[2])
+        self.assertFalse(mask[3])
+
+    def test_runtime_env_alpha_gate_blocks_disallowed_direction(self) -> None:
+        history = _make_history(rows=320)
+        raw = _compute_raw(history).dropna(subset=FEATURE_COLS)
+        scaler = StandardScaler().fit(raw.loc[:, FEATURE_COLS])
+        action_map = build_action_map([0.5], [0.5])
+        env = RuntimeGymEnv(
+            symbol="EURUSD",
+            bars_frame=history,
+            scaler=scaler,
+            action_map=action_map,
+            alpha_gate=self._DummyAlphaGate(allow_long=True, allow_short=False),
+            config=RuntimeGymConfig(random_start=False, slippage_pips=0.1, entry_spread_z_limit=5.0),
+        )
+
+        env.reset(seed=7)
+        mask = env.action_masks()
+
+        self.assertTrue(mask[0])
+        self.assertTrue(mask[2])
+        self.assertFalse(mask[3])
+
+    def test_runtime_env_window_size_shapes_observation(self) -> None:
+        history = _make_history(rows=320)
+        raw = _compute_raw(history).dropna(subset=FEATURE_COLS)
+        scaler = StandardScaler().fit(raw.loc[:, FEATURE_COLS])
+        action_map = build_action_map([0.5], [0.5])
+        env = RuntimeGymEnv(
+            symbol="EURUSD",
+            bars_frame=history,
+            scaler=scaler,
+            action_map=action_map,
+            config=RuntimeGymConfig(random_start=False, slippage_pips=0.1, window_size=8),
+        )
+
+        obs, info = env.reset(seed=7)
+
+        self.assertEqual((8, len(FEATURE_COLS) + 4), obs.shape)
+        self.assertEqual(WARMUP_BARS, info["episode_start_index"])
 
     def test_runtime_env_force_closes_open_position_at_episode_end(self) -> None:
         history = _make_history(rows=320)

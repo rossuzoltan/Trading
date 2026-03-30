@@ -2,6 +2,7 @@
 # but are missing or unclear in the legacy Requirements.txt snapshot.
 joblib>=1.4
 optuna>=4.8
+psutil>=5.9
 py-spy>=0.4.1
 pyarrow>=18.0.0
 python-dotenv>=1.0.1

@@ -70,7 +70,6 @@ OPTIONAL_PACKAGES = {
 }
 DEFAULT_RUNTIME_MODEL_NAME = "models/model_<symbol>_best.zip"
 DEFAULT_RUNTIME_SCALER_NAME = "models/scaler_<SYMBOL>.pkl"
-RUNTIME_OBSERVATION_SHAPE = [1, len(FEATURE_COLS) + STATE_FEATURE_COUNT]
 
 
 def _print_header(title: str) -> None:
@@ -173,25 +172,28 @@ def _validate_runtime_manifest_bundle(
 
     symbol = str(manifest.strategy_symbol).strip().upper()
     expected_action_map = deserialize_action_map(manifest.action_map)
+    expected_observation_shape = list(
+        getattr(manifest, "observation_shape", None) or [1, len(FEATURE_COLS) + STATE_FEATURE_COUNT]
+    )
     load_validated_model(
         manifest,
         expected_symbol=symbol,
         expected_action_map=expected_action_map,
-        expected_observation_shape=RUNTIME_OBSERVATION_SHAPE,
+        expected_observation_shape=expected_observation_shape,
         expected_dataset_id=expected_dataset_id,
     )
     load_validated_scaler(
         manifest,
         expected_symbol=symbol,
         expected_action_map=expected_action_map,
-        expected_observation_shape=RUNTIME_OBSERVATION_SHAPE,
+        expected_observation_shape=expected_observation_shape,
         expected_dataset_id=expected_dataset_id,
     )
     load_validated_vecnormalize(
         manifest,
         expected_symbol=symbol,
         expected_action_map=expected_action_map,
-        expected_observation_shape=RUNTIME_OBSERVATION_SHAPE,
+        expected_observation_shape=expected_observation_shape,
         expected_dataset_id=expected_dataset_id,
     )
 

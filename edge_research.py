@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,55 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from symbol_utils import pip_value_for_volume, price_to_pips
+
+
+@dataclass
+class BaselineAlphaGate:
+    symbol: str
+    feature_cols: tuple[str, ...]
+    model_kind: str
+    probability_threshold: float = 0.55
+    probability_margin: float = 0.05
+    min_edge_pips: float = 0.0
+    long_model: Pipeline | None = None
+    short_model: Pipeline | None = None
+    signed_model: Pipeline | None = None
+
+    def score_row(self, row: pd.Series | dict[str, Any]) -> dict[str, float]:
+        features = np.asarray(
+            [[float((row.get(col, 0.0) if hasattr(row, "get") else 0.0)) for col in self.feature_cols]],
+            dtype=np.float64,
+        )
+        scores = {
+            "long_score": 0.0,
+            "short_score": 0.0,
+            "signed_score": 0.0,
+        }
+        if self.long_model is not None and self.short_model is not None:
+            scores["long_score"] = float(self.long_model.predict_proba(features)[0, 1])
+            scores["short_score"] = float(self.short_model.predict_proba(features)[0, 1])
+        if self.signed_model is not None:
+            scores["signed_score"] = float(self.signed_model.predict(features)[0])
+        return scores
+
+    def allowed_directions(self, row: pd.Series | dict[str, Any]) -> tuple[bool, bool, dict[str, float]]:
+        scores = self.score_row(row)
+        if self.model_kind == "logistic_pair":
+            long_score = float(scores["long_score"])
+            short_score = float(scores["short_score"])
+            allow_long = long_score >= float(self.probability_threshold) and (
+                (long_score - short_score) >= float(self.probability_margin)
+            )
+            allow_short = short_score >= float(self.probability_threshold) and (
+                (short_score - long_score) >= float(self.probability_margin)
+            )
+            return bool(allow_long), bool(allow_short), scores
+        if self.model_kind == "ridge_signed_target":
+            signed_score = float(scores["signed_score"])
+            allow_long = signed_score >= float(self.min_edge_pips)
+            allow_short = signed_score <= -float(self.min_edge_pips)
+            return bool(allow_long), bool(allow_short), scores
+        return False, False, scores
 
 
 def _ensure_cost_columns(frame: pd.DataFrame) -> pd.DataFrame:
@@ -204,6 +254,64 @@ def _fit_probability_pair(x_train: np.ndarray, frame_train: pd.DataFrame) -> tup
     long_model.fit(x_train, frame_train["long_target"].to_numpy(dtype=np.int8))
     short_model.fit(x_train, frame_train["short_target"].to_numpy(dtype=np.int8))
     return long_model, short_model
+
+
+def fit_baseline_alpha_gate(
+    *,
+    symbol: str,
+    train_frame: pd.DataFrame,
+    feature_cols: list[str],
+    horizon_bars: int,
+    commission_per_lot: float,
+    slippage_pips: float,
+    min_edge_pips: float,
+    probability_threshold: float,
+    probability_margin: float,
+    model_preference: str = "auto",
+) -> BaselineAlphaGate | None:
+    prepared_train = _prepare_targets(
+        train_frame,
+        symbol=symbol,
+        feature_cols=feature_cols,
+        horizon_bars=horizon_bars,
+        commission_per_lot=commission_per_lot,
+        slippage_pips=slippage_pips,
+        min_edge_pips=min_edge_pips,
+    )
+    if prepared_train.empty:
+        return None
+
+    x_train = prepared_train.loc[:, feature_cols].to_numpy(dtype=np.float64)
+    preference = str(model_preference or "auto").strip().lower()
+    if preference in {"auto", "logistic_pair"}:
+        logistic_long, logistic_short = _fit_probability_pair(x_train, prepared_train)
+        if logistic_long is not None and logistic_short is not None:
+            return BaselineAlphaGate(
+                symbol=str(symbol).upper(),
+                feature_cols=tuple(feature_cols),
+                model_kind="logistic_pair",
+                probability_threshold=float(probability_threshold),
+                probability_margin=float(probability_margin),
+                min_edge_pips=float(min_edge_pips),
+                long_model=logistic_long,
+                short_model=logistic_short,
+            )
+        if preference == "logistic_pair":
+            return None
+
+    if preference in {"auto", "ridge_signed_target", "ridge"}:
+        ridge = Pipeline(steps=[("scaler", StandardScaler()), ("model", Ridge(alpha=1.0))])
+        ridge.fit(x_train, prepared_train["signed_target"].to_numpy(dtype=np.float64))
+        return BaselineAlphaGate(
+            symbol=str(symbol).upper(),
+            feature_cols=tuple(feature_cols),
+            model_kind="ridge_signed_target",
+            probability_threshold=float(probability_threshold),
+            probability_margin=float(probability_margin),
+            min_edge_pips=float(min_edge_pips),
+            signed_model=ridge,
+        )
+    return None
 
 
 def _trend_rule_signals(frame: pd.DataFrame) -> np.ndarray:

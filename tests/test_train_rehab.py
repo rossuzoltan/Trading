@@ -4,6 +4,7 @@ import json
 import shutil
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 import numpy as np
@@ -13,8 +14,10 @@ from feature_engine import FEATURE_COLS
 from train_agent import (
     TrainingDiagnosticsCallback,
     TrainingHeartbeatCallback,
+    _apply_profile_override,
     _deployment_candidate_rank,
     _holdout_deployment_blockers,
+    _resolve_training_experiment_profile,
     evaluate_model,
     get_current_ent_coef,
     get_current_phase,
@@ -145,6 +148,28 @@ class DummyHeartbeatModel:
 
 
 class TrainRehabTests(unittest.TestCase):
+    def test_finalboss_reward_strip_profiles_resolve_expected_overrides(self):
+        reward_strip = _resolve_training_experiment_profile("reward_strip")
+        hard_churn = _resolve_training_experiment_profile("reward_strip_hard_churn")
+        hard_churn_alpha = _resolve_training_experiment_profile("reward_strip_hard_churn_alpha_gate")
+
+        self.assertEqual(0.0, reward_strip["reward_downside_risk_coef"])
+        self.assertEqual(0.0, reward_strip["reward_turnover_coef"])
+        self.assertEqual(0.0, reward_strip["churn_penalty_usd"])
+        self.assertEqual(1000.0, reward_strip["reward_scale"])
+        self.assertEqual(-10.0, reward_strip["reward_clip_low"])
+        self.assertEqual(10.0, reward_strip["reward_clip_high"])
+        self.assertFalse(reward_strip["participation_bonus_enabled"])
+        self.assertEqual(5, hard_churn["churn_min_hold_bars"])
+        self.assertEqual(3, hard_churn["churn_action_cooldown"])
+        self.assertTrue(hard_churn_alpha["alpha_gate_enabled"])
+        self.assertEqual("auto", hard_churn_alpha["alpha_gate_model"])
+
+    def test_explicit_env_var_values_beat_profile_defaults(self):
+        with patch.dict("os.environ", {"TRAIN_REWARD_SCALE": "2500"}, clear=False):
+            self.assertEqual(5, _apply_profile_override(5, "TRAIN_REWARD_SCALE", 1000.0))
+        self.assertEqual(1000.0, _apply_profile_override(5, "TRAIN_EXPERIMENT_PROFILE_FAKE", 1000.0))
+
     def test_recovery_helpers_follow_staircase_and_entropy_schedule(self):
         cfg = {
             "slippage_curriculum": {

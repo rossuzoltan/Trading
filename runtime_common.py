@@ -136,13 +136,6 @@ def build_action_mask(
             mask[2:] = True
     else:
         mask[1] = True
-        for idx, action in enumerate(action_map):
-            if (
-                action.action_type == ActionType.OPEN
-                and action.direction is not None
-                and int(action.direction) == int(position.direction)
-            ):
-                mask[idx] = True
     return mask
 
 
@@ -384,11 +377,15 @@ def build_evaluation_accounting(
     """
     Transform trade log + execution diagnostics into a single normalized accounting summary.
     """
+    trade_diagnostics = dict(
+        execution_diagnostics.get("trade_diagnostics", execution_diagnostics.get("trade_stats", {})) or {}
+    )
+    economics = dict(execution_diagnostics.get("economics", {}))
     trade_metrics = compute_trade_metrics(trade_log, initial_equity=initial_equity)
     reconciliation = build_trade_metric_reconciliation(
         trade_metrics=trade_metrics,
-        trade_diagnostics=execution_diagnostics.get("trade_stats", {}),
-        economics=execution_diagnostics.get("economics", {}),
+        trade_diagnostics=trade_diagnostics,
+        economics=economics,
         trade_log_count=len(trade_log),
         execution_log_count=execution_log_count,
     )
@@ -397,14 +394,11 @@ def build_evaluation_accounting(
     summary = {
         **trade_metrics,
         "metrics_reconciliation": reconciliation,
+        "metric_reconciliation": reconciliation,
     }
     # Ensure top-level fields match downstream expectations if they differ
-    summary["executed_order_count"] = int(
-        execution_diagnostics.get("trade_stats", {}).get("order_executed_count", 0)
-    )
-    summary["forced_close_count"] = int(
-        execution_diagnostics.get("trade_stats", {}).get("forced_close_count", 0)
-    )
+    summary["executed_order_count"] = int(trade_diagnostics.get("order_executed_count", 0))
+    summary["forced_close_count"] = int(trade_diagnostics.get("forced_close_count", 0))
 
     return summary
 
@@ -413,7 +407,7 @@ def validate_evaluation_accounting(accounting: dict[str, Any]) -> dict[str, Any]
     """
     Assert that trade counts derived from the trade log match the closed trade counts from diagnostics.
     """
-    reconcile = accounting.get("metrics_reconciliation", {})
+    reconcile = accounting.get("metrics_reconciliation") or accounting.get("metric_reconciliation", {})
     passed = bool(reconcile.get("passed", False))
     mismatches = reconcile.get("mismatch_fields", [])
 
@@ -439,7 +433,7 @@ def validate_evaluation_payload(payload: dict[str, Any]) -> None:
     if not isinstance(metrics, dict):
         raise ValueError("Evaluation payload missing valid metrics dictionary.")
 
-    reconcile = metrics.get("metrics_reconciliation", {})
+    reconcile = metrics.get("metrics_reconciliation") or metrics.get("metric_reconciliation", {})
     if not bool(reconcile.get("passed", False)):
         mismatches = reconcile.get("mismatch_fields", [])
         raise RuntimeError(f"Cannot serialize evaluation: reconciliation failed for {mismatches}")

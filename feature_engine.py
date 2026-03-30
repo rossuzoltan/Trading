@@ -371,8 +371,18 @@ class FeatureEngine:
         self._buffer: pd.DataFrame | None   = None
         self._raw_buffer_np: np.ndarray | None = None
         self._timestamps_np: np.ndarray | None = None
+        self._scaler_mean: np.ndarray | None = None
+        self._scaler_scale: np.ndarray | None = None
         self._buffer_size: int = 400  # Increased for safety with indicators
         self._count: int = 0
+
+    def _sync_scaler_cache(self) -> None:
+        if self._scaler is not None:
+            self._scaler_mean = self._scaler.mean_.astype(np.float32)
+            self._scaler_scale = self._scaler.scale_.astype(np.float32)
+        else:
+            self._scaler_mean = None
+            self._scaler_scale = None
 
     def fit_transform(
         self, df: pd.DataFrame, scaler_path: str = SCALER_PATH
@@ -386,6 +396,7 @@ class FeatureEngine:
         self._scaler = StandardScaler()
         feature_block = raw.loc[:, FEATURE_COLS]
         self._scaler.fit(feature_block)
+        self._sync_scaler_cache()
         transformed = raw.copy()
         transformed.loc[:, FEATURE_COLS] = self._scaler.transform(feature_block)
 
@@ -412,6 +423,7 @@ class FeatureEngine:
             raise FileNotFoundError(f"Scaler not found at '{path}'. Run training first.")
         engine = cls()
         engine._scaler = joblib.load(path)
+        engine._sync_scaler_cache()
         print(f"[FeatureEngine] Scaler loaded from {path}")
         return engine
 
@@ -419,6 +431,7 @@ class FeatureEngine:
     def from_scaler(cls, scaler: StandardScaler) -> "FeatureEngine":
         engine = cls()
         engine._scaler = scaler
+        engine._sync_scaler_cache()
         return engine
 
     @classmethod
@@ -456,6 +469,7 @@ class FeatureEngine:
         if raw.empty:
             raise ValueError("warm_up() produced no valid feature rows after indicator/scaler filtering.")
         self._buffer = raw
+        self._sync_scaler_cache()
 
     def push(self, bar: pd.Series) -> None:
         """Legacy path for pd.Series inputs."""
@@ -468,15 +482,16 @@ class FeatureEngine:
         
         # Update tail
         idx = -1
+        bar_timestamp = pd.Timestamp(bar.name)
         self._raw_buffer_np[idx]['open'] = bar.get('Open', 0.0)
         self._raw_buffer_np[idx]['high'] = bar.get('High', 0.0)
         self._raw_buffer_np[idx]['low'] = bar.get('Low', 0.0)
         self._raw_buffer_np[idx]['close'] = bar.get('Close', 0.0)
         self._raw_buffer_np[idx]['volume'] = bar.get('Volume', 0.0)
-        self._raw_buffer_np[idx]['timestamp_s'] = bar.name.timestamp()
+        self._raw_buffer_np[idx]['timestamp_s'] = bar_timestamp.timestamp()
         self._raw_buffer_np[idx]['avg_spread'] = bar.get('avg_spread', 0.0)
         self._raw_buffer_np[idx]['time_delta_s'] = bar.get('time_delta_s', 3600.0)
-        self._timestamps_np[idx] = bar.name.to_datetime64()
+        self._timestamps_np[idx] = bar_timestamp.to_datetime64()
         self._count = min(self._count + 1, self._buffer_size)
 
         self._refresh_buffer()
@@ -516,13 +531,7 @@ class FeatureEngine:
         raw = _compute_raw(df, latest_only_hurst=True, fast_mode=True)
         self._buffer = self._drop_invalid_feature_rows(raw)
         
-        # Pre-cache scaler params for hot-path speed
-        if self._scaler is not None:
-            self._scaler_mean = self._scaler.mean_.astype(np.float32)
-            self._scaler_scale = self._scaler.scale_.astype(np.float32)
-        else:
-            self._scaler_mean = None
-            self._scaler_scale = None
+        self._sync_scaler_cache()
 
     def _get_obs_hot_path(self) -> np.ndarray:
         """
@@ -639,3 +648,25 @@ class FeatureEngine:
         if np.any(np.isnan(obs)):
             obs = np.nan_to_num(obs, nan=0.0)
         return obs
+
+    def recent_observation_window(self, window_size: int = 1) -> np.ndarray:
+        size = max(int(window_size), 1)
+        if size == 1:
+            return self.latest_observation.reshape(1, -1)
+        if self._buffer is None or self._buffer.empty:
+            raise RuntimeError("No observations. Call warm_up() first.")
+
+        feature_frame = self._buffer.loc[:, FEATURE_COLS].tail(size).copy()
+        if feature_frame.empty:
+            raise RuntimeError("No feature rows available for observation window.")
+
+        if self._scaler is not None:
+            rows = self._scaler.transform(feature_frame).astype(np.float32)
+        else:
+            rows = feature_frame.to_numpy(dtype=np.float32, copy=True)
+
+        if rows.shape[0] < size:
+            pad_source = rows[0:1] if rows.size else np.zeros((1, len(FEATURE_COLS)), dtype=np.float32)
+            pad = np.repeat(pad_source, size - rows.shape[0], axis=0)
+            rows = np.vstack([pad, rows])
+        return np.nan_to_num(rows.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)

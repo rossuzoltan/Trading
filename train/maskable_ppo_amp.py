@@ -48,6 +48,7 @@ class MaskablePPO_AMP(MaskablePPO):
         entropy_losses = []
         pg_losses, value_losses = [], []
         clip_fractions = []
+        param_deltas = []  # L2 norm of policy weight movement per update step
         continue_training = True
 
         # train for n_epochs epochs
@@ -64,6 +65,13 @@ class MaskablePPO_AMP(MaskablePPO):
                 advantages = rollout_data.advantages
                 if self.normalize_advantage:
                     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+                # --- Snapshot policy params before update (for delta tracking) ---
+                # This directly measures whether the policy weights actually move,
+                # independent of KL divergence computation. KL≈0 alone is ambiguous;
+                # a near-zero param_delta alongside KL≈0 conclusively confirms policy freeze.
+                with th.no_grad():
+                    prev_params = th.cat([p.detach().clone().flatten() for p in self.policy.parameters()])
 
                 # --- AMP Training Step ---
                 self.policy.optimizer.zero_grad()
@@ -137,6 +145,13 @@ class MaskablePPO_AMP(MaskablePPO):
                     approx_kl_div = th.mean((th.exp(log_ratio) - 1) - log_ratio).cpu().numpy()
                     approx_kl_divs.append(approx_kl_div)
 
+                    # Policy parameter delta: L2 distance between weights before and after update.
+                    # Near-zero delta + KL≈0 = confirmed policy freeze.
+                    # Non-zero delta + KL≈0 = KL formula/scaling issue, not true freeze.
+                    curr_params = th.cat([p.detach().flatten() for p in self.policy.parameters()])
+                    delta = th.norm(curr_params - prev_params).item()
+                    param_deltas.append(delta)
+
                 if self.target_kl is not None and approx_kl_div > 1.5 * self.target_kl:
                     continue_training = False
                     if self.verbose >= 1:
@@ -161,3 +176,10 @@ class MaskablePPO_AMP(MaskablePPO):
         self.logger.record("train/clip_range", clip_range)
         if self.clip_range_vf is not None:
             self.logger.record("train/clip_range_vf", clip_range_vf)
+        # Policy freeze diagnostics
+        if param_deltas:
+            self.logger.record("train/policy_param_delta", float(np.mean(param_deltas)))
+        # Action entropy from the last mini-batch (proxy for policy collapse)
+        if entropy_losses:
+            # entropy_loss = -mean(entropy), so entropy = -entropy_loss
+            self.logger.record("train/action_entropy", -float(np.mean(entropy_losses)))

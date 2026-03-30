@@ -22,6 +22,7 @@ from execution.replay_broker import ReplayBroker
 from risk.risk_engine import RiskEngine, RiskLimits
 from runtime.runtime_engine import RuntimeEngine, RuntimeSnapshot
 
+from edge_research import BaselineAlphaGate
 from feature_engine import FEATURE_COLS, FeatureEngine, WARMUP_BARS
 from runtime_common import STATE_FEATURE_COUNT, ActionSpec, ActionType, action_label, build_action_mask, build_observation
 from symbol_utils import pip_value_for_volume
@@ -92,6 +93,7 @@ class RuntimeGymConfig:
     downside_risk_penalty: float = 0.0
     turnover_penalty: float = 0.0
     net_return_coef: float = 1.0
+    entry_spread_z_limit: float = 1.5
     window_size: int = 1
     random_start: bool = False
 
@@ -117,12 +119,50 @@ def compute_participation_bonus(
     if int(global_step) - int(last_bonus_step) < int(pcfg.get("cooldown_steps", 0)):
         return 0.0
 
+    mode = str(pcfg.get("mode", "entry")).lower()
+    if mode == "per_bar":
+        if int(new_position) != 0:
+            return float(pcfg.get("bonus_value", 0.0)) / 10.0
+        return 0.0
+
     entry_happened = int(prev_position) == 0 and int(new_position) != 0
     if bool(pcfg.get("only_from_flat", True)) and not entry_happened:
         return 0.0
     if not entry_happened:
         return 0.0
     return float(pcfg.get("bonus_value", 0.0))
+
+
+def compose_final_reward(
+    *,
+    base_reward_unclipped: float,
+    net_return_coef: float,
+    turnover_penalty: float,
+    downside_risk_penalty: float,
+    rapid_reversal_penalty: float,
+    holding_penalty: float,
+    participation_bonus: float,
+    clip_low: float,
+    clip_high: float,
+) -> tuple[float, dict[str, float]]:
+    net_return_adjustment = float(base_reward_unclipped) * (float(net_return_coef) - 1.0)
+    pre_bonus_reward = (
+        float(base_reward_unclipped)
+        + float(net_return_adjustment)
+        - float(turnover_penalty)
+        - float(downside_risk_penalty)
+        - float(rapid_reversal_penalty)
+        - float(holding_penalty)
+    )
+    unclipped_final_reward = float(pre_bonus_reward) + float(participation_bonus)
+    final_reward = float(np.clip(unclipped_final_reward, float(clip_low), float(clip_high)))
+    return final_reward, {
+        "net_return_adjustment_applied": float(net_return_adjustment),
+        "pre_bonus_reward": float(pre_bonus_reward),
+        "final_reward_unclipped": float(unclipped_final_reward),
+        "final_reward_clipped_low": float(unclipped_final_reward <= float(clip_low)),
+        "final_reward_clipped_high": float(unclipped_final_reward >= float(clip_high)),
+    }
 
 
 class TrainingDiagnostics:
@@ -182,6 +222,12 @@ class TrainingDiagnostics:
             "participation_bonus_sum": 0.0,
             "holding_penalty_sum": 0.0,
             "drawdown_penalty_sum": 0.0,
+            "turnover_penalty_sum": 0.0,
+            "downside_risk_penalty_sum": 0.0,
+            "rapid_reversal_penalty_sum": 0.0,
+            "net_return_adjustment_sum": 0.0,
+            "final_reward_clipped_low_count": 0.0,
+            "final_reward_clipped_high_count": 0.0,
             "net_reward_sum": 0.0,
         }
         self._position_duration_samples.clear()
@@ -204,6 +250,16 @@ class TrainingDiagnostics:
     def mark_bonus_awarded(self, global_step: int) -> None:
         self._last_bonus_step = int(global_step)
         self._episode_bonus_count += 1
+
+    def is_rapid_reversal_candidate(self, entry_filled_direction: int) -> bool:
+        direction = int(entry_filled_direction)
+        if direction == 0 or self._last_close_step is None:
+            return False
+        if (int(self.total_steps) - int(self._last_close_step)) > self.RAPID_REVERSAL_WINDOW_STEPS:
+            return False
+        return (direction > 0 and self._last_closed_direction < 0) or (
+            direction < 0 and self._last_closed_direction > 0
+        )
 
     def _record_action(self, action: ActionSpec) -> None:
         if action.action_type == ActionType.HOLD:
@@ -321,7 +377,6 @@ class TrainingDiagnostics:
             if self._last_closed_direction < 0 and self._last_close_step is not None:
                 if (self.total_steps - self._last_close_step) <= self.RAPID_REVERSAL_WINDOW_STEPS:
                     self.trade_stats["rapid_reversals"] += 1
-                self.trade_stats["rapid_reversals"] += 1
         elif int(entry_filled_direction) < 0:
             self.trade_stats["entered_short_count"] += 1
             if (
@@ -355,6 +410,22 @@ class TrainingDiagnostics:
         )
         self.reward_stats["holding_penalty_sum"] -= float(reward_components.get("holding_penalty_applied", 0.0))
         self.reward_stats["drawdown_penalty_sum"] -= float(reward_components.get("drawdown_penalty_applied", 0.0))
+        self.reward_stats["turnover_penalty_sum"] -= float(reward_components.get("turnover_penalty_applied", 0.0))
+        self.reward_stats["downside_risk_penalty_sum"] -= float(
+            reward_components.get("downside_risk_penalty_applied", 0.0)
+        )
+        self.reward_stats["rapid_reversal_penalty_sum"] -= float(
+            reward_components.get("rapid_reversal_penalty_applied", 0.0)
+        )
+        self.reward_stats["net_return_adjustment_sum"] += float(
+            reward_components.get("net_return_adjustment_applied", 0.0)
+        )
+        self.reward_stats["final_reward_clipped_low_count"] += float(
+            reward_components.get("final_reward_clipped_low", 0.0)
+        )
+        self.reward_stats["final_reward_clipped_high_count"] += float(
+            reward_components.get("final_reward_clipped_high", 0.0)
+        )
         self.reward_stats["net_reward_sum"] += float(reward)
 
     def record_forced_close(
@@ -386,6 +457,59 @@ class TrainingDiagnostics:
             "reward_components": {key: float(value) for key, value in self.reward_stats.items()},
         }
 
+    def snapshot_delta(self, baseline: dict[str, Any] | None) -> dict[str, Any]:
+        current = self.snapshot()
+        if not isinstance(baseline, dict):
+            return current
+
+        def _delta_map(
+            current_map: dict[str, Any] | None,
+            baseline_map: dict[str, Any] | None,
+            *,
+            float_keys: set[str] | None = None,
+        ) -> dict[str, Any]:
+            out: dict[str, Any] = {}
+            current_map = dict(current_map or {})
+            baseline_map = dict(baseline_map or {})
+            keys = set(current_map) | set(baseline_map)
+            for key in keys:
+                if key == "position_durations_sample":
+                    current_sample = list(current_map.get(key, []) or [])
+                    baseline_sample = list(baseline_map.get(key, []) or [])
+                    if len(current_sample) >= len(baseline_sample):
+                        out[key] = current_sample[len(baseline_sample):]
+                    else:
+                        out[key] = current_sample
+                    continue
+                current_value = current_map.get(key, 0.0)
+                baseline_value = baseline_map.get(key, 0.0)
+                if float_keys and key in float_keys:
+                    out[key] = float(current_value) - float(baseline_value)
+                else:
+                    out[key] = int(round(float(current_value) - float(baseline_value)))
+            return out
+
+        return {
+            "total_steps": max(int(current.get("total_steps", 0)) - int(baseline.get("total_steps", 0)), 0),
+            "action_counts": _delta_map(current.get("action_counts"), baseline.get("action_counts")),
+            "trade_stats": _delta_map(
+                current.get("trade_stats"),
+                baseline.get("trade_stats"),
+                float_keys={"position_duration_sum"},
+            ),
+            "economics": _delta_map(
+                current.get("economics"),
+                baseline.get("economics"),
+                float_keys=set((current.get("economics") or {}).keys()) | set((baseline.get("economics") or {}).keys()),
+            ),
+            "reward_components": _delta_map(
+                current.get("reward_components"),
+                baseline.get("reward_components"),
+                float_keys=set((current.get("reward_components") or {}).keys())
+                | set((baseline.get("reward_components") or {}).keys()),
+            ),
+        }
+
 
 class RuntimeGymEnv(gym.Env):
     """
@@ -411,6 +535,7 @@ class RuntimeGymEnv(gym.Env):
         risk_limits: RiskLimits | None = None,
         config: RuntimeGymConfig | None = None,
         recovery_config: dict[str, Any] | None = None,
+        alpha_gate: BaselineAlphaGate | None = None,
     ) -> None:
         super().__init__()
         self.symbol = symbol.upper()
@@ -464,6 +589,9 @@ class RuntimeGymEnv(gym.Env):
         self._recovery_config = copy.deepcopy(recovery_config) if recovery_config is not None else None
         self._global_step = 0
         self._training_diagnostics = TrainingDiagnostics()
+        self._episode_diagnostics_baseline: dict[str, Any] | None = None
+        self._alpha_gate = alpha_gate
+        self._last_alpha_gate_scores: dict[str, float] | None = None
 
         self._reset_internal()
 
@@ -474,6 +602,8 @@ class RuntimeGymEnv(gym.Env):
         self._episode_start_index = 0
         self._pending_entry_direction = 0
         self._episode_finalized = False
+        self._episode_diagnostics_baseline = None
+        self._last_alpha_gate_scores = None
 
     @staticmethod
     def _frame_to_bars(frame: pd.DataFrame) -> np.ndarray:
@@ -530,6 +660,8 @@ class RuntimeGymEnv(gym.Env):
             reward_transaction_penalty=float(self.config.transaction_penalty),
             reward_clip_low=float(self.config.reward_clip_low),
             reward_clip_high=float(self.config.reward_clip_high),
+            window_size=int(self.config.window_size),
+            alpha_gate=self._alpha_gate,
         )
         runtime.startup_reconcile()
         return runtime
@@ -560,6 +692,44 @@ class RuntimeGymEnv(gym.Env):
         slippage_ratio = slippage_cost_usd / max(float(equity_base), 1e-6)
         return float(self._runtime.reward_transaction_penalty * self._runtime.reward_scale * slippage_ratio)
 
+    def _estimate_downside_risk_penalty(self, reward_components: dict[str, float]) -> float:
+        coef = max(float(self.config.downside_risk_penalty), 0.0)
+        if coef <= 0.0:
+            return 0.0
+        # Keep penalty in the same units as the base reward. Using log_return * reward_scale
+        # again would double-scale and can saturate clipping, starving PPO of gradient.
+        reward_raw = float(reward_components.get("reward_raw_unclipped", 0.0))
+        downside = max(-reward_raw, 0.0)
+        return float(coef * downside)
+
+    def _estimate_turnover_penalty(self, reward_components: dict[str, float]) -> float:
+        coef = max(float(self.config.turnover_penalty), 0.0)
+        if coef <= 0.0:
+            return 0.0
+        # Penalize turnover as an additional fraction of the already-scaled transaction penalty.
+        transaction_penalty = max(float(reward_components.get("transaction_penalty_applied", 0.0)), 0.0)
+        return float(coef * transaction_penalty)
+
+    def _estimate_holding_penalty(self, closed_trades: Sequence[dict[str, Any]] | None) -> float:
+        penalty_unit = max(float(self.config.churn_penalty_usd), 0.0)
+        min_hold_bars = max(int(self.config.churn_min_hold_bars), 0)
+        if penalty_unit <= 0.0 or min_hold_bars <= 0:
+            return 0.0
+        penalty = 0.0
+        for trade in list(closed_trades or []):
+            holding_bars = max(int(trade.get("holding_bars", 0) or 0), 0)
+            if 0 < holding_bars < min_hold_bars:
+                penalty += penalty_unit * float(min_hold_bars - holding_bars + 1)
+        return float(penalty)
+
+    def _estimate_rapid_reversal_penalty(self, entry_filled_direction: int) -> float:
+        penalty_unit = max(float(self.config.churn_penalty_usd), 0.0)
+        if penalty_unit <= 0.0:
+            return 0.0
+        if not self._training_diagnostics.is_rapid_reversal_candidate(entry_filled_direction):
+            return 0.0
+        return float(penalty_unit)
+
     def set_slippage_pips(self, value: float) -> None:
         self.max_slippage_pips = float(value)
         self._apply_runtime_slippage()
@@ -571,7 +741,14 @@ class RuntimeGymEnv(gym.Env):
         self._recovery_config = copy.deepcopy(cfg) if cfg is not None else None
 
     def get_training_diagnostics(self) -> dict[str, Any]:
-        return self._training_diagnostics.snapshot()
+        snapshot = self._training_diagnostics.snapshot()
+        if self._alpha_gate is not None:
+            snapshot["alpha_gate"] = {
+                "enabled": True,
+                "model_kind": self._alpha_gate.model_kind,
+                "last_scores": dict(self._last_alpha_gate_scores or {}),
+            }
+        return snapshot
 
     def get_trade_log(self) -> list[dict[str, Any]]:
         """Return closed trade log from the current episode broker.
@@ -621,6 +798,8 @@ class RuntimeGymEnv(gym.Env):
                 "gross_pnl_usd_delta": 0.0,
                 "net_pnl_usd_delta": 0.0,
                 "transaction_cost_usd_delta": 0.0,
+                "executed_events": [],
+                "closed_trades": [],
                 "equity": float(self._runtime.last_equity) if self._runtime is not None else float(self.config.initial_equity),
             }
         prev_position = int(self._runtime.confirmed_position.direction)
@@ -648,6 +827,8 @@ class RuntimeGymEnv(gym.Env):
             "gross_pnl_usd_delta": float(sum(float(trade.get("gross_pnl_usd", 0.0)) for trade in closed_trades)),
             "net_pnl_usd_delta": float(sum(float(trade.get("net_pnl_usd", 0.0)) for trade in closed_trades)),
             "transaction_cost_usd_delta": float(sum(float(trade.get("transaction_cost_usd", 0.0)) for trade in closed_trades)),
+            "executed_events": executed_events,
+            "closed_trades": closed_trades,
             "equity": float(forced_summary.get("equity", self._runtime.last_equity)),
         }
 
@@ -703,6 +884,7 @@ class RuntimeGymEnv(gym.Env):
     def action_masks(self) -> np.ndarray:
         if self._runtime is None or self._runtime.feature_engine._buffer is None:
             return np.zeros(len(self.action_map), dtype=bool)
+        self._last_alpha_gate_scores = None
         
         latest_row = self._runtime.feature_engine._buffer.iloc[-1]
         spread_z = float(latest_row.get("spread_z", 0.0))
@@ -713,6 +895,8 @@ class RuntimeGymEnv(gym.Env):
             position=self._runtime.confirmed_position,
             spread_z=spread_z
         )
+        if self._runtime.confirmed_position.is_flat and float(spread_z) >= float(self.config.entry_spread_z_limit):
+            mask[2:] = False
         
         # Phase 4: Churn/Selectivity constraints
         position = self._runtime.confirmed_position
@@ -734,6 +918,18 @@ class RuntimeGymEnv(gym.Env):
                     cooldown_mask = np.zeros_like(mask)
                     cooldown_mask[0] = True
                     return cooldown_mask
+
+        if position.is_flat and self._alpha_gate is not None:
+            allow_long, allow_short, scores = self._alpha_gate.allowed_directions(latest_row)
+            self._last_alpha_gate_scores = dict(scores)
+            for idx, action in enumerate(self.action_map):
+                if action.action_type != ActionType.OPEN:
+                    continue
+                direction = int(action.direction or 0)
+                if direction > 0 and not allow_long:
+                    mask[idx] = False
+                if direction < 0 and not allow_short:
+                    mask[idx] = False
         
         return mask
 
@@ -741,6 +937,7 @@ class RuntimeGymEnv(gym.Env):
         super().reset(seed=seed)
         self._reset_internal()
         self._training_diagnostics.reset_episode_state()
+        self._episode_diagnostics_baseline = self._training_diagnostics.snapshot()
         self._episode_start_index = self._resolve_start_index()
         self._runtime = self._bootstrap_runtime(self._episode_start_index)
         self._apply_runtime_slippage()
@@ -793,6 +990,9 @@ class RuntimeGymEnv(gym.Env):
                 "gross_pnl_usd_delta": float(finalization["gross_pnl_usd_delta"]),
                 "net_pnl_usd_delta": float(finalization["net_pnl_usd_delta"]),
                 "transaction_cost_usd_delta": float(finalization["transaction_cost_usd_delta"]),
+                "executed_events_delta": [dict(item) for item in list(finalization.get("executed_events", []) or []) if isinstance(item, dict)],
+                "closed_trades_delta": [dict(item) for item in list(finalization.get("closed_trades", []) or []) if isinstance(item, dict)],
+                "episode_diagnostics": self._training_diagnostics.snapshot_delta(self._episode_diagnostics_baseline),
             }
             if _GYM:
                 return obs, 0.0, terminated, truncated, info
@@ -831,6 +1031,12 @@ class RuntimeGymEnv(gym.Env):
             current_price=float(bar.close),
             equity_base=prev_equity,
         )
+        reward_components["turnover_penalty_applied"] = self._estimate_turnover_penalty(reward_components)
+        reward_components["downside_risk_penalty_applied"] = self._estimate_downside_risk_penalty(reward_components)
+        reward_components["rapid_reversal_penalty_applied"] = self._estimate_rapid_reversal_penalty(
+            entry_filled_direction
+        )
+        reward_components["holding_penalty_applied"] = self._estimate_holding_penalty(closed_trades)
         terminated = bool(self._bar_index >= len(self._bars) - 1 or result.kill_switch_active)
         finalization: dict[str, Any] | None = None
         if terminated and not result.kill_switch_active:
@@ -851,7 +1057,20 @@ class RuntimeGymEnv(gym.Env):
             cfg=self._recovery_config,
         )
         reward_components["participation_bonus_applied"] = float(participation_bonus)
-        final_reward = float(result.reward) + float(participation_bonus)
+        base_reward_unclipped = float(reward_components.get("reward_unclipped", result.reward))
+        reward_components["base_reward_unclipped"] = float(base_reward_unclipped)
+        final_reward, composed_fields = compose_final_reward(
+            base_reward_unclipped=base_reward_unclipped,
+            net_return_coef=float(self.config.net_return_coef),
+            turnover_penalty=float(reward_components["turnover_penalty_applied"]),
+            downside_risk_penalty=float(reward_components["downside_risk_penalty_applied"]),
+            rapid_reversal_penalty=float(reward_components["rapid_reversal_penalty_applied"]),
+            holding_penalty=float(reward_components["holding_penalty_applied"]),
+            participation_bonus=float(participation_bonus),
+            clip_low=float(self.config.reward_clip_low),
+            clip_high=float(self.config.reward_clip_high),
+        )
+        reward_components.update(composed_fields)
         reward_components["net_reward_with_bonus"] = float(final_reward)
         if participation_bonus > 0.0:
             self._training_diagnostics.mark_bonus_awarded(self._global_step)
@@ -883,6 +1102,15 @@ class RuntimeGymEnv(gym.Env):
             gross_pnl_usd_delta += float(finalization["gross_pnl_usd_delta"])
             net_pnl_usd_delta += float(finalization["net_pnl_usd_delta"])
             transaction_cost_usd_delta += float(finalization["transaction_cost_usd_delta"])
+        executed_events_delta = [dict(item) for item in executed_events if isinstance(item, dict)]
+        closed_trades_delta = [dict(item) for item in closed_trades if isinstance(item, dict)]
+        if finalization is not None:
+            executed_events_delta.extend(
+                dict(item) for item in list(finalization.get("executed_events", []) or []) if isinstance(item, dict)
+            )
+            closed_trades_delta.extend(
+                dict(item) for item in list(finalization.get("closed_trades", []) or []) if isinstance(item, dict)
+            )
         info = {
             "equity": float(result.equity),
             "total_equity_usd": float(result.equity),
@@ -904,19 +1132,12 @@ class RuntimeGymEnv(gym.Env):
             "gross_pnl_usd_delta": gross_pnl_usd_delta,
             "net_pnl_usd_delta": net_pnl_usd_delta,
             "transaction_cost_usd_delta": transaction_cost_usd_delta,
+            "executed_events_delta": executed_events_delta,
+            "closed_trades_delta": closed_trades_delta,
         }
+        if terminated:
+            info["episode_diagnostics"] = self._training_diagnostics.snapshot_delta(self._episode_diagnostics_baseline)
         if _GYM:
             return result.observation, float(final_reward), terminated, truncated, info
         return result.observation, float(final_reward), bool(terminated or truncated), info
 
-    def get_trade_log(self) -> list[dict[str, Any]]:
-        """Provides proxy access to closed trade log (for SubprocVecEnv)."""
-        return list(self._runtime.broker.trade_log)
-
-    def get_execution_log(self) -> list[dict[str, Any]]:
-        """Provides proxy access to raw execution log (for SubprocVecEnv)."""
-        return list(self._runtime.broker.execution_log)
-
-    def get_training_diagnostics(self) -> dict[str, Any]:
-        """Provides proxy access to engine-level diagnostics (for SubprocVecEnv)."""
-        return self._runtime.get_training_diagnostics()

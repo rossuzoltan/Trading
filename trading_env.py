@@ -119,8 +119,10 @@ class ForexTradingEnv(gym.Env):
         drawdown_penalty: float = 2.0,
         position_change_penalty: float = 0.5,
         reward_tanh_clip: bool = True,
+        participation_bonus_value: float = 0.0,
     ) -> None:
         super().__init__()
+        self.participation_bonus_value = float(participation_bonus_value)
 
         source_frame = df.copy()
         timestamp_index: pd.DatetimeIndex | None = None
@@ -721,6 +723,15 @@ class ForexTradingEnv(gym.Env):
             reward -= transaction_penalty
             reward -= self.drawdown_penalty * drawdown
             reward -= position_penalty
+
+            # Participation bonus: award per-bar while holding a position to prevent hold-lock.
+            # We award 1/10th of the full bonus value per bar (conservative scaling).
+            if prev_exposure_lots > 0:
+                per_bar_bonus = self.participation_bonus_value / 10.0
+                reward += per_bar_bonus
+                if "participation_bonus_sum" in self.reward_stats:
+                    self.reward_stats["participation_bonus_sum"] += per_bar_bonus
+
             if self.reward_tanh_clip:
                 reward = float(np.tanh(reward))
 
@@ -759,21 +770,26 @@ class ForexTradingEnv(gym.Env):
 
         obs  = self._get_observation()
         info: dict[str, Any] = {
-            "equity_usd":    float(self.equity_usd),
-            "total_equity_usd": float(total_equity),
-            "position":      int(self.position),
-            "time_in_trade": int(self.time_in_trade),
+            "equity_usd":    self.equity_usd,
+            "total_equity_usd": total_equity,
+            "position":      self.position,
+            "time_in_trade": self.time_in_trade,
             "timestamp_utc": (
                 self._timestamp_datetimes[self.current_step - 1].isoformat()
                 if self._timestamp_datetimes is not None and self.current_step > 0
                 else None
             ),
-            "log_return": float(log_return),
-            "reward_std": float(reward_std),
-            "drawdown": float(drawdown),
-            "turnover_lots": float(turnover_lots),
-            "transaction_cost_penalty": float(transaction_penalty),
-            "position_change_penalty": float(position_penalty),
+            "log_return": log_return,
+            "reward_std": reward_std,
+            "drawdown": drawdown,
+            "turnover_lots": turnover_lots,
+            "transaction_cost_penalty": transaction_penalty,
+            "position_change_penalty": position_penalty,
+            "reward_pnl": normalized_return,
+            "reward_bonus": (per_bar_bonus if prev_exposure_lots > 0 else 0.0),
+            "reward_penalty": (transaction_penalty + (self.drawdown_penalty * drawdown) + position_penalty),
+            "action_idx": action,
+            "action_type": act_type,
         }
         if _GYM:
             return obs, reward, self.terminated, self.truncated, info

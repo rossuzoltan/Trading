@@ -33,6 +33,7 @@ from execution.replay_broker import ReplayBroker
 from risk.risk_engine import RiskEngine, RiskLimits
 from runtime.runtime_engine import ModelPolicy, RuntimeEngine, RuntimeSnapshot
 
+from edge_research import fit_baseline_alpha_gate
 from feature_engine import FEATURE_COLS, FeatureEngine, WARMUP_BARS, _compute_raw
 from project_paths import ensure_runtime_dirs, resolve_dataset_path, resolve_manifest_path, validate_dataset_bar_spec
 from run_logging import configure_run_logging, set_log_context
@@ -93,6 +94,7 @@ class ReplayContext:
     diagnostics_path: Path | None
     manifest_path: Path | None
     artifact_metadata: dict[str, Any]
+    runtime_options: dict[str, Any]
 
 
 def _resolve_execution_cost_profile(manifest) -> dict[str, float]:
@@ -112,6 +114,19 @@ def _resolve_reward_profile(manifest) -> dict[str, float]:
         "transaction_penalty": float(profile.get("transaction_penalty", 1.0)),
         "reward_clip_low": float(profile.get("reward_clip_low", -5.0)),
         "reward_clip_high": float(profile.get("reward_clip_high", 5.0)),
+    }
+
+
+def _load_training_runtime_options(diagnostics_path: Path | None) -> dict[str, Any]:
+    payload = load_json_report(diagnostics_path) if diagnostics_path is not None and diagnostics_path.exists() else {}
+    return {
+        "window_size": int(payload.get("training_window_size", 1) or 1),
+        "alpha_gate_enabled": bool(payload.get("training_alpha_gate_enabled", False)),
+        "alpha_gate_model": str(payload.get("training_alpha_gate_model", "auto") or "auto"),
+        "alpha_gate_probability_threshold": float(payload.get("training_alpha_gate_probability_threshold", 0.55)),
+        "alpha_gate_probability_margin": float(payload.get("training_alpha_gate_probability_margin", 0.05)),
+        "alpha_gate_min_edge_pips": float(payload.get("training_alpha_gate_min_edge_pips", 0.0)),
+        "baseline_target_horizon_bars": int(payload.get("baseline_target_horizon_bars", 10) or 10),
     }
 
 
@@ -200,29 +215,32 @@ def _load_promoted_manifest_context(symbol: str) -> ReplayContext | None:
 
     dataset_id = dataset_id_for_path(dataset_path)
     action_map = deserialize_action_map(manifest.action_map)
-    observation_shape = [1, len(FEATURE_COLS) + STATE_FEATURE_COUNT]
+    diagnostics_path = Path(manifest.training_diagnostics_path) if manifest.training_diagnostics_path else None
+    runtime_options = _load_training_runtime_options(diagnostics_path)
+    expected_observation_shape = list(getattr(manifest, "observation_shape", None) or [])
+    if not expected_observation_shape:
+        expected_observation_shape = [int(runtime_options["window_size"]), len(FEATURE_COLS) + STATE_FEATURE_COUNT]
     model = load_validated_model(
         manifest,
         expected_symbol=symbol,
         expected_action_map=action_map,
-        expected_observation_shape=observation_shape,
+        expected_observation_shape=expected_observation_shape,
         expected_dataset_id=dataset_id,
     )
     obs_normalizer = load_validated_vecnormalize(
         manifest,
         expected_symbol=symbol,
         expected_action_map=action_map,
-        expected_observation_shape=observation_shape,
+        expected_observation_shape=expected_observation_shape,
         expected_dataset_id=dataset_id,
     )
     scaler = load_validated_scaler(
         manifest,
         expected_symbol=symbol,
         expected_action_map=action_map,
-        expected_observation_shape=observation_shape,
+        expected_observation_shape=expected_observation_shape,
         expected_dataset_id=dataset_id,
     )
-    diagnostics_path = Path(manifest.training_diagnostics_path) if manifest.training_diagnostics_path else None
     return ReplayContext(
         symbol=symbol.upper(),
         source="promoted_manifest",
@@ -248,6 +266,7 @@ def _load_promoted_manifest_context(symbol: str) -> ReplayContext | None:
             "vecnormalize_path": str(manifest.vecnormalize_path) if manifest.vecnormalize_path else None,
             "training_diagnostics_path": str(diagnostics_path) if diagnostics_path is not None else None,
         },
+        runtime_options=runtime_options,
     )
 
 
@@ -374,7 +393,9 @@ def _load_checkpoint_replay_context(symbol: str) -> ReplayContext:
         raise RuntimeError("Checkpoint replay context produced an empty warmup or replay frame.")
 
     model = MaskablePPO.load(str(artifact["model_path"]), device="cpu")
-    expected_obs_shape = [1, len(FEATURE_COLS) + STATE_FEATURE_COUNT]
+    diagnostics_path = Path(artifact["diagnostics_path"]) if Path(artifact["diagnostics_path"]).exists() else None
+    runtime_options = _load_training_runtime_options(diagnostics_path)
+    expected_obs_shape = [int(runtime_options["window_size"]), len(FEATURE_COLS) + STATE_FEATURE_COUNT]
     model_obs_shape = [int(value) for value in model.observation_space.shape]
     if model_obs_shape != expected_obs_shape:
         raise RuntimeError(
@@ -404,7 +425,6 @@ def _load_checkpoint_replay_context(symbol: str) -> ReplayContext:
         key: float(value)
         for key, value in build_reward_profile().items()
     }
-    diagnostics_path = Path(artifact["diagnostics_path"]) if Path(artifact["diagnostics_path"]).exists() else None
     return ReplayContext(
         symbol=symbol.upper(),
         source="checkpoint_fallback",
@@ -433,6 +453,7 @@ def _load_checkpoint_replay_context(symbol: str) -> ReplayContext:
             "vecnormalize_path": str(artifact["vecnormalize_path"]),
             "diagnostics_path": str(diagnostics_path) if diagnostics_path is not None else None,
         },
+        runtime_options=runtime_options,
     )
 
 
@@ -454,6 +475,21 @@ def _build_runtime(
     broker = ReplayBroker(symbol=context.symbol, **context.execution_cost_profile)
     snapshot = RuntimeSnapshot(last_equity=1_000.0, high_water_mark=1_000.0, day_start_equity=1_000.0)
     risk_engine = RiskEngine(RiskLimits(), snapshot=snapshot, initial_equity=1_000.0)
+    runtime_options = dict(context.runtime_options or {})
+    alpha_gate = None
+    if bool(runtime_options.get("alpha_gate_enabled", False)):
+        alpha_gate = fit_baseline_alpha_gate(
+            symbol=context.symbol,
+            train_frame=context.trainable_feature_frame,
+            feature_cols=FEATURE_COLS,
+            horizon_bars=int(runtime_options.get("baseline_target_horizon_bars", 10)),
+            commission_per_lot=float(context.execution_cost_profile.get("commission_per_lot", 7.0)),
+            slippage_pips=float(context.execution_cost_profile.get("slippage_pips", 0.25)),
+            min_edge_pips=float(runtime_options.get("alpha_gate_min_edge_pips", 0.0)),
+            probability_threshold=float(runtime_options.get("alpha_gate_probability_threshold", 0.55)),
+            probability_margin=float(runtime_options.get("alpha_gate_probability_margin", 0.05)),
+            model_preference=str(runtime_options.get("alpha_gate_model", "auto")),
+        )
     runtime = RuntimeEngine(
         symbol=context.symbol,
         feature_engine=feature_engine,
@@ -465,6 +501,8 @@ def _build_runtime(
         risk_engine=risk_engine,
         snapshot=snapshot,
         state_store=None,
+        window_size=int(runtime_options.get("window_size", 1)),
+        alpha_gate=alpha_gate,
         **context.reward_profile,
     )
     runtime.startup_reconcile()
