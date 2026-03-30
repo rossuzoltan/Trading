@@ -122,7 +122,7 @@ def compute_participation_bonus(
     mode = str(pcfg.get("mode", "entry")).lower()
     if mode == "per_bar":
         if int(new_position) != 0:
-            return float(pcfg.get("bonus_value", 0.0)) / 10.0
+            return float(pcfg.get("bonus_value", 0.0))
         return 0.0
 
     entry_happened = int(prev_position) == 0 and int(new_position) != 0
@@ -1115,7 +1115,17 @@ class RuntimeGymEnv(gym.Env):
             "equity": float(result.equity),
             "total_equity_usd": float(result.equity),
             "reward": float(final_reward),
+            "reward_pnl": float(net_pnl_usd_delta),
+            "reward_bonus": float(reward_components.get("participation_bonus_applied", 0.0)),
+            "reward_penalty": float(
+                transaction_cost_usd_delta +
+                reward_components.get("turnover_penalty_applied", 0.0) +
+                reward_components.get("downside_risk_penalty_applied", 0.0) +
+                reward_components.get("rapid_reversal_penalty_applied", 0.0) +
+                reward_components.get("holding_penalty_applied", 0.0)
+            ),
             "reward_components": dict(reward_components),
+            "participation_bonus_applied": float(reward_components.get("participation_bonus_applied", 0.0)),
             "selected_action_index": int(result.action_index),
             "selected_action_label": action_label(result.action),
             "selected_action_type": result.action.action_type.value,

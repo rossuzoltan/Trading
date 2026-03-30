@@ -280,7 +280,7 @@ _ENTROPY_PHASE_2_UNTIL_DEFAULT = max(
     ),
     _ENTROPY_PHASE_1_UNTIL_DEFAULT + 1,
 )
-_PARTICIPATION_BONUS_UNTIL_DEFAULT = _timed_recovery_step(fraction=0.25, minimum=20_000, maximum=200_000)
+_PARTICIPATION_BONUS_UNTIL_DEFAULT = _timed_recovery_step(fraction=0.33, minimum=20_000, maximum=1_000_000)
 
 TRAINING_RECOVERY_CONFIG: dict[str, Any] = {
     "training_stage": TRAINING_STAGE,
@@ -309,13 +309,14 @@ TRAINING_RECOVERY_CONFIG: dict[str, Any] = {
     },
     "participation_bonus": {
         "enabled": os.environ.get("TRAIN_RECOVERY_PARTICIPATION_BONUS_ENABLED", "1") != "0",
+        "mode": os.environ.get("TRAIN_RECOVERY_PARTICIPATION_BONUS_MODE", "per_bar"),
         "bonus_value": float(os.environ.get("TRAIN_RECOVERY_PARTICIPATION_BONUS_VALUE", "0.0025")),
         "active_until_step": int(
             os.environ.get("TRAIN_RECOVERY_PARTICIPATION_BONUS_UNTIL", str(_PARTICIPATION_BONUS_UNTIL_DEFAULT))
         ),
         "cooldown_steps": int(os.environ.get("TRAIN_RECOVERY_PARTICIPATION_BONUS_COOLDOWN", "32")),
         "only_from_flat": os.environ.get("TRAIN_RECOVERY_PARTICIPATION_ONLY_FROM_FLAT", "1") != "0",
-        "max_bonus_per_episode": int(os.environ.get("TRAIN_RECOVERY_PARTICIPATION_MAX_PER_EPISODE", "12")),
+        "max_bonus_per_episode": int(os.environ.get("TRAIN_RECOVERY_PARTICIPATION_MAX_PER_EPISODE", "5000")),
     },
     "entropy_schedule": {
         "enabled": os.environ.get("TRAIN_RECOVERY_ENTROPY_SCHEDULE_ENABLED", "1") != "0",
@@ -760,6 +761,7 @@ def find_optimal_env_workers(
     
     for n in candidates:
         print(f"  Testing n={n} workers...")
+        test_vec = None
         try:
             # Create a simplified test environment
             def make_env():
@@ -787,8 +789,14 @@ def find_optimal_env_workers(
             
             print(f"    -> SPS: {sps:.1f} | CPU: {cpu:.1f}%")
             
-            test_vec.close()
+            # [OPTIMIZATION] Prioritize SPS (throughput) over raw CPU saturation.
+            # If SPS drops significantly even if CPU is below target, stop and use the previous speed winner.
+            if n > starting_n and sps < best_sps * 0.95:
+                 print(f"    [!] SPS dropped from {best_sps:.1f} to {sps:.1f} due to sync overhead. Stopping.")
+                 break
             
+            best_sps = sps # track for comparison
+
             if cpu > target_cpu_pct:
                 print(f"    [!] CPU load ({cpu:.1f}%) exceeds target ({target_cpu_pct}%). Stopping.")
                 # If N=8 already exceeds target, we keep 8, otherwise we keep the previous successful N
@@ -800,6 +808,12 @@ def find_optimal_env_workers(
         except Exception as e:
             print(f"    [!] Benchmark failed for n={n}: {e}")
             break
+        finally:
+            if test_vec is not None:
+                try:
+                    test_vec.close()
+                except Exception:
+                    pass
             
     print(f"[Adaptive Tuner] Selected optimal worker count: {best_n}\n")
     return best_n
@@ -1099,12 +1113,21 @@ class EnhancedLoggingCallback(BaseCallback):
         # Collect metrics from all vector environment workers
         infos = self.locals.get("infos")
         if infos:
-            # Minimize overhead inside the step loop - avoid creating a dict per env per step
+            # Support both RuntimeGymEnv and ForexTradingEnv info dict formats
             for info in infos:
-                self.pnl_buffer.append(info.get("reward_pnl", 0.0))
-                self.bonus_buffer.append(info.get("reward_bonus", 0.0))
-                self.penalty_buffer.append(info.get("reward_penalty", 0.0))
-                self.action_type_buffer.append(info.get("action_type", "HOLD"))
+                # 1. Rewards: use simplified top-level keys now shared by both env types
+                self.pnl_buffer.append(float(info.get("reward_pnl", 0.0)))
+                self.bonus_buffer.append(float(info.get("reward_bonus", 0.0)))
+                self.penalty_buffer.append(float(info.get("reward_penalty", 0.0)))
+
+                # 2. Actions: Map "OPEN" + direction -> "LONG"/"SHORT"
+                act_type = info.get("action_type", info.get("selected_action_type", "HOLD"))
+                if act_type == "OPEN":
+                    direction = int(info.get("selected_action_direction", 0))
+                    act = "LONG" if direction > 0 else "SHORT"
+                else:
+                    act = act_type
+                self.action_type_buffer.append(str(act))
 
             # Capture system metrics at each step (sampled at monitor's interval)
             sys_metrics = resource_monitor.get_latest()
@@ -1161,9 +1184,18 @@ class EnhancedLoggingCallback(BaseCallback):
         audit_metrics["step_win_rate"] = win_rate
         self.logger.record("rollout/step_win_rate", win_rate)
 
+        # Include system metrics in audit
+        if self.cpu_usage_buffer:
+            audit_metrics.update({
+                "system_cpu_pct_mean": float(np.mean(self.cpu_usage_buffer)),
+                "system_ram_pct_mean": float(np.mean(self.ram_usage_buffer)),
+            })
+            if self.gpu_usage_buffer:
+                audit_metrics["system_gpu_pct_mean"] = float(np.mean(self.gpu_usage_buffer))
+
         # Emit structured audit log
         self._audit_logger.info(
-            f"Rollout Audit: Steps={total_steps} WinRate={win_rate:.1%}",
+            f"Rollout Audit: Steps={total_steps} WinRate={win_rate:.1%} PnL={avg_pnl:.6f} Bonus={avg_bonus:.6f}",
             extra={
                 "event": "rollout_audit",
                 "rollout_steps": total_steps,
@@ -1173,7 +1205,7 @@ class EnhancedLoggingCallback(BaseCallback):
 
         if self.verbose > 0:
             print(
-                f"[Rollout Audit] PnL={avg_pnl:.4f} | Bonus={avg_bonus:.4f} | "
+                f"[Rollout Audit] PnL={avg_pnl:.6f} | Bonus={avg_bonus:.6f} | "
                 f"Penalty={avg_penalty:.4f} | WinRate={win_rate:.1%}"
             )
 
@@ -1182,20 +1214,10 @@ class EnhancedLoggingCallback(BaseCallback):
         self.bonus_buffer.clear()
         self.penalty_buffer.clear()
         self.action_type_buffer.clear()
-
-        # Add system metrics to audit
-        if self.cpu_usage_buffer:
-            audit_metrics.update({
-                "system_cpu_pct_mean": float(np.mean(self.cpu_usage_buffer)),
-                "system_ram_pct_mean": float(np.mean(self.ram_usage_buffer)),
-            })
-            if self.gpu_usage_buffer:
-                audit_metrics["system_gpu_pct_mean"] = float(np.mean(self.gpu_usage_buffer))
-
-        # Clear system buffers
         self.cpu_usage_buffer.clear()
         self.gpu_usage_buffer.clear()
         self.ram_usage_buffer.clear()
+
 
 
 class TrainingDiagnosticsCallback(BaseCallback):
@@ -2876,7 +2898,22 @@ def main() -> None:
         if vec_env_type == "dummy":
             train_base_vec = DummyVecEnv(train_fns)
         else:
-            train_base_vec = SubprocVecEnv(train_fns)
+            try:
+                train_base_vec = SubprocVecEnv(train_fns)
+            except PermissionError as exc:
+                # Windows can fail to duplicate pipe handles in some restricted environments.
+                # Fall back to a single-process vector env instead of crashing mid-run.
+                print(f"[WARN] SubprocVecEnv failed with PermissionError ({exc}); falling back to DummyVecEnv.")
+                vec_env_type = "dummy"
+                train_base_vec = DummyVecEnv(train_fns)
+            except OSError as exc:
+                winerror = getattr(exc, "winerror", None)
+                if winerror == 5:
+                    print(f"[WARN] SubprocVecEnv failed with WinError 5 ({exc}); falling back to DummyVecEnv.")
+                    vec_env_type = "dummy"
+                    train_base_vec = DummyVecEnv(train_fns)
+                else:
+                    raise
 
         ckpt_dir = run_checkpoints_root / f"fold_{fold_idx}"
         ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -3329,9 +3366,28 @@ if __name__ == "__main__":
             # For simplicity, we'll use a default config for the benchmark
             from trading_env import ForexTradingEnv
             def benchmark_env_fn():
+                n_rows = 2048
+                close = 1.1 + np.cumsum(np.random.randn(n_rows) * 0.0001).astype(np.float64)
+                frame = pd.DataFrame(
+                    {
+                        "Close": close,
+                        "High": close + 0.00005,
+                        "Low": close - 0.00005,
+                        "Volume": np.random.rand(n_rows).astype(np.float64) * 1000.0,
+                    }
+                )
                 return ForexTradingEnv(
-                    df=pd.DataFrame(np.random.randn(100, 5), columns=["open", "high", "low", "close", "volume"]),
-                    window_size=20
+                    df=frame,
+                    feature_columns=[],
+                    sl_options=[10.0],
+                    tp_options=[10.0],
+                    window_size=1,
+                    random_start=False,
+                    min_episode_steps=128,
+                    episode_max_steps=256,
+                    use_variable_spread=False,
+                    use_trailing_stop=False,
+                    max_slippage_pips=0.0,
                 )
             
             optimal_n = find_optimal_env_workers(

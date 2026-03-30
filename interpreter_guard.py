@@ -65,8 +65,6 @@ def ensure_project_venv(project_root: str | Path | None = None, *, script_path: 
     should_reexec, target = should_reexec_to_project_venv(project_root)
     if not should_reexec or target is None:
         return
-    if os.environ.get(_REEXEC_ENV) == "1":
-        return
 
     env = os.environ.copy()
     env[_REEXEC_ENV] = "1"
