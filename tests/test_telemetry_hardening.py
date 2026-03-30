@@ -6,7 +6,7 @@ import subprocess
 import unittest
 from pathlib import Path
 
-from training_status import resolve_current_run_heartbeat, summarize_heartbeat_schema
+from training_status import build_status_summary, resolve_current_run_heartbeat, summarize_heartbeat_schema
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -133,6 +133,102 @@ class TelemetryHardeningTests(unittest.TestCase):
             self.assertEqual(current_root / "training_heartbeat.json", heartbeat_path)
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_build_status_summary_surfaces_replay_and_baseline_context(self):
+        tmpdir = ROOT / "tests" / "tmp" / "telemetry_status_summary"
+        if tmpdir.exists():
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        tmpdir.mkdir(parents=True, exist_ok=True)
+        models_dir = ROOT / "models"
+        models_dir.mkdir(parents=True, exist_ok=True)
+        diagnostics_path = models_dir / "training_diagnostics_eurusd.json"
+        gate_path = models_dir / "deployment_gate_eurusd.json"
+        replay_path = models_dir / "replay_report_eurusd.json"
+        baseline_path = tmpdir / "baseline_report.json"
+        current_run_path = tmpdir / "current_training_run.json"
+        heartbeat_path = tmpdir / "run_telemetry" / "fold_0" / "training_heartbeat.json"
+        heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
+
+        cleanup_paths = [diagnostics_path, gate_path, replay_path]
+        try:
+            heartbeat_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "timestamp_utc": "2026-03-26T00:00:00+00:00",
+                        "num_timesteps": 500,
+                        "ppo_diagnostics": {
+                            "diagnostic_sample_count": 4,
+                            "metrics_fresh": True,
+                            "last_distinct_update_seen": 12,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            current_run_path.write_text(
+                json.dumps(
+                    {
+                        "run_id": "telemetry-run",
+                        "checkpoints_root": str(tmpdir / "run_telemetry"),
+                        "symbol": "EURUSD",
+                        "state": "failed_baseline_gate",
+                        "baseline_report_path": str(baseline_path),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            diagnostics_path.write_text(
+                json.dumps({"gate_passed": False, "blockers": ["baseline gate failed"]}),
+                encoding="utf-8",
+            )
+            gate_path.write_text(
+                json.dumps({"approved_for_live": False, "blockers": ["replay mismatch"]}),
+                encoding="utf-8",
+            )
+            replay_path.write_text(
+                json.dumps(
+                    {
+                        "replay_metrics": {
+                            "trade_count": 10,
+                            "net_pnl_usd": 12.5,
+                            "profit_factor": 1.2,
+                            "metric_reconciliation": {
+                                "passed": False,
+                                "mismatch_fields": ["net_pnl_usd_vs_diagnostics"],
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            baseline_path.write_text(
+                json.dumps(
+                    {
+                        "holdout_metrics": {
+                            "blockers": ["no positive expectancy baselines"],
+                            "models": {
+                                "ridge_signed_target": {"metrics": {"expectancy_usd": 1.0, "profit_factor": 1.1, "trade_count": 20}},
+                                "tree_signed_target": {"metrics": {"expectancy_usd": 0.5, "profit_factor": 1.05, "trade_count": 12}},
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            summary = build_status_summary("EURUSD", tmpdir)
+
+            self.assertEqual("failed_baseline_gate", summary["failures"]["current_run_state"])
+            self.assertEqual(["baseline gate failed"], summary["failures"]["training_blockers"])
+            self.assertEqual(["replay mismatch"], summary["failures"]["deployment_blockers"])
+            self.assertEqual(["net_pnl_usd_vs_diagnostics"], summary["failures"]["replay_metric_mismatches"])
+            self.assertEqual("ridge_signed_target", summary["best_holdout_baseline"])
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            for path in cleanup_paths:
+                if path.exists():
+                    path.unlink()
 
 
 if __name__ == "__main__":

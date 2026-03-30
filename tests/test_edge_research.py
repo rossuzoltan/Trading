@@ -84,6 +84,8 @@ class EdgeResearchTests(unittest.TestCase):
             self.assertTrue(report["passing_models"])
             self.assertIn("profit_factor", report["holdout_metrics"]["models"]["logistic_pair"]["metrics"])
             self.assertIn("sharpe_like", report["holdout_metrics"]["models"]["logistic_pair"]["metrics"])
+            self.assertIn("tree_signed_target", report["holdout_metrics"]["models"])
+            self.assertIn("trend_rule", report["holdout_metrics"]["models"])
             self.assertTrue(out_path.exists())
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)

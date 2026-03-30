@@ -42,6 +42,7 @@ try:
 except ImportError:  # pragma: no cover
     load_dotenv = None
 from sb3_contrib import MaskablePPO
+from train.maskable_ppo_amp import MaskablePPO_AMP
 from sb3_contrib.common.wrappers import ActionMasker
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 from stable_baselines3.common.callbacks import BaseCallback
@@ -53,7 +54,16 @@ from device_utils import configure_training_runtime
 from edge_research import run_edge_baseline_research
 from feature_engine import FEATURE_COLS, WARMUP_BARS, _compute_raw, SCALER_PATH
 from masking_utils import action_mask_fn
-from runtime_common import STATE_FEATURE_COUNT, build_action_map, build_simple_action_map, compute_trade_metrics
+from runtime_common import (
+    STATE_FEATURE_COUNT,
+    build_action_map,
+    build_evaluation_accounting,
+    build_simple_action_map,
+    build_trade_metric_reconciliation,
+    compute_trade_metrics,
+    validate_evaluation_accounting,
+    validate_evaluation_payload,
+)
 from project_paths import (
     ensure_runtime_dirs,
     resolve_dataset_path,
@@ -74,6 +84,13 @@ from trading_config import (
     DEPLOY_EXPECTANCY_MIN,
     DEPLOY_PROFIT_FACTOR_MIN,
     DEPLOY_TIMED_SHARPE_MIN,
+    DEFAULT_CHURN_MIN_HOLD_BARS,
+    DEFAULT_CHURN_ACTION_COOLDOWN,
+    DEFAULT_CHURN_PENALTY_USD,
+    DEFAULT_REWARD_DOWNSIDE_RISK_COEF,
+    DEFAULT_REWARD_TURNOVER_COEF,
+    DEFAULT_REWARD_DRAWDOWN_COEF,
+    DEFAULT_REWARD_NET_RETURN_COEF,
     deployment_paths,
     resolve_bar_construction_ticks_per_bar,
 )
@@ -128,11 +145,34 @@ BAR_CONSTRUCTION_TICKS_PER_BAR = resolve_bar_construction_ticks_per_bar(
 TRAIN_POINT_IN_TIME_VERIFIED = os.environ.get("TRAIN_POINT_IN_TIME_VERIFIED", "0") == "1"
 TRAIN_DATASET_INTEGRITY_VERIFIED = os.environ.get("TRAIN_DATASET_INTEGRITY_VERIFIED", "0") == "1"
 PPO_N_STEPS = int(os.environ.get("TRAIN_PPO_N_STEPS", "2048"))
-PPO_BATCH_SIZE = int(os.environ.get("TRAIN_PPO_BATCH_SIZE", "1024"))
+PPO_BATCH_SIZE = int(os.environ.get("TRAIN_PPO_BATCH_SIZE", "4096"))
 PPO_N_EPOCHS = int(os.environ.get("TRAIN_PPO_N_EPOCHS", "10"))
 TRAIN_EVAL_FREQ = int(os.environ.get("TRAIN_EVAL_FREQ", "20000"))
 TRAIN_LOG_INTERVAL = int(os.environ.get("TRAIN_LOG_INTERVAL", "5"))
-PPO_ENT_COEF = float(os.environ.get("TRAIN_PPO_ENT_COEF", "0.015"))
+
+TRAIN_TORCH_COMPILE = os.environ.get("TRAIN_TORCH_COMPILE", "0") == "1"
+TRAIN_TORCH_COMPILE_MODE = os.environ.get("TRAIN_TORCH_COMPILE_MODE", "default").strip()
+TRAIN_REDUCE_LOGGING = os.environ.get("TRAIN_REDUCE_LOGGING", "1") == "1"
+TRAIN_ASYNC_EVAL = os.environ.get("TRAIN_ASYNC_EVAL", "0") == "1"
+TRAIN_SHARED_DATASET = os.environ.get("TRAIN_SHARED_DATASET", "1") == "1"
+TRAIN_USE_AMP = os.environ.get("TRAIN_USE_AMP", "0") == "1"
+TRAIN_AMP_DTYPE = os.environ.get("TRAIN_AMP_DTYPE", "bf16").strip().lower()
+
+if TRAIN_REDUCE_LOGGING:
+    TRAIN_LOG_INTERVAL = max(TRAIN_LOG_INTERVAL, 20)
+if TRAIN_ASYNC_EVAL:
+    TRAIN_EVAL_FREQ = max(TRAIN_EVAL_FREQ, 100000)
+
+
+TRAIN_CHURN_MIN_HOLD_BARS = int(os.environ.get("TRAIN_CHURN_MIN_HOLD_BARS", str(DEFAULT_CHURN_MIN_HOLD_BARS)))
+TRAIN_CHURN_ACTION_COOLDOWN = int(os.environ.get("TRAIN_CHURN_ACTION_COOLDOWN", str(DEFAULT_CHURN_ACTION_COOLDOWN)))
+TRAIN_CHURN_PENALTY_USD = float(os.environ.get("TRAIN_CHURN_PENALTY_USD", str(DEFAULT_CHURN_PENALTY_USD)))
+
+TRAIN_REWARD_DOWNSIDE_RISK_COEF = float(os.environ.get("TRAIN_REWARD_DOWNSIDE_RISK_COEF", str(DEFAULT_REWARD_DOWNSIDE_RISK_COEF)))
+TRAIN_REWARD_TURNOVER_COEF = float(os.environ.get("TRAIN_REWARD_TURNOVER_COEF", str(DEFAULT_REWARD_TURNOVER_COEF)))
+TRAIN_REWARD_NET_RETURN_COEF = float(os.environ.get("TRAIN_REWARD_NET_RETURN_COEF", str(DEFAULT_REWARD_NET_RETURN_COEF)))
+TRAIN_REWARD_DRAWDOWN_PENALTY = float(os.environ.get("TRAIN_REWARD_DRAWDOWN_PENALTY", str(DEFAULT_REWARD_DRAWDOWN_COEF)))
+PPO_ENT_COEF = float(os.environ.get("TRAIN_PPO_ENT_COEF", "0.05"))
 TRAIN_DEBUG_ALLOW_BASELINE_BYPASS = os.environ.get("TRAIN_DEBUG_ALLOW_BASELINE_BYPASS", "0") == "1"
 TRAIN_LEGACY_REQUIRE_BASELINE_GATE = os.environ.get("TRAIN_REQUIRE_BASELINE_GATE", "1") != "0"
 TRAIN_STARTUP_SMOKE_ONLY = os.environ.get("TRAIN_STARTUP_SMOKE_ONLY", "0") == "1"
@@ -149,7 +189,7 @@ BASELINE_PROB_MARGIN = float(os.environ.get("TRAIN_BASELINE_PROB_MARGIN", "0.05"
 TRAIN_COMMISSION_PER_LOT = float(os.environ.get("TRAIN_COMMISSION_PER_LOT", "7.0"))
 TRAIN_PARTIAL_FILL_RATIO = float(os.environ.get("TRAIN_PARTIAL_FILL_RATIO", "1.0"))
 TRAIN_REWARD_SCALE = float(os.environ.get("TRAIN_REWARD_SCALE", "10000.0"))
-TRAIN_REWARD_DRAWDOWN_PENALTY = float(os.environ.get("TRAIN_REWARD_DRAWDOWN_PENALTY", "2.0"))
+TRAIN_REWARD_DRAWDOWN_PENALTY = TRAIN_REWARD_DRAWDOWN_PENALTY  # Consistently using value above
 TRAIN_REWARD_TRANSACTION_PENALTY = float(os.environ.get("TRAIN_REWARD_TRANSACTION_PENALTY", "1.0"))
 TRAIN_REWARD_CLIP_LOW = float(os.environ.get("TRAIN_REWARD_CLIP_LOW", "-5.0"))
 TRAIN_REWARD_CLIP_HIGH = float(os.environ.get("TRAIN_REWARD_CLIP_HIGH", "5.0"))
@@ -165,7 +205,7 @@ TRAINING_RECOVERY_CONFIG: dict[str, Any] = {
         "phases": [
             {
                 "until_step": int(os.environ.get("TRAIN_RECOVERY_PHASE_1_UNTIL", "750000")),
-                "slippage_pips": float(os.environ.get("TRAIN_RECOVERY_PHASE_1_SLIPPAGE_PIPS", "0.1")),
+                "slippage_pips": float(os.environ.get("TRAIN_RECOVERY_PHASE_1_SLIPPAGE_PIPS", "0.05")),
             },
             {
                 "until_step": int(os.environ.get("TRAIN_RECOVERY_PHASE_2_UNTIL", "1750000")),
@@ -184,7 +224,7 @@ TRAINING_RECOVERY_CONFIG: dict[str, Any] = {
     },
     "participation_bonus": {
         "enabled": os.environ.get("TRAIN_RECOVERY_PARTICIPATION_BONUS_ENABLED", "1") != "0",
-        "bonus_value": float(os.environ.get("TRAIN_RECOVERY_PARTICIPATION_BONUS_VALUE", "0.0025")),
+        "bonus_value": float(os.environ.get("TRAIN_RECOVERY_PARTICIPATION_BONUS_VALUE", "0.01")),
         "active_until_step": int(os.environ.get("TRAIN_RECOVERY_PARTICIPATION_BONUS_UNTIL", "500000")),
         "cooldown_steps": int(os.environ.get("TRAIN_RECOVERY_PARTICIPATION_BONUS_COOLDOWN", "8")),
         "only_from_flat": os.environ.get("TRAIN_RECOVERY_PARTICIPATION_ONLY_FROM_FLAT", "1") != "0",
@@ -192,7 +232,7 @@ TRAINING_RECOVERY_CONFIG: dict[str, Any] = {
     },
     "entropy_schedule": {
         "enabled": os.environ.get("TRAIN_RECOVERY_ENTROPY_SCHEDULE_ENABLED", "1") != "0",
-        "initial_ent_coef": float(os.environ.get("TRAIN_RECOVERY_ENTROPY_INITIAL", "0.02")),
+        "initial_ent_coef": float(os.environ.get("TRAIN_RECOVERY_ENTROPY_INITIAL", "0.05")),
         "mid_ent_coef": float(os.environ.get("TRAIN_RECOVERY_ENTROPY_MID", "0.01")),
         "final_ent_coef": float(os.environ.get("TRAIN_RECOVERY_ENTROPY_FINAL", "0.001")),
         "phase_1_until": int(os.environ.get("TRAIN_RECOVERY_ENTROPY_PHASE_1_UNTIL", "750000")),
@@ -478,13 +518,29 @@ def resolve_train_vec_env_type(
     force_dummy: bool,
 ) -> tuple[str, list[str]]:
     warnings: list[str] = []
+    is_windows = sys.platform == "win32"
+
     if force_dummy:
         warnings.append("TRAIN_FORCE_DUMMY_VEC=1 forces DummyVecEnv for training; use this only for debug or profiling.")
-    if requested_envs == 1:
+        vec_env_type = "dummy"
+    elif is_windows and requested_envs == 1:
+        warnings.append("Windows detected: using DummyVecEnv for single-worker training.")
+        vec_env_type = "dummy"
+    elif is_windows:
+        warnings.append("Windows detected: using SubprocVecEnv (experimental stability).")
+        vec_env_type = "subproc"
+    elif requested_envs == 1:
         warnings.append("TRAIN_NUM_ENVS=1 disables parallel experience collection; use this only for debug or profiling.")
-    vec_env_type = "dummy" if force_dummy or effective_envs <= 1 else "subproc"
+        vec_env_type = "dummy"
+    else:
+        vec_env_type = "subproc" if effective_envs > 1 else "dummy"
+
+    if vec_env_type == "dummy" and effective_envs > 1:
+        warnings.append(f"DummyVecEnv will run {effective_envs} environments sequentially.")
+
     if vec_env_type == "dummy" and effective_envs <= 1:
         warnings.append("Training is running with a single environment worker; expect lower throughput and noisier PPO updates.")
+
     return vec_env_type, warnings
 
 
@@ -674,6 +730,7 @@ class FullPathEvalCallback(BaseCallback):
         if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
             sync_vecnormalize_stats(self._train_vecnormalize, self._eval_vecnormalize)
             _, metrics = evaluate_model(self.model, self.eval_env)
+            # Add metadata before serialization
             metrics = {
                 **metrics,
                 "num_timesteps": int(self.num_timesteps),
@@ -681,8 +738,16 @@ class FullPathEvalCallback(BaseCallback):
                 "deterministic": True,
                 "full_path_eval_used": True,
             }
-            self.latest_metrics = metrics
-            self.history.append(metrics)
+
+            # Strategy: Only append/save if accounting reconciliation passed
+            try:
+                validate_evaluation_payload(metrics)
+                self.latest_metrics = metrics
+                self.history.append(metrics)
+            except Exception as e:
+                log.warning(f"FullPathEvalCallback: Skipping serialization of failed evaluation at step {self.num_timesteps}: {e}")
+                return True
+
             if self.history_path is not None:
                 self.history_path.parent.mkdir(parents=True, exist_ok=True)
                 self.history_path.write_text(
@@ -750,7 +815,13 @@ class TrainingDiagnosticsCallback(BaseCallback):
                 self.metrics[key].append(value)
             self._last_update_index = update_index
             self._last_metric_snapshot = metric_snapshot
-        if self.verbose and self._print_every_steps and self.num_timesteps >= self._next_print:
+        
+        should_print = self.verbose and self._print_every_steps and self.num_timesteps >= self._next_print
+        if TRAIN_REDUCE_LOGGING and should_print:
+            # Print only every 5x steps if reduced logging is enabled to save I/O overhead
+            should_print = self.num_timesteps >= self._next_print * 5
+            
+        if should_print:
             self._next_print += self._print_every_steps
             summary = self.summary()
             print(
@@ -1041,6 +1112,7 @@ def make_env(
     symbol: str = "EURUSD",
     scaler: StandardScaler | None = None,
     recovery_config: dict[str, Any] | None = None,
+    bars: list[Any] | None = None,
 ):
     def _init():
         if TRAIN_ENV_MODE == "runtime":
@@ -1052,6 +1124,7 @@ def make_env(
             env = RuntimeGymEnv(
                 symbol=symbol,
                 bars_frame=df,
+                bars=bars,
                 scaler=scaler,
                 action_map=action_map,
                 config=RuntimeGymConfig(
@@ -1063,6 +1136,12 @@ def make_env(
                     transaction_penalty=float(TRAIN_REWARD_TRANSACTION_PENALTY),
                     reward_clip_low=float(TRAIN_REWARD_CLIP_LOW),
                     reward_clip_high=float(TRAIN_REWARD_CLIP_HIGH),
+                    churn_min_hold_bars=int(TRAIN_CHURN_MIN_HOLD_BARS),
+                    churn_action_cooldown=int(TRAIN_CHURN_ACTION_COOLDOWN),
+                    churn_penalty_usd=float(TRAIN_CHURN_PENALTY_USD),
+                    downside_risk_penalty=float(TRAIN_REWARD_DOWNSIDE_RISK_COEF),
+                    turnover_penalty=float(TRAIN_REWARD_TURNOVER_COEF),
+                    net_return_coef=float(TRAIN_REWARD_NET_RETURN_COEF),
                     random_start=bool(random_start),
                 ),
                 recovery_config=copy.deepcopy(recovery_config) if recovery_config is not None else None,
@@ -1149,33 +1228,87 @@ def _curve_segment_metrics(
 
 
 def _extract_eval_trade_log(eval_env) -> list[dict[str, Any]]:
+    """Extract closed trade log from eval env using a robust 3-strategy fallback chain.
+
+    Strategy 1: env_method("get_trade_log") — works with RuntimeGymEnv via
+        SubprocVecEnv/DummyVecEnv without requiring cross-process object serialization.
+    Strategy 2: get_attr("_runtime") -> broker.trade_log — works when _runtime
+        is directly accessible (DummyVecEnv with RuntimeGymEnv).
+    Strategy 3: get_attr("trade_log") — ForexTradingEnv / legacy env fallback.
+    """
+    # Strategy 1: explicit env_method (most reliable via SubprocVecEnv)
+    try:
+        results = eval_env.env_method("get_trade_log")
+        if results is not None and isinstance(results, list) and len(results) > 0:
+            trace = results[0]
+            if isinstance(trace, list):
+                return [dict(item) for item in trace if isinstance(item, dict)]
+    except Exception:
+        pass
+
+    # Strategy 2: get_attr("_runtime") -> broker.trade_log
     try:
         runtimes = eval_env.get_attr("_runtime")
+        if runtimes:
+            runtime = runtimes[0]
+            broker = getattr(runtime, "broker", None)
+            trade_log = getattr(broker, "trade_log", None)
+            if isinstance(trade_log, list):
+                return [dict(item) for item in trade_log if isinstance(item, dict)]
     except Exception:
-        return []
-    if not runtimes:
-        return []
-    runtime = runtimes[0]
-    broker = getattr(runtime, "broker", None)
-    trade_log = getattr(broker, "trade_log", None)
-    if not isinstance(trade_log, list):
-        return []
-    return [dict(item) for item in trade_log if isinstance(item, dict)]
+        pass
+
+    # Strategy 3: legacy ForexTradingEnv direct attribute
+    try:
+        trade_logs = eval_env.get_attr("trade_log")
+        if trade_logs and isinstance(trade_logs[0], list):
+            return [dict(item) for item in trade_logs[0] if isinstance(item, dict)]
+    except Exception:
+        pass
+
+    log.warning(
+        "evaluate_model: could not extract trade_log from eval env via any known strategy. "
+        "trade_count and economic metrics will be zero. Check env type and SubprocVecEnv serialization."
+    )
+    return []
 
 
 def _extract_eval_execution_log(eval_env) -> list[dict[str, Any]]:
+    """Extract execution log from eval env using a robust 3-strategy fallback chain.
+
+    Mirrors the strategy ordering of _extract_eval_trade_log.
+    """
+    # Strategy 1: explicit env_method (most reliable via SubprocVecEnv)
+    try:
+        results = eval_env.env_method("get_execution_log")
+        if results is not None and isinstance(results, list) and len(results) > 0:
+            trace = results[0]
+            if isinstance(trace, list):
+                return [dict(item) for item in trace if isinstance(item, dict)]
+    except Exception:
+        pass
+
+    # Strategy 2: get_attr("_runtime") -> broker.execution_log
     try:
         runtimes = eval_env.get_attr("_runtime")
+        if runtimes:
+            runtime = runtimes[0]
+            broker = getattr(runtime, "broker", None)
+            execution_log = getattr(broker, "execution_log", None)
+            if isinstance(execution_log, list):
+                return [dict(item) for item in execution_log if isinstance(item, dict)]
     except Exception:
-        return []
-    runtime = runtimes[0] if runtimes else None
-    if runtime is None:
-        return []
-    broker = getattr(runtime, "broker", None)
-    execution_log = getattr(broker, "execution_log", None)
-    if not isinstance(execution_log, list):
-        return []
-    return [dict(item) for item in execution_log if isinstance(item, dict)]
+        pass
+
+    # Strategy 3: legacy fallback
+    try:
+        exec_logs = eval_env.get_attr("execution_log")
+        if exec_logs and isinstance(exec_logs[0], list):
+            return [dict(item) for item in exec_logs[0] if isinstance(item, dict)]
+    except Exception:
+        pass
+
+    return []
 
 
 def evaluate_model(model, eval_env) -> tuple[list[float], dict[str, Any]]:
@@ -1212,40 +1345,36 @@ def evaluate_model(model, eval_env) -> tuple[list[float], dict[str, Any]]:
             break
     trade_log = _extract_eval_trade_log(eval_env)
     execution_log = _extract_eval_execution_log(eval_env)
-    trade_metrics = compute_trade_metrics(trade_log, initial_equity=1_000.0)
+
     try:
         raw_env_diagnostics = eval_env.env_method("get_training_diagnostics") if hasattr(eval_env, "env_method") else []
     except Exception:
         raw_env_diagnostics = []
+
     env_diagnostics = aggregate_training_diagnostics(raw_env_diagnostics)
+
+    # Use unified accounting from runtime_common
+    accounting = build_evaluation_accounting(
+        trade_log=trade_log,
+        execution_diagnostics=env_diagnostics,
+        execution_log_count=len(execution_log),
+        initial_equity=1000.0,
+    )
+    val_status = validate_evaluation_accounting(accounting)
+
     metrics = {
-        "final_equity": float(equity_curve[-1]) if equity_curve else 1_000.0,
+        "final_equity": float(equity_curve[-1]) if equity_curve else 1000.0,
         "timed_sharpe": compute_timed_sharpe(equity_curve, timestamps),
         "max_drawdown": compute_max_drawdown(equity_curve),
         "steps": int(len(equity_curve)),
         "aux_total_shaped_reward": float(np.sum(rewards)) if rewards else 0.0,
         "aux_mean_step_shaped_reward": float(np.mean(rewards)) if rewards else 0.0,
         "segment_metrics": _curve_segment_metrics(equity_curve, timestamps),
-        "win_rate": float(trade_metrics["win_rate"]),
-        "profit_factor": float(trade_metrics["profit_factor"]),
-        "expectancy": float(trade_metrics["expectancy_usd"]),
-        "expectancy_usd": float(trade_metrics["expectancy_usd"]),
-        "expectancy_pips": float(trade_metrics["expectancy_pips"]),
-        "trade_count": int(trade_metrics["trade_count"]),
-        "gross_pnl_usd": float(trade_metrics["gross_pnl_usd"]),
-        "net_pnl_usd": float(trade_metrics["net_pnl_usd"]),
-        "total_transaction_cost_usd": float(trade_metrics["total_transaction_cost_usd"]),
-        "total_commission_usd": float(trade_metrics["total_commission_usd"]),
-        "total_spread_slippage_cost_usd": float(trade_metrics["total_spread_slippage_cost_usd"]),
-        "avg_win_usd": float(trade_metrics["avg_win_usd"]),
-        "avg_loss_usd": float(trade_metrics["avg_loss_usd"]),
-        "win_loss_asymmetry": float(trade_metrics["win_loss_asymmetry"]),
-        "economic_metrics_primary": True,
-        "reward_shaping_excluded_from_primary_metrics": True,
+        **accounting,
         "execution_diagnostics": env_diagnostics,
-        "forced_close_count": int(env_diagnostics.get("trade_diagnostics", {}).get("forced_close_count", 0)),
-        "executed_order_count": int(env_diagnostics.get("trade_diagnostics", {}).get("order_executed_count", 0)),
         "execution_event_count": int(len(execution_log)),
+        "validation_status": val_status,
+        "accounting_gap_detected": not val_status["passed"],
     }
     return equity_curve, metrics
 
@@ -1675,12 +1804,26 @@ def _prime_eval_callback_from_history(eval_cb: FullPathEvalCallback) -> None:
         payload = json.loads(eval_cb.history_path.read_text(encoding="utf-8"))
     except Exception:
         return
-    history = list(payload.get("evaluations", []) or [])
-    eval_cb.history = history
-    if history:
-        eval_cb.latest_metrics = history[-1]
+    raw_history = list(payload.get("evaluations", []) or [])
+
+    # Filter for integrity: skip legacy entries that fail unified accounting validation
+    valid_history = []
+    for entry in raw_history:
+        try:
+            # We treat entries without reconciliation info as legacy-invalid
+            # or we can be slightly more permissive but here we favor truthfulness.
+            validate_evaluation_payload(entry)
+            valid_history.append(entry)
+        except Exception as e:
+            # Skip invalid entries silently but log once
+            continue
+
+    eval_cb.history = valid_history
+    if valid_history:
+        eval_cb.latest_metrics = valid_history[-1]
+
     best_metric = -float("inf")
-    for entry in history:
+    for entry in valid_history:
         raw_value = entry.get(eval_cb.metric_key, -float("inf"))
         try:
             numeric_value = float(raw_value)
@@ -1798,12 +1941,6 @@ def main() -> None:
     )
     if TRAIN_ENV_MODE not in {"runtime", "legacy"}:
         raise RuntimeError(f"Unsupported TRAIN_ENV_MODE={TRAIN_ENV_MODE!r}. Expected 'runtime' or 'legacy'.")
-    if TRAIN_ENV_MODE == "legacy":
-        print("[WARN] TRAIN_ENV_MODE=legacy is deprecated. Supported training stack is RuntimeGymEnv + volume bars + MaskablePPO.")
-    print(
-        f"[INFO] Supported training stack: MaskablePPO + RuntimeGymEnv + volume bars | "
-        f"bar_construction_ticks_per_bar={BAR_CONSTRUCTION_TICKS_PER_BAR}"
-    )
     requested_envs = int(os.environ.get("TRAIN_NUM_ENVS", "0")) or None
     runtime_plan = configure_training_runtime(requested_envs)
     device = runtime_plan.device
@@ -1831,6 +1968,18 @@ def main() -> None:
     )
     for warning in vec_env_warnings:
         print(f"[WARN] {warning}")
+    
+    use_amp = TRAIN_USE_AMP and str(device) == "cuda"
+    amp_dtype = TRAIN_AMP_DTYPE
+    msg_amp = " | AMP=on" if use_amp else " | AMP=off"
+    if use_amp:
+        msg_amp += f" ({amp_dtype})"
+    
+    print(
+        f"[INFO] Supported training stack: MaskablePPO + RuntimeGymEnv + volume bars{msg_amp} | "
+        f"bar_construction_ticks_per_bar={BAR_CONSTRUCTION_TICKS_PER_BAR}"
+    )
+    
     if not TRAIN_LEGACY_REQUIRE_BASELINE_GATE and not TRAIN_DEBUG_ALLOW_BASELINE_BYPASS:
         print(
             "[WARN] Ignoring deprecated TRAIN_REQUIRE_BASELINE_GATE=0. "
@@ -2142,6 +2291,26 @@ def main() -> None:
         initial_curriculum_slippage = get_current_slippage_pips(0, TRAINING_RECOVERY_CONFIG)
         final_curriculum_slippage = get_final_slippage_pips(TRAINING_RECOVERY_CONFIG)
         sym_list = list(sym_folds.keys())
+        # Pre-convert bars for all symbols in this fold to avoid O(N) conversion in every worker
+        sym_bars_fold: dict[str, Any] = {}
+        if TRAIN_ENV_MODE == "runtime":
+            from runtime_gym_env import RuntimeGymEnv
+            import tempfile
+            for sym in sym_list:
+                sdf = sym_folds[sym][fold_idx][0]
+                bars_arr = RuntimeGymEnv._frame_to_bars(sdf)
+                if TRAIN_SHARED_DATASET:
+                    # Unique path to avoid Errno 22 / Access Denied on Windows re-runs
+                    mmap_name = f"bars_{sym}_{fold_idx}_{os.getpid()}_{int(time.time())}.dat"
+                    mmap_path = os.path.join(tempfile.gettempdir(), mmap_name)
+                    mmap_arr = np.memmap(mmap_path, dtype=bars_arr.dtype, mode='w+', shape=bars_arr.shape)
+                    mmap_arr[:] = bars_arr[:]
+                    mmap_arr.flush()
+                    # np.memmap pickles fine, the worker will reopen it
+                    sym_bars_fold[sym] = mmap_arr
+                else:
+                    sym_bars_fold[sym] = bars_arr
+
         def make_parallel(rank: int):
             sym = sym_list[rank % len(sym_list)]
             if TRAIN_ENV_MODE == "runtime":
@@ -2162,6 +2331,7 @@ def main() -> None:
                 symbol=sym,
                 scaler=fold_scaler,
                 recovery_config=train_recovery_cfg if TRAIN_ENV_MODE == "runtime" else None,
+                bars=sym_bars_fold.get(sym),
             )
 
         val_symbol = primary_symbol
@@ -2210,6 +2380,11 @@ def main() -> None:
             train_vec.norm_reward = False
         else:
             train_vec = wrap_vecnormalize(train_base_vec, training=True)
+
+        print(
+            f"[INFO] Supported training stack: MaskablePPO + RuntimeGymEnv + volume bars{msg_amp} | "
+            f"bar_construction_ticks_per_bar={BAR_CONSTRUCTION_TICKS_PER_BAR}"
+        )
 
         def build_single_eval_base_vec(
             source_frame: pd.DataFrame,
@@ -2268,7 +2443,14 @@ def main() -> None:
         tensorboard_log = "./tensorboard_log" if importlib.util.find_spec("tensorboard") is not None else None
 
         if resume_current_fold:
-            model = MaskablePPO.load(str(resume_state["model_path"]), env=train_vec, device=device)
+            ppo_class = MaskablePPO_AMP if use_amp else MaskablePPO
+            model = ppo_class.load(str(resume_state["model_path"]), env=train_vec, device=device)
+            
+            if use_amp:
+                # Re-inject AMP config if resuming
+                setattr(model, "amp_dtype", (th.bfloat16 if amp_dtype == "bf16" else th.float16))
+                setattr(model, "scaler", th.cuda.amp.GradScaler(enabled=(amp_dtype == "fp16")))
+
             remaining_timesteps = max(TOTAL_TIMESTEPS - int(getattr(model, "num_timesteps", 0) or 0), 0)
             print(
                 f"[Resume] Loaded fold {fold_idx} checkpoint {resume_state['model_path']} | "
@@ -2276,7 +2458,12 @@ def main() -> None:
                 f"remaining={remaining_timesteps:,}"
             )
         else:
-            model = MaskablePPO(
+            ppo_class = MaskablePPO_AMP if use_amp else MaskablePPO
+            ppo_kwargs = {}
+            if use_amp:
+                ppo_kwargs["amp_dtype"] = amp_dtype
+
+            model = ppo_class(
                 "MlpPolicy",
                 train_vec,
                 verbose=1,
@@ -2290,6 +2477,7 @@ def main() -> None:
                 tensorboard_log=tensorboard_log,
                 device=device,
                 seed=SEED + fold_idx,   # different seed per fold
+                **ppo_kwargs
             )
             remaining_timesteps = TOTAL_TIMESTEPS
 
@@ -2306,6 +2494,14 @@ def main() -> None:
             * max(effective_envs, 1)
         )
         heartbeat_every = int(os.environ.get("TRAIN_HEARTBEAT_EVERY_STEPS", str(heartbeat_default_steps)))
+        if TRAIN_REDUCE_LOGGING:
+            heartbeat_every = max(heartbeat_every, 20_000)
+            
+        eval_freq = max(TRAIN_EVAL_FREQ // max(effective_envs, 1), 1)
+        if TRAIN_ASYNC_EVAL:
+            # We delay saving vecnormalize and evaluating deeply by using a much larger frequency
+            eval_freq = max(eval_freq, 50_000)
+
         eval_cb = FullPathEvalCallback(
             val_vec,
             train_vecnormalize=train_vec,
@@ -2313,7 +2509,7 @@ def main() -> None:
             best_model_save_path=ckpt_dir,
             best_vecnormalize_path=best_vecnormalize_path,
             history_path=Path(ckpt_dir) / "full_path_evaluations.json",
-            eval_freq=max(TRAIN_EVAL_FREQ // max(effective_envs, 1), 1),
+            eval_freq=eval_freq,
             verbose=1,
         )
         if resume_current_fold:
@@ -2338,6 +2534,26 @@ def main() -> None:
         )
 
         if remaining_timesteps > 0:
+            if TRAIN_TORCH_COMPILE and hasattr(model, "policy"):
+                # Windows/Triton availability check
+                is_windows = sys.platform.startswith("win")
+                try:
+                    import triton
+                    has_triton = True
+                except ImportError:
+                    has_triton = False
+
+                if is_windows and not has_triton:
+                    print("[Torch] Waning: Triton not found on Windows. Skipping torch.compile to avoid inducer crash (use a Triton-supported OS/backend for speedups).")
+                else:
+                    print(f"[Torch] Compiling policy network with mode={TRAIN_TORCH_COMPILE_MODE} ...")
+                    compile_start = time.perf_counter()
+                    try:
+                        model.policy = torch.compile(model.policy, mode=TRAIN_TORCH_COMPILE_MODE)
+                        print(f"[Torch] Compilation tracing initiated (elapsed: {time.perf_counter() - compile_start:.2f}s). Final code generation will happen on first forward pass.")
+                    except Exception as e:
+                        print(f"[Torch] Compilation failed: {e}. Falling back to standard policy.")
+
             model.learn(
                 total_timesteps=remaining_timesteps,
                 callback=[curriculum_cb, diagnostics_cb, eval_cb, heartbeat_cb],
@@ -2353,7 +2569,8 @@ def main() -> None:
 
         # Evaluate best checkpoint from this fold
         best_path = ckpt_dir / "best_model.zip"
-        fold_model = MaskablePPO.load(str(best_path), device="cpu") if best_path.exists() else model
+        ppo_class = MaskablePPO_AMP if use_amp else MaskablePPO
+        fold_model = ppo_class.load(str(best_path), device="cpu") if best_path.exists() else model
         if best_vecnormalize_path.exists():
             val_vec.close()
             holdout_vec.close()
@@ -2495,9 +2712,9 @@ def main() -> None:
         )
         print(
             "  PPO diagnostics: "
-            f"explained_variance={diagnostics['explained_variance']:.3f} "
-            f"approx_kl={diagnostics['approx_kl']:.3f} "
-            f"value_loss_mean={diagnostics['value_loss_mean']:.3f}"
+            f"explained_variance={diagnostics.get('explained_variance', 0.0):.3f} "
+            f"approx_kl={diagnostics.get('approx_kl', 0.0):.3f} "
+            f"value_loss_mean={diagnostics.get('value_loss_mean', 0.0):.3f}"
         )
 
         current_candidate_rank = _deployment_candidate_rank(diagnostics)

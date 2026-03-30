@@ -7,55 +7,11 @@ from typing import Iterable, Sequence
 import numpy as np
 import pandas as pd
 
+from domain.enums import ActionType
+from domain.models import ActionSpec, ConfirmedPosition
 from symbol_utils import price_to_pips
 
-
 STATE_FEATURE_COUNT = 4
-
-
-class ActionType(str, Enum):
-    HOLD = "HOLD"
-    CLOSE = "CLOSE"
-    OPEN = "OPEN"
-
-
-@dataclass(frozen=True)
-class ActionSpec:
-    action_type: ActionType
-    direction: int | None = None
-    sl_value: float | None = None
-    tp_value: float | None = None
-
-
-@dataclass
-class ConfirmedPosition:
-    direction: int = 0
-    entry_price: float | None = None
-    sl_price: float | None = None
-    tp_price: float | None = None
-    volume: float = 0.0
-    broker_ticket: int | None = None
-    order_id: int | None = None
-    time_in_trade_bars: int = 0
-    last_reward: float = 0.0
-    last_confirmed_price: float | None = None
-    last_confirmed_time_msc: int | None = None
-
-    @property
-    def is_flat(self) -> bool:
-        return self.direction == 0 or self.entry_price is None or self.volume <= 0
-
-    def reset(self) -> None:
-        self.direction = 0
-        self.entry_price = None
-        self.sl_price = None
-        self.tp_price = None
-        self.volume = 0.0
-        self.broker_ticket = None
-        self.order_id = None
-        self.time_in_trade_bars = 0
-        self.last_confirmed_price = None
-        self.last_confirmed_time_msc = None
 
 
 def build_action_map(sl_options: Sequence[float], tp_options: Sequence[float]) -> tuple[ActionSpec, ...]:
@@ -325,3 +281,171 @@ def compute_trade_metrics(
         "avg_loss_usd": avg_loss_usd,
         "win_loss_asymmetry": float(win_loss_asymmetry),
     }
+
+
+def build_trade_metric_reconciliation(
+    *,
+    trade_metrics: dict[str, float],
+    trade_diagnostics: dict | None = None,
+    economics: dict | None = None,
+    trade_log_count: int | None = None,
+    execution_log_count: int | None = None,
+    amount_tolerance: float = 1e-6,
+) -> dict[str, object]:
+    trade_diagnostics = dict(trade_diagnostics or {})
+    economics = dict(economics or {})
+    checks: dict[str, dict[str, object]] = {}
+    mismatches: list[str] = []
+
+    def _numeric_check(name: str, left: float, right: float, *, tolerance: float = amount_tolerance) -> None:
+        diff = float(abs(float(left) - float(right)))
+        passed = bool(diff <= float(tolerance))
+        checks[name] = {
+            "passed": passed,
+            "left": float(left),
+            "right": float(right),
+            "abs_diff": diff,
+            "tolerance": float(tolerance),
+        }
+        if not passed:
+            mismatches.append(name)
+
+    def _count_check(name: str, left: int, right: int) -> None:
+        passed = int(left) == int(right)
+        checks[name] = {
+            "passed": passed,
+            "left": int(left),
+            "right": int(right),
+        }
+        if not passed:
+            mismatches.append(name)
+
+    trade_count = int(trade_metrics.get("trade_count", 0.0) or 0)
+    forced_close_count = int(trade_metrics.get("forced_close_count", 0.0) or 0)
+    avg_holding_bars = float(trade_metrics.get("avg_holding_bars", 0.0) or 0.0)
+
+    if trade_log_count is not None:
+        _count_check("trade_count_vs_trade_log", trade_count, int(trade_log_count))
+    if "closed_trade_count" in trade_diagnostics:
+        _count_check("trade_count_vs_diagnostics", trade_count, int(trade_diagnostics.get("closed_trade_count", 0)))
+    if "forced_close_count" in trade_diagnostics:
+        _count_check(
+            "forced_close_count_vs_diagnostics",
+            forced_close_count,
+            int(trade_diagnostics.get("forced_close_count", 0)),
+        )
+    if execution_log_count is not None and "order_executed_count" in trade_diagnostics:
+        _count_check(
+            "executed_order_count_vs_execution_log",
+            int(trade_diagnostics.get("order_executed_count", 0)),
+            int(execution_log_count),
+        )
+    if "position_duration_sum" in trade_diagnostics and "position_duration_count" in trade_diagnostics:
+        duration_count = int(trade_diagnostics.get("position_duration_count", 0) or 0)
+        diagnostics_avg_holding = (
+            float(trade_diagnostics.get("position_duration_sum", 0.0) or 0.0) / float(duration_count)
+            if duration_count > 0
+            else 0.0
+        )
+        _numeric_check("avg_holding_bars_vs_diagnostics", avg_holding_bars, diagnostics_avg_holding)
+
+    economics_key_map = {
+        "gross_pnl_usd": "gross_pnl_usd",
+        "net_pnl_usd": "net_pnl_usd",
+        "total_transaction_cost_usd": "transaction_cost_usd",
+        "total_commission_usd": "commission_usd",
+        "total_spread_slippage_cost_usd": "spread_slippage_cost_usd",
+        "total_spread_cost_usd": "spread_cost_usd",
+        "total_slippage_cost_usd": "slippage_cost_usd",
+    }
+    for metric_key, economics_key in economics_key_map.items():
+        if economics_key not in economics:
+            continue
+        _numeric_check(
+            f"{metric_key}_vs_diagnostics",
+            float(trade_metrics.get(metric_key, 0.0) or 0.0),
+            float(economics.get(economics_key, 0.0) or 0.0),
+        )
+
+    return {
+        "passed": not mismatches,
+        "mismatch_fields": mismatches,
+        "checks": checks,
+    }
+
+
+def build_evaluation_accounting(
+    *,
+    trade_log: Sequence[dict],
+    execution_diagnostics: dict[str, Any],
+    execution_log_count: int,
+    initial_equity: float = 1000.0,
+) -> dict[str, Any]:
+    """
+    Transform trade log + execution diagnostics into a single normalized accounting summary.
+    """
+    trade_metrics = compute_trade_metrics(trade_log, initial_equity=initial_equity)
+    reconciliation = build_trade_metric_reconciliation(
+        trade_metrics=trade_metrics,
+        trade_diagnostics=execution_diagnostics.get("trade_stats", {}),
+        economics=execution_diagnostics.get("economics", {}),
+        trade_log_count=len(trade_log),
+        execution_log_count=execution_log_count,
+    )
+
+    # Flatten into a single summary
+    summary = {
+        **trade_metrics,
+        "metrics_reconciliation": reconciliation,
+    }
+    # Ensure top-level fields match downstream expectations if they differ
+    summary["executed_order_count"] = int(
+        execution_diagnostics.get("trade_stats", {}).get("order_executed_count", 0)
+    )
+    summary["forced_close_count"] = int(
+        execution_diagnostics.get("trade_stats", {}).get("forced_close_count", 0)
+    )
+
+    return summary
+
+
+def validate_evaluation_accounting(accounting: dict[str, Any]) -> dict[str, Any]:
+    """
+    Assert that trade counts derived from the trade log match the closed trade counts from diagnostics.
+    """
+    reconcile = accounting.get("metrics_reconciliation", {})
+    passed = bool(reconcile.get("passed", False))
+    mismatches = reconcile.get("mismatch_fields", [])
+
+    if not passed:
+        reason = f"Accounting reconciliation failed for fields: {', '.join(mismatches)}"
+    else:
+        reason = "Accounting reconciliation passed."
+
+    return {
+        "passed": passed,
+        "reason": reason,
+        "mismatches": mismatches,
+    }
+
+
+def validate_evaluation_payload(payload: dict[str, Any]) -> None:
+    """
+    Ensure required summary fields exist and are consistent before serialization.
+    Fail closed if reconciliation failed.
+    """
+    # 1. Check top-level metrics for reconciliation success
+    metrics = payload.get("replay_metrics") or payload
+    if not isinstance(metrics, dict):
+        raise ValueError("Evaluation payload missing valid metrics dictionary.")
+
+    reconcile = metrics.get("metrics_reconciliation", {})
+    if not bool(reconcile.get("passed", False)):
+        mismatches = reconcile.get("mismatch_fields", [])
+        raise RuntimeError(f"Cannot serialize evaluation: reconciliation failed for {mismatches}")
+
+    # 2. Ensure critical fields exist
+    required_fields = ["trade_count", "final_equity", "net_pnl_usd", "profit_factor"]
+    missing = [f for f in required_fields if f not in metrics]
+    if missing:
+        raise ValueError(f"Evaluation metrics missing required fields: {missing}")

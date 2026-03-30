@@ -17,10 +17,62 @@ except ImportError:
     from gym import spaces  # type: ignore
     _GYM = False
 
-from event_pipeline import ReplayBroker, RiskEngine, RiskLimits, RuntimeEngine, RuntimeSnapshot, VolumeBar
+from domain.models import VolumeBar, BAR_DTYPE
+from execution.replay_broker import ReplayBroker
+from risk.risk_engine import RiskEngine, RiskLimits
+from runtime.runtime_engine import RuntimeEngine, RuntimeSnapshot
+
 from feature_engine import FEATURE_COLS, FeatureEngine, WARMUP_BARS
 from runtime_common import STATE_FEATURE_COUNT, ActionSpec, ActionType, action_label, build_action_mask, build_observation
 from symbol_utils import pip_value_for_volume
+
+
+
+class BarView:
+    __slots__ = ['row', '_ts']
+    
+    def __init__(self, row: np.void):
+        self.row = row
+        self._ts = None
+
+    @property
+    def timestamp(self):
+        if self._ts is None:
+            self._ts = pd.Timestamp(self.row['timestamp_s'], unit='s', tz='UTC').to_pydatetime()
+        return self._ts
+    
+    @property
+    def open(self): return float(self.row['open'])
+    @property
+    def high(self): return float(self.row['high'])
+    @property
+    def low(self): return float(self.row['low'])
+    @property
+    def close(self): return float(self.row['close'])
+    @property
+    def volume(self): return float(self.row['volume'])
+    @property
+    def avg_spread(self): return float(self.row['avg_spread'])
+    @property
+    def time_delta_s(self): return float(self.row['time_delta_s'])
+    @property
+    def start_time_msc(self): return int(self.row['start_time_msc'])
+    @property
+    def end_time_msc(self): return int(self.row['end_time_msc'])
+
+    def to_series(self) -> pd.Series:
+        return pd.Series(
+            {
+                "Open": self.open,
+                "High": self.high,
+                "Low": self.low,
+                "Close": self.close,
+                "Volume": self.volume,
+                "avg_spread": self.avg_spread,
+                "time_delta_s": self.time_delta_s,
+            },
+            name=self.timestamp,
+        )
 
 
 @dataclass(frozen=True)
@@ -34,6 +86,12 @@ class RuntimeGymConfig:
     transaction_penalty: float = 1.0
     reward_clip_low: float = -5.0
     reward_clip_high: float = 5.0
+    churn_min_hold_bars: int = 0
+    churn_action_cooldown: int = 0
+    churn_penalty_usd: float = 0.0
+    downside_risk_penalty: float = 0.0
+    turnover_penalty: float = 0.0
+    net_return_coef: float = 1.0
     window_size: int = 1
     random_start: bool = False
 
@@ -221,31 +279,48 @@ class TrainingDiagnostics:
         reward: float,
     ) -> None:
         self.total_steps += 1
+        
+        # Fast-path for most common event: HOLD with no trades/events
+        # We only need to track steps and positions
+        if action.action_type == ActionType.HOLD and not executed_events and not closed_trades:
+            self.action_counts["hold"] += 1
+            if new_position == 0: self.trade_stats["flat_steps"] += 1
+            elif new_position > 0: self.trade_stats["long_steps"] += 1
+            else: self.trade_stats["short_steps"] += 1
+            self.trade_stats["action_selected_count"] += 1
+            
+            # Record rewards
+            rstats = self.reward_stats
+            rstats["pnl_reward_sum"] += reward_components.get("pnl_reward", 0.0)
+            rstats["net_reward_sum"] += reward
+            return
+
+        # Slow path for actions/events
         self.trade_stats["action_selected_count"] += 1
         self._record_action(action)
         if action.action_type != ActionType.HOLD:
             self.trade_stats["trade_attempt_count"] += 1
+        
         if submit_result is not None and bool(getattr(submit_result, "accepted", False)):
             self.trade_stats["action_accepted_count"] += 1
-            if action.action_type == ActionType.CLOSE:
+            at = action.action_type
+            if at == ActionType.CLOSE:
                 self.trade_stats["accepted_close_count"] += 1
-            elif action.action_type == ActionType.OPEN:
+            elif at == ActionType.OPEN:
                 self.trade_stats["accepted_open_count"] += 1
         elif submit_result is not None:
             self.trade_stats["trade_reject_count"] += 1
 
-        if int(entry_signal_direction) > 0:
+        if entry_signal_direction > 0:
             self.trade_stats["entry_signal_long_count"] += 1
-        elif int(entry_signal_direction) < 0:
+        elif entry_signal_direction < 0:
             self.trade_stats["entry_signal_short_count"] += 1
 
-        if int(entry_filled_direction) > 0:
+        if entry_filled_direction > 0:
             self.trade_stats["entered_long_count"] += 1
-            if (
-                self._last_closed_direction < 0
-                and self._last_close_step is not None
-                and (self.total_steps - self._last_close_step) <= self.RAPID_REVERSAL_WINDOW_STEPS
-            ):
+            if self._last_closed_direction < 0 and self._last_close_step is not None:
+                if (self.total_steps - self._last_close_step) <= self.RAPID_REVERSAL_WINDOW_STEPS:
+                    self.trade_stats["rapid_reversals"] += 1
                 self.trade_stats["rapid_reversals"] += 1
         elif int(entry_filled_direction) < 0:
             self.trade_stats["entered_short_count"] += 1
@@ -328,8 +403,10 @@ class RuntimeGymEnv(gym.Env):
         self,
         *,
         symbol: str,
-        bars_frame: pd.DataFrame,
+        bars_frame: pd.DataFrame | None = None,
+        bars: np.ndarray | list[VolumeBar] | None = None,
         scaler: Any,
+
         action_map: Sequence[ActionSpec],
         risk_limits: RiskLimits | None = None,
         config: RuntimeGymConfig | None = None,
@@ -341,32 +418,34 @@ class RuntimeGymEnv(gym.Env):
         self.risk_limits = risk_limits or RiskLimits()
         self.config = config or RuntimeGymConfig()
 
-        required = ["Open", "High", "Low", "Close", "Volume"]
-        missing = [c for c in required if c not in bars_frame.columns]
-        if missing:
-            raise ValueError(f"bars_frame missing required columns: {missing}")
-
-        frame = bars_frame.copy()
-        if not isinstance(frame.index, pd.DatetimeIndex):
-            if "Gmt time" in frame.columns:
-                frame["Gmt time"] = pd.to_datetime(frame["Gmt time"], utc=True, errors="coerce")
-                frame = frame.dropna(subset=["Gmt time"]).set_index("Gmt time")
+        if bars is not None:
+            self._bars = bars
+            # Use small slice of bars_frame for observation space reference if provided, else dummy
+            self._frame = bars_frame if bars_frame is not None else pd.DataFrame()
+        elif bars_frame is not None:
+            frame = bars_frame.copy()
+            if not isinstance(frame.index, pd.DatetimeIndex):
+                if "Gmt time" in frame.columns:
+                    frame["Gmt time"] = pd.to_datetime(frame["Gmt time"], utc=True, errors="coerce")
+                    frame = frame.dropna(subset=["Gmt time"]).set_index("Gmt time")
+                else:
+                    raise ValueError("bars_frame must have a DatetimeIndex or a 'Gmt time' column.")
+            if frame.index.tz is None:
+                frame.index = frame.index.tz_localize("UTC")
             else:
-                raise ValueError("bars_frame must have a DatetimeIndex or a 'Gmt time' column.")
-        if frame.index.tz is None:
-            frame.index = frame.index.tz_localize("UTC")
+                frame.index = frame.index.tz_convert("UTC")
+
+            if "avg_spread" not in frame.columns:
+                frame["avg_spread"] = 0.0
+            if "time_delta_s" not in frame.columns:
+                frame["time_delta_s"] = frame.index.to_series().diff().dt.total_seconds().fillna(0.0)
+
+            self._frame = frame.sort_index()
+            if len(self._frame) < WARMUP_BARS + 10:
+                raise ValueError(f"bars_frame too short: need >= {WARMUP_BARS + 10}, got {len(self._frame)}")
+            self._bars = self._frame_to_bars(self._frame)
         else:
-            frame.index = frame.index.tz_convert("UTC")
-
-        if "avg_spread" not in frame.columns:
-            frame["avg_spread"] = 0.0
-        if "time_delta_s" not in frame.columns:
-            frame["time_delta_s"] = frame.index.to_series().diff().dt.total_seconds().fillna(0.0)
-
-        self._frame = frame.sort_index()
-        if len(self._frame) < WARMUP_BARS + 10:
-            raise ValueError(f"bars_frame too short: need >= {WARMUP_BARS + 10}, got {len(self._frame)}")
-        self._bars = self._frame_to_bars(self._frame)
+            raise ValueError("Either bars_frame or bars must be provided to RuntimeGymEnv.")
 
         self.action_space = spaces.Discrete(len(self.action_map))
         self.observation_space = spaces.Box(
@@ -397,26 +476,26 @@ class RuntimeGymEnv(gym.Env):
         self._episode_finalized = False
 
     @staticmethod
-    def _frame_to_bars(frame: pd.DataFrame) -> list[VolumeBar]:
-        bars: list[VolumeBar] = []
-        for timestamp, row in frame.iterrows():
-            time_delta_s = float(row.get("time_delta_s", 0.0))
-            end_time_msc = int(pd.Timestamp(timestamp).timestamp() * 1000)
-            bars.append(
-                VolumeBar(
-                    timestamp=pd.Timestamp(timestamp).to_pydatetime(),
-                    open=float(row["Open"]),
-                    high=float(row["High"]),
-                    low=float(row["Low"]),
-                    close=float(row["Close"]),
-                    volume=float(row["Volume"]),
-                    avg_spread=float(row.get("avg_spread", 0.0)),
-                    time_delta_s=time_delta_s,
-                    start_time_msc=end_time_msc,
-                    end_time_msc=end_time_msc + int(max(time_delta_s, 0.0) * 1000),
-                )
-            )
-        return bars
+    def _frame_to_bars(frame: pd.DataFrame) -> np.ndarray:
+        arr = np.empty(len(frame), dtype=BAR_DTYPE)
+        
+        timestamps_s = frame.index.view(np.int64) / 10**9
+        arr['timestamp_s'] = timestamps_s
+        arr['open'] = frame['Open'].to_numpy(dtype=np.float32)
+        arr['high'] = frame['High'].to_numpy(dtype=np.float32)
+        arr['low'] = frame['Low'].to_numpy(dtype=np.float32)
+        arr['close'] = frame['Close'].to_numpy(dtype=np.float32)
+        arr['volume'] = frame['Volume'].to_numpy(dtype=np.float32)
+        arr['avg_spread'] = frame.get("avg_spread", pd.Series(0.0, index=frame.index)).to_numpy(dtype=np.float32)
+        
+        time_delta_s = frame.get("time_delta_s", pd.Series(0.0, index=frame.index)).to_numpy(dtype=np.float32)
+        arr['time_delta_s'] = time_delta_s
+        
+        start_time_msc = (timestamps_s * 1000).astype(np.int64)
+        arr['start_time_msc'] = start_time_msc
+        arr['end_time_msc'] = start_time_msc + (np.maximum(time_delta_s, 0.0) * 1000).astype(np.int64)
+        
+        return arr
 
     def _bootstrap_runtime(self, start_index: int) -> RuntimeEngine:
         feature_engine = FeatureEngine.from_scaler(self._scaler)
@@ -440,15 +519,15 @@ class RuntimeGymEnv(gym.Env):
         runtime = RuntimeEngine(
             symbol=self.symbol,
             feature_engine=feature_engine,
-            policy=dummy_policy,  # not used when action_index_override is provided
+            policy=dummy_policy,
             broker=broker,
             action_map=self.action_map,
             risk_engine=risk_engine,
             snapshot=snapshot,
             state_store=None,
             reward_scale=float(self.config.reward_scale),
-            drawdown_penalty=float(self.config.drawdown_penalty),
-            transaction_penalty=float(self.config.transaction_penalty),
+            reward_drawdown_penalty=float(self.config.drawdown_penalty),
+            reward_transaction_penalty=float(self.config.transaction_penalty),
             reward_clip_low=float(self.config.reward_clip_low),
             reward_clip_high=float(self.config.reward_clip_high),
         )
@@ -494,11 +573,43 @@ class RuntimeGymEnv(gym.Env):
     def get_training_diagnostics(self) -> dict[str, Any]:
         return self._training_diagnostics.snapshot()
 
-    def _latest_bar(self) -> VolumeBar:
-        if not self._bars:
+    def get_trade_log(self) -> list[dict[str, Any]]:
+        """Return closed trade log from the current episode broker.
+
+        Callable via SubprocVecEnv.env_method("get_trade_log") so that
+        evaluate_model() can reliably extract trade counts even across process
+        boundaries where get_attr("_runtime") may fail silently.
+        """
+        if self._runtime is None:
+            return []
+        broker = self._runtime.broker
+        trade_log = getattr(broker, "trade_log", None)
+        if not isinstance(trade_log, list):
+            return []
+        return [dict(item) for item in trade_log if isinstance(item, dict)]
+
+    def get_execution_log(self) -> list[dict[str, Any]]:
+        """Return execution log from the current episode broker.
+
+        Callable via SubprocVecEnv.env_method("get_execution_log") for
+        the same reason as get_trade_log().
+        """
+        if self._runtime is None:
+            return []
+        broker = self._runtime.broker
+        execution_log = getattr(broker, "execution_log", None)
+        if not isinstance(execution_log, list):
+            return []
+        return [dict(item) for item in execution_log if isinstance(item, dict)]
+
+    def _latest_bar(self) -> BarView:
+        if self._bars is None or len(self._bars) == 0:
             raise RuntimeError("No bars available for runtime environment.")
         index = min(max(int(self._bar_index), 0), len(self._bars) - 1)
-        return self._bars[index]
+        item = self._bars[index]
+        if isinstance(item, np.void):
+            return BarView(item)
+        return item
 
     def _finalize_episode(self, *, reason: str) -> dict[str, Any]:
         if self._episode_finalized or self._runtime is None:
@@ -551,7 +662,7 @@ class RuntimeGymEnv(gym.Env):
     def _force_close_end_of_path(
         self,
         *,
-        bar: VolumeBar,
+        bar: BarView | VolumeBar,
         prev_equity: float,
         turnover_lots: float,
         reward_components: dict[str, float],
@@ -592,9 +703,39 @@ class RuntimeGymEnv(gym.Env):
     def action_masks(self) -> np.ndarray:
         if self._runtime is None or self._runtime.feature_engine._buffer is None:
             return np.zeros(len(self.action_map), dtype=bool)
+        
         latest_row = self._runtime.feature_engine._buffer.iloc[-1]
         spread_z = float(latest_row.get("spread_z", 0.0))
-        return build_action_mask(self.action_map, position=self._runtime.confirmed_position, spread_z=spread_z)
+        
+        # Base mask (spread filter and flat vs open logic)
+        mask = build_action_mask(
+            self.action_map,
+            position=self._runtime.confirmed_position,
+            spread_z=spread_z
+        )
+        
+        # Phase 4: Churn/Selectivity constraints
+        position = self._runtime.confirmed_position
+        current_bar_index = self._runtime.processed_bars_count
+        
+        if not position.is_flat and self.config.churn_min_hold_bars > 0:
+            if int(position.time_in_trade_bars) < self.config.churn_min_hold_bars:
+                # Forced HOLD: block all except index 0 (HOLD)
+                churn_mask = np.zeros_like(mask)
+                churn_mask[0] = True
+                return churn_mask
+                
+        if position.is_flat and self.config.churn_action_cooldown > 0:
+            last_close = self._runtime.last_close_bar_index
+            if last_close is not None:
+                bars_since = current_bar_index - last_close
+                if bars_since < self.config.churn_action_cooldown:
+                    # Forced HOLD: block all except index 0 (HOLD)
+                    cooldown_mask = np.zeros_like(mask)
+                    cooldown_mask[0] = True
+                    return cooldown_mask
+        
+        return mask
 
     def reset(self, seed: int | None = None, options: dict | None = None):
         super().reset(seed=seed)
@@ -604,7 +745,7 @@ class RuntimeGymEnv(gym.Env):
         self._runtime = self._bootstrap_runtime(self._episode_start_index)
         self._apply_runtime_slippage()
         self._bar_index = self._episode_start_index
-        first_bar = self._bars[self._bar_index]
+        first_bar = self._latest_bar()
 
         # Prime the environment by processing the first actionable bar with HOLD.
         result = self._runtime.process_bar(first_bar, action_index_override=0)
@@ -658,7 +799,7 @@ class RuntimeGymEnv(gym.Env):
             return obs, 0.0, True, info
 
         self._bar_index += 1
-        bar = self._bars[self._bar_index]
+        bar = self._latest_bar()
         result = self._runtime.process_bar(bar, action_index_override=action)
         self._last_observation = result.observation
         reward_components = dict(result.reward_components)
@@ -767,3 +908,15 @@ class RuntimeGymEnv(gym.Env):
         if _GYM:
             return result.observation, float(final_reward), terminated, truncated, info
         return result.observation, float(final_reward), bool(terminated or truncated), info
+
+    def get_trade_log(self) -> list[dict[str, Any]]:
+        """Provides proxy access to closed trade log (for SubprocVecEnv)."""
+        return list(self._runtime.broker.trade_log)
+
+    def get_execution_log(self) -> list[dict[str, Any]]:
+        """Provides proxy access to raw execution log (for SubprocVecEnv)."""
+        return list(self._runtime.broker.execution_log)
+
+    def get_training_diagnostics(self) -> dict[str, Any]:
+        """Provides proxy access to engine-level diagnostics (for SubprocVecEnv)."""
+        return self._runtime.get_training_diagnostics()

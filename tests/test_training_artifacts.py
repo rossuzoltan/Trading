@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from artifact_manifest import create_manifest, load_manifest, save_manifest
 from evaluate_oos import _resolve_execution_cost_profile, _resolve_reward_profile
-from runtime_common import ActionSpec, ActionType
+from runtime_common import ActionSpec, ActionType, build_trade_metric_reconciliation
 from train_agent import (
     TrainingDiagnosticsCallback,
     _archive_paths,
@@ -320,6 +320,69 @@ class TrainingArtifactTests(unittest.TestCase):
             },
             _resolve_execution_cost_profile(SimpleNamespace(execution_cost_profile=None)),
         )
+
+    def test_trade_metric_reconciliation_detects_mismatch(self):
+        trade_metrics = {
+            "trade_count": 3.0,
+            "gross_pnl_usd": 12.0,
+            "net_pnl_usd": 7.0,
+            "total_transaction_cost_usd": 5.0,
+            "total_commission_usd": 2.0,
+            "total_spread_slippage_cost_usd": 3.0,
+            "total_spread_cost_usd": 1.0,
+            "total_slippage_cost_usd": 2.0,
+            "forced_close_count": 1.0,
+            "avg_holding_bars": 4.0,
+        }
+
+        matched = build_trade_metric_reconciliation(
+            trade_metrics=trade_metrics,
+            trade_diagnostics={
+                "closed_trade_count": 3,
+                "forced_close_count": 1,
+                "order_executed_count": 6,
+                "position_duration_sum": 12.0,
+                "position_duration_count": 3,
+            },
+            economics={
+                "gross_pnl_usd": 12.0,
+                "net_pnl_usd": 7.0,
+                "transaction_cost_usd": 5.0,
+                "commission_usd": 2.0,
+                "spread_slippage_cost_usd": 3.0,
+                "spread_cost_usd": 1.0,
+                "slippage_cost_usd": 2.0,
+            },
+            trade_log_count=3,
+            execution_log_count=6,
+        )
+        self.assertTrue(matched["passed"])
+
+        mismatched = build_trade_metric_reconciliation(
+            trade_metrics=trade_metrics,
+            trade_diagnostics={
+                "closed_trade_count": 2,
+                "forced_close_count": 0,
+                "order_executed_count": 5,
+                "position_duration_sum": 9.0,
+                "position_duration_count": 2,
+            },
+            economics={
+                "gross_pnl_usd": 12.0,
+                "net_pnl_usd": 6.5,
+                "transaction_cost_usd": 5.5,
+                "commission_usd": 2.0,
+                "spread_slippage_cost_usd": 3.0,
+                "spread_cost_usd": 1.0,
+                "slippage_cost_usd": 2.0,
+            },
+            trade_log_count=3,
+            execution_log_count=6,
+        )
+        self.assertFalse(mismatched["passed"])
+        self.assertIn("trade_count_vs_diagnostics", mismatched["mismatch_fields"])
+        self.assertIn("executed_order_count_vs_execution_log", mismatched["mismatch_fields"])
+        self.assertIn("net_pnl_usd_vs_diagnostics", mismatched["mismatch_fields"])
 
 
 if __name__ == "__main__":

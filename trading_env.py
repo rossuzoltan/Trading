@@ -240,6 +240,51 @@ class ForexTradingEnv(gym.Env):
 
         self.equity_curve: list[float] = []
         self.trade_log: list[dict] = []
+        
+        # ── Phase 13: Diagnostics Tracking ──────────────────────────────────
+        self.total_steps: int = 0
+        self.action_counts: dict[str, int] = {"hold": 0, "close": 0, "long": 0, "short": 0}
+        self.trade_stats: dict[str, Any] = {
+            "action_selected_count": 0,
+            "action_accepted_count": 0,
+            "accepted_open_count": 0,
+            "accepted_close_count": 0,
+            "order_executed_count": 0,
+            "executed_open_count": 0,
+            "executed_close_count": 0,
+            "entered_long_count": 0,
+            "entered_short_count": 0,
+            "entry_signal_long_count": 0,
+            "entry_signal_short_count": 0,
+            "closed_trade_count": 0,
+            "trade_attempt_count": 0,
+            "trade_reject_count": 0,
+            "forced_close_count": 0,
+            "flat_steps": 0,
+            "long_steps": 0,
+            "short_steps": 0,
+            "position_duration_sum": 0.0,
+            "position_duration_count": 0,
+            "rapid_reversals": 0,
+            "position_durations_sample": [],
+        }
+        self.economic_stats: dict[str, float] = {
+            "gross_pnl_usd": 0.0,
+            "net_pnl_usd": 0.0,
+            "transaction_cost_usd": 0.0,
+            "commission_usd": 0.0,
+            "spread_slippage_cost_usd": 0.0,
+            "spread_cost_usd": 0.0,
+            "slippage_cost_usd": 0.0,
+        }
+        self.reward_stats: dict[str, float] = {
+            "pnl_reward_sum": 0.0,
+            "slippage_penalty_sum": 0.0,
+            "participation_bonus_sum": 0.0,
+            "holding_penalty_sum": 0.0,
+            "drawdown_penalty_sum": 0.0,
+            "net_reward_sum": 0.0,
+        }
 
     @property
     def initial_equity(self) -> float:
@@ -435,7 +480,23 @@ class ForexTradingEnv(gym.Env):
         else:
             raw_pips = (self.entry_price - exit_price) / self.pip_value
         net_pips = raw_pips - half_spread
-        self.equity_usd += net_pips * self._pip_value_for_volume(exit_price)
+        
+        pip_val = self._pip_value_for_volume(exit_price)
+        pnl_usd = net_pips * pip_val
+        self.equity_usd += pnl_usd
+        
+        # Update diagnostics
+        self.economic_stats["gross_pnl_usd"] += (raw_pips * pip_val)
+        self.economic_stats["net_pnl_usd"]   += pnl_usd
+        self.economic_stats["spread_cost_usd"] += (half_spread * pip_val)
+        self.trade_stats["closed_trade_count"] += 1
+        
+        duration = self.time_in_trade
+        self.trade_stats["position_duration_sum"] += float(duration)
+        self.trade_stats["position_duration_count"] += 1
+        if len(self.trade_stats["position_durations_sample"]) < 100:
+            self.trade_stats["position_durations_sample"].append(float(duration))
+
         self.trade_log.append({
             "step": self.current_step, "reason": reason,
             "position": self.position, "entry": self.entry_price,
@@ -519,6 +580,16 @@ class ForexTradingEnv(gym.Env):
             mask[1] = True
         return mask
 
+    def get_training_diagnostics(self) -> dict[str, Any]:
+        """Return a snapshot of current training diagnostics."""
+        return {
+            "total_steps": self.total_steps,
+            "action_counts": self.action_counts.copy(),
+            "trade_stats": self.trade_stats.copy(),
+            "economic_stats": self.economic_stats.copy(),
+            "reward_stats": self.reward_stats.copy(),
+        }
+
     # ── Gym API ──────────────────────────────────────────────────────────────
 
     def reset(self, seed: int | None = None, options: dict | None = None):
@@ -565,17 +636,39 @@ class ForexTradingEnv(gym.Env):
             act_type = "HOLD"
 
         if act_type == "OPEN":
-            self._open(
-                direction,
-                sl_pips,
-                tp_pips,
-                price=current_close,
-                pip_value_per_lot=current_pip_value_per_lot,
-            )
+            self.trade_stats["trade_attempt_count"] += 1
+            self.trade_stats["action_selected_count"] += 1
+            if self.position == 0:
+                self.trade_stats["action_accepted_count"] += 1
+                self.trade_stats["accepted_open_count"] += 1
+                self._open(
+                    direction,
+                    sl_pips,
+                    tp_pips,
+                    price=current_close,
+                    pip_value_per_lot=current_pip_value_per_lot,
+                )
+                self.trade_stats["order_executed_count"] += 1
+                self.trade_stats["executed_open_count"] += 1
+                if direction == 1: self.trade_stats["entered_long_count"] += 1
+                else: self.trade_stats["entered_short_count"] += 1
+            else:
+                self.trade_stats["trade_reject_count"] += 1
         elif act_type == "CLOSE":
-            slip   = self._slippage() * self.pip_value
-            exit_p = current_close - slip if self.position == 1 else current_close + slip
-            self._close("MANUAL", exit_p)
+            self.trade_stats["action_selected_count"] += 1
+            if self.position != 0:
+                self.trade_stats["action_accepted_count"] += 1
+                self.trade_stats["accepted_close_count"] += 1
+                slip   = self._slippage() * self.pip_value
+                exit_p = current_close - slip if self.position == 1 else current_close + slip
+                self._close("MANUAL", exit_p)
+                self.trade_stats["order_executed_count"] += 1
+                self.trade_stats["executed_close_count"] += 1
+            else:
+                self.trade_stats["trade_reject_count"] += 1
+        else:
+            self.trade_stats["action_selected_count"] += 1
+            self.trade_stats["action_accepted_count"] += 1
 
         if step_idx >= self.n_steps - 1 and self.position != 0:
             self._close("END_OF_DATA", current_close)
@@ -600,6 +693,9 @@ class ForexTradingEnv(gym.Env):
             position_penalty = self.position_change_penalty * (turnover_lots ** 2)
             reward = -1.0
             self.terminated = True
+            
+            # Record failed state diagnostics
+            self.reward_stats["net_reward_sum"] += reward
         else:
             prev = max(self.prev_total_equity, 1e-6)
             log_return = float(np.log(total_equity / prev))
@@ -636,7 +732,25 @@ class ForexTradingEnv(gym.Env):
 
         self.current_step     += 1
         self.steps_in_episode += 1
+        self.total_steps      += 1
         self.equity_curve.append(float(total_equity))
+
+        # Update activity distribution
+        if act_type == "HOLD": self.action_counts["hold"] += 1
+        elif act_type == "CLOSE": self.action_counts["close"] += 1
+        elif act_type == "OPEN":
+            if direction == 1: self.action_counts["long"] += 1
+            else: self.action_counts["short"] += 1
+
+        if self.position == 0: self.trade_stats["flat_steps"] += 1
+        elif self.position == 1: self.trade_stats["long_steps"] += 1
+        else: self.trade_stats["short_steps"] += 1
+
+        # Record reward stats
+        self.reward_stats["net_reward_sum"] += reward
+        self.reward_stats["drawdown_penalty_sum"] += float(self.drawdown_penalty * drawdown)
+        # Note: transaction cost and position change penalties are part of the reward
+        # but tracking them explicitly here requires more granular mapping.
 
         if self.current_step >= self.n_steps - 1:
             self.terminated = True

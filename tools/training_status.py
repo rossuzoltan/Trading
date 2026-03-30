@@ -145,21 +145,88 @@ def summarize_heartbeat_schema(heartbeat: dict[str, Any] | None) -> dict[str, An
     }
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Show latest PPO training + deployment gate status.")
-    parser.add_argument("--symbol", default="EURUSD", help="Symbol, e.g. EURUSD")
-    parser.add_argument("--checkpoints", default="checkpoints", help="Checkpoints directory")
-    args = parser.parse_args()
-
-    symbol = str(args.symbol).strip().upper() or "EURUSD"
-    checkpoints_dir = Path(args.checkpoints)
+def build_status_summary(symbol: str, checkpoints_dir: Path) -> dict[str, Any]:
     paths = deployment_paths(symbol)
-
     heartbeat_path, run_context = resolve_current_run_heartbeat(checkpoints_dir)
     heartbeat = _maybe_load(heartbeat_path) if heartbeat_path is not None else None
     gate = _maybe_load(paths.gate_path)
     diagnostics = _maybe_load(paths.diagnostics_path)
     ops_attestation = _maybe_load(paths.ops_attestation_path)
+    replay_report_path = Path("models") / f"replay_report_{symbol.lower()}.json"
+    replay_report = _maybe_load(replay_report_path)
+
+    baseline_report = None
+    baseline_report_path = None
+    if run_context and run_context.get("baseline_report_path"):
+        baseline_report_path = Path(str(run_context["baseline_report_path"]))
+        baseline_report = _maybe_load(baseline_report_path)
+    elif diagnostics and diagnostics.get("baseline_report_path"):
+        baseline_report_path = Path(str(diagnostics["baseline_report_path"]))
+        baseline_report = _maybe_load(baseline_report_path)
+
+    replay_metrics = dict((replay_report or {}).get("replay_metrics", {}) or {})
+    replay_reconciliation = dict(replay_metrics.get("metric_reconciliation", {}) or {})
+    baseline_models = dict(((baseline_report or {}).get("holdout_metrics", {}) or {}).get("models", {}) or {})
+    best_holdout_baseline = None
+    if baseline_models:
+        best_holdout_baseline = max(
+            baseline_models.items(),
+            key=lambda item: (
+                float(((item[1] or {}).get("metrics", {}) or {}).get("expectancy_usd", 0.0)),
+                float(((item[1] or {}).get("metrics", {}) or {}).get("profit_factor", 0.0)),
+                float(((item[1] or {}).get("metrics", {}) or {}).get("trade_count", 0.0)),
+            ),
+        )[0]
+
+    return {
+        "symbol": symbol.upper(),
+        "current_run": run_context,
+        "heartbeat_path": str(heartbeat_path) if heartbeat_path is not None else None,
+        "heartbeat_schema": summarize_heartbeat_schema(heartbeat),
+        "training_diagnostics_path": str(paths.diagnostics_path),
+        "training_diagnostics": diagnostics,
+        "deployment_gate_path": str(paths.gate_path),
+        "deployment_gate": gate,
+        "ops_attestation_path": str(paths.ops_attestation_path),
+        "ops_attestation": ops_attestation,
+        "replay_report_path": str(replay_report_path) if replay_report_path.exists() else None,
+        "replay_metrics": replay_metrics or None,
+        "replay_metric_reconciliation": replay_reconciliation or None,
+        "baseline_report_path": str(baseline_report_path) if baseline_report_path is not None else None,
+        "baseline_report": baseline_report,
+        "best_holdout_baseline": best_holdout_baseline,
+        "failures": {
+            "current_run_state": (run_context or {}).get("state"),
+            "training_blockers": list((diagnostics or {}).get("blockers", []) or []),
+            "deployment_blockers": list((gate or {}).get("blockers", []) or []),
+            "baseline_blockers": list(((baseline_report or {}).get("holdout_metrics", {}) or {}).get("blockers", []) or []),
+            "replay_metric_mismatches": list(replay_reconciliation.get("mismatch_fields", []) or []),
+        },
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Show latest PPO training + deployment gate status.")
+    parser.add_argument("--symbol", default="EURUSD", help="Symbol, e.g. EURUSD")
+    parser.add_argument("--checkpoints", default="checkpoints", help="Checkpoints directory")
+    parser.add_argument("--json", action="store_true", help="Emit a machine-readable status summary.")
+    args = parser.parse_args()
+
+    symbol = str(args.symbol).strip().upper() or "EURUSD"
+    checkpoints_dir = Path(args.checkpoints)
+    paths = deployment_paths(symbol)
+    summary = build_status_summary(symbol, checkpoints_dir)
+    heartbeat_path = Path(summary["heartbeat_path"]) if summary.get("heartbeat_path") else None
+    run_context = summary.get("current_run")
+    heartbeat = _maybe_load(heartbeat_path) if heartbeat_path is not None else None
+    heartbeat_schema = summary.get("heartbeat_schema", {})
+    diagnostics = summary.get("training_diagnostics")
+    gate = summary.get("deployment_gate")
+    ops_attestation = summary.get("ops_attestation")
+
+    if args.json:
+        print(json.dumps(summary, indent=2))
+        return 0
 
     print("=" * 80)
     print(f"Training / Gate Status — {symbol}")
@@ -178,21 +245,20 @@ def main() -> int:
     else:
         print(f"Heartbeat: {heartbeat_path}")
         if heartbeat:
-            schema = summarize_heartbeat_schema(heartbeat)
             ts = heartbeat.get("timestamp_utc")
             steps = heartbeat.get("num_timesteps")
             ppo = heartbeat.get("ppo_diagnostics", {}) or {}
             print(f"  timestamp_utc     : {ts}")
             print(f"  num_timesteps     : {steps}")
-            print(f"  schema_version    : {schema.get('schema_version')}")
-            print(f"  schema_state      : {schema.get('schema_state')}")
-            print(f"  freshness_state   : {schema.get('freshness_state')}")
-            print(f"  contamination     : {schema.get('contamination_state')}")
-            print(f"  contamination_reasons: {schema.get('contamination_reasons')}")
-            print(f"  diagnostic_sample_count: {schema.get('diagnostic_sample_count')}")
-            print(f"  n_updates         : {schema.get('n_updates')}")
-            print(f"  last_distinct_update_seen: {schema.get('last_distinct_update_seen')}")
-            print(f"  metrics_fresh     : {schema.get('metrics_fresh')}")
+            print(f"  schema_version    : {heartbeat_schema.get('schema_version')}")
+            print(f"  schema_state      : {heartbeat_schema.get('schema_state')}")
+            print(f"  freshness_state   : {heartbeat_schema.get('freshness_state')}")
+            print(f"  contamination     : {heartbeat_schema.get('contamination_state')}")
+            print(f"  contamination_reasons: {heartbeat_schema.get('contamination_reasons')}")
+            print(f"  diagnostic_sample_count: {heartbeat_schema.get('diagnostic_sample_count')}")
+            print(f"  n_updates         : {heartbeat_schema.get('n_updates')}")
+            print(f"  last_distinct_update_seen: {heartbeat_schema.get('last_distinct_update_seen')}")
+            print(f"  metrics_fresh     : {heartbeat_schema.get('metrics_fresh')}")
             print(f"  explained_variance: {ppo.get('explained_variance')}")
             print(f"  approx_kl         : {ppo.get('approx_kl')}")
             print(f"  value_loss_stable : {ppo.get('value_loss_stable')}")
@@ -223,6 +289,19 @@ def main() -> int:
         print(f"  shadow_days_completed        : {ops_attestation.get('shadow_days_completed')}")
         print(f"  execution_drift_ok           : {ops_attestation.get('execution_drift_ok')}")
         print(f"  position_reconciliation_ok   : {ops_attestation.get('position_reconciliation_ok')}")
+
+    replay_metrics = summary.get("replay_metrics")
+    if replay_metrics:
+        print(f"Replay report: {summary.get('replay_report_path')}")
+        print(f"  trade_count      : {replay_metrics.get('trade_count')}")
+        print(f"  net_pnl_usd      : {replay_metrics.get('net_pnl_usd')}")
+        print(f"  profit_factor    : {replay_metrics.get('profit_factor')}")
+        print(f"  metric_parity    : {((summary.get('replay_metric_reconciliation') or {}).get('passed'))}")
+
+    if summary.get("baseline_report"):
+        print(f"Baseline report: {summary.get('baseline_report_path')}")
+        print(f"  best_holdout_baseline: {summary.get('best_holdout_baseline')}")
+        print(f"  baseline_blockers    : {summary.get('failures', {}).get('baseline_blockers')}")
 
     # Decision-oriented verdict (conservative)
     verdict = "Research more"

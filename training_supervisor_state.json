@@ -1,0 +1,11 @@
+{
+    "active_num_envs":  6,
+    "restart_count":  1,
+    "recent_failure_count":  0,
+    "last_seen_steps":  null,
+    "last_seen_hb_utc":  null,
+    "active_profile":  "default",
+    "bad_run_restart_count":  0,
+    "last_start_utc":  "2026-03-27T18:50:01.7420946Z",
+    "last_restart_reason":  "no step progress (229380 -\u003e 229380)"
+}

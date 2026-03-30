@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from sklearn.tree import DecisionTreeRegressor
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -71,6 +72,9 @@ def _prepare_targets(
     )
     prepared["long_net_pips"] = raw_move_pips - cost_pips
     prepared["short_net_pips"] = -raw_move_pips - cost_pips
+    # NON-PARITY APPROXIMATION:
+    # Baseline costs are estimated via simplified pip-math and are not execution-path
+    # identical to ReplayBroker results. Absolute comparability is limited.
     prepared["long_target"] = prepared["long_net_pips"] >= min_edge_pips
     prepared["short_target"] = prepared["short_net_pips"] >= min_edge_pips
     prepared["signed_target"] = np.where(
@@ -202,6 +206,48 @@ def _fit_probability_pair(x_train: np.ndarray, frame_train: pd.DataFrame) -> tup
     return long_model, short_model
 
 
+def _trend_rule_signals(frame: pd.DataFrame) -> np.ndarray:
+    signals = np.zeros(len(frame), dtype=np.int8)
+    fast = np.asarray(frame.get("ma20_slope", 0.0), dtype=np.float64)
+    slow = np.asarray(frame.get("ma50_slope", 0.0), dtype=np.float64)
+    signals[(fast > 0.0) & (slow > 0.0)] = 1
+    signals[(fast < 0.0) & (slow < 0.0)] = -1
+    return signals
+
+
+def _mean_reversion_rule_signals(frame: pd.DataFrame) -> np.ndarray:
+    signals = np.zeros(len(frame), dtype=np.int8)
+    spread_z = np.asarray(frame.get("spread_z", 0.0), dtype=np.float64)
+    # Simple MR rule: buy when spread_z is surprisingly low/negative, sell when high.
+    # In reality, spread_z tracks spread abnormality, but this serves as a basic MR proxy baseline.
+    signals[spread_z < -1.0] = 1
+    signals[spread_z > 1.0] = -1
+    return signals
+
+
+def _flat_baseline_metrics() -> dict[str, float]:
+    """The 'do nothing' floor."""
+    return {
+        "trade_count": 0.0,
+        "expectancy_usd": 0.0,
+        "avg_trade_usd": 0.0,
+        "profit_factor": 0.0,
+        "net_pnl_usd": 0.0,
+        "gross_profit_usd": 0.0,
+        "gross_loss_usd": 0.0,
+        "win_rate": 0.0,
+        "avg_win_usd": 0.0,
+        "avg_loss_usd": 0.0,
+        "win_loss_asymmetry": 0.0,
+        "sharpe_like": 0.0,
+        "max_drawdown_usd": 0.0,
+        "long_trade_count": 0.0,
+        "short_trade_count": 0.0,
+        "avg_holding_bars": 0.0,
+        "trades_per_bar": 0.0,
+    }
+
+
 def run_edge_baseline_research(
     *,
     symbol: str,
@@ -270,6 +316,38 @@ def run_edge_baseline_research(
             "threshold": float(min_edge_pips),
             "metrics": _simulate_signals(prepared_val, ridge_signals, symbol=symbol, horizon_bars=horizon_bars),
         }
+        tree = DecisionTreeRegressor(max_depth=3, random_state=42)
+        tree.fit(x_train, prepared_train["signed_target"].to_numpy(dtype=np.float64))
+        tree_val = np.asarray(tree.predict(x_val), dtype=np.float64)
+        tree_signals = np.zeros(len(prepared_val), dtype=np.int8)
+        tree_signals[tree_val >= min_edge_pips] = 1
+        tree_signals[tree_val <= -min_edge_pips] = -1
+        fold_payload["models"]["tree_signed_target"] = {
+            "threshold": float(min_edge_pips),
+            "metrics": _simulate_signals(prepared_val, tree_signals, symbol=symbol, horizon_bars=horizon_bars),
+        }
+        fold_payload["models"]["trend_rule"] = {
+            "threshold": 0.0,
+            "metrics": _simulate_signals(
+                prepared_val,
+                _trend_rule_signals(prepared_val),
+                symbol=symbol,
+                horizon_bars=horizon_bars,
+            ),
+        }
+        fold_payload["models"]["mean_reversion"] = {
+            "threshold": 0.0,
+            "metrics": _simulate_signals(
+                prepared_val,
+                _mean_reversion_rule_signals(prepared_val),
+                symbol=symbol,
+                horizon_bars=horizon_bars,
+            ),
+        }
+        fold_payload["models"]["flat"] = {
+            "threshold": 0.0,
+            "metrics": _flat_baseline_metrics(),
+        }
         fold_reports.append(fold_payload)
 
     prepared_trainable = _prepare_targets(
@@ -331,6 +409,57 @@ def run_edge_baseline_research(
         }
         if float(ridge_metrics["expectancy_usd"]) > 0.0 and int(ridge_metrics["trade_count"]) >= effective_min_trade_count:
             passing_models.append("ridge_signed_target")
+
+        tree = DecisionTreeRegressor(max_depth=3, random_state=42)
+        tree.fit(x_trainable, prepared_trainable["signed_target"].to_numpy(dtype=np.float64))
+        tree_holdout = np.asarray(tree.predict(x_holdout), dtype=np.float64)
+        tree_signals = np.zeros(len(prepared_holdout), dtype=np.int8)
+        tree_signals[tree_holdout >= min_edge_pips] = 1
+        tree_signals[tree_holdout <= -min_edge_pips] = -1
+        tree_metrics = _simulate_signals(prepared_holdout, tree_signals, symbol=symbol, horizon_bars=horizon_bars)
+        holdout_models["tree_signed_target"] = {
+            "threshold": float(min_edge_pips),
+            "metrics": tree_metrics,
+        }
+        if float(tree_metrics["expectancy_usd"]) > 0.0 and int(tree_metrics["trade_count"]) >= effective_min_trade_count:
+            passing_models.append("tree_signed_target")
+
+        trend_rule_metrics = _simulate_signals(
+            prepared_holdout,
+            _trend_rule_signals(prepared_holdout),
+            symbol=symbol,
+            horizon_bars=horizon_bars,
+        )
+        holdout_models["trend_rule"] = {
+            "threshold": 0.0,
+            "metrics": trend_rule_metrics,
+        }
+        if (
+            float(trend_rule_metrics["expectancy_usd"]) > 0.0
+            and int(trend_rule_metrics["trade_count"]) >= effective_min_trade_count
+        ):
+            passing_models.append("trend_rule")
+
+        mean_reversion_metrics = _simulate_signals(
+            prepared_holdout,
+            _mean_reversion_rule_signals(prepared_holdout),
+            symbol=symbol,
+            horizon_bars=horizon_bars,
+        )
+        holdout_models["mean_reversion"] = {
+            "threshold": 0.0,
+            "metrics": mean_reversion_metrics,
+        }
+        if (
+            float(mean_reversion_metrics["expectancy_usd"]) > 0.0
+            and int(mean_reversion_metrics["trade_count"]) >= effective_min_trade_count
+        ):
+            passing_models.append("mean_reversion")
+
+        holdout_models["flat"] = {
+            "threshold": 0.0,
+            "metrics": _flat_baseline_metrics(),
+        }
 
     report = {
         "symbol": str(symbol).upper(),
