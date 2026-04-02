@@ -226,10 +226,13 @@ def _compute_raw(df: pd.DataFrame, *, latest_only_hurst: bool = False, fast_mode
 
     # ── UTC DatetimeIndex ────────────────────────────────────────────────────
     if not isinstance(df.index, pd.DatetimeIndex):
-        if "Gmt time" in df.columns:
-            df["Gmt time"] = pd.to_datetime(df["Gmt time"], utc=True, errors="coerce")
-            df = df.set_index("Gmt time")
+        gmt_col = next((c for c in df.columns if c.lower() == "gmt time"), None)
+        if gmt_col:
+            df[gmt_col] = pd.to_datetime(df[gmt_col], utc=True, errors="coerce")
+            df = df.set_index(gmt_col)
         else:
+            # Dangerous fallback - log it!
+            print("[FeatureEngine] WARNING: 'Gmt time' column not found. Using synthetic index.")
             df.index = pd.date_range("2020-01-01", periods=len(df), freq="h", tz="UTC")
     elif df.index.tz is None:
         df.index = df.index.tz_localize("UTC")
@@ -248,11 +251,12 @@ def _compute_raw(df: pd.DataFrame, *, latest_only_hurst: bool = False, fast_mode
         if col in df.columns:
             df[col] = df[col].astype(np.float64)
 
-    # ── Temporal features (UTC cyclical) ─────────────────────────────────────
-    df["hour_sin"] = np.sin(2 * np.pi * df.index.hour / 24)
-    df["hour_cos"] = np.cos(2 * np.pi * df.index.hour / 24)
-    df["day_sin"]  = np.sin(2 * np.pi * df.index.dayofweek / 5)
-    df["day_cos"]  = np.cos(2 * np.pi * df.index.dayofweek / 5)
+    # ── Temporal features (UTC cyclical) ───────────────────────────────────
+    # We use a 7-day cycle and 24-hour cycle for robust regime awareness.
+    df["hour_sin"] = np.sin(2 * np.pi * df.index.hour / 24.0).astype(np.float32)
+    df["hour_cos"] = np.cos(2 * np.pi * df.index.hour / 24.0).astype(np.float32)
+    df["day_sin"]  = np.sin(2 * np.pi * df.index.dayofweek / 7.0).astype(np.float32)
+    df["day_cos"]  = np.cos(2 * np.pi * df.index.dayofweek / 7.0).astype(np.float32)
 
     # ── Log return ───────────────────────────────────────────────────────────
     df["log_return"] = np.log(df["Close"] / df["Close"].shift(1))
@@ -299,8 +303,9 @@ def _compute_raw(df: pd.DataFrame, *, latest_only_hurst: bool = False, fast_mode
     # ── MA slopes ────────────────────────────────────────────────────────────
     df["ma20"] = pd.to_numeric(ta.sma(df["Close"], length=20), errors="coerce")
     df["ma50"] = pd.to_numeric(ta.sma(df["Close"], length=50), errors="coerce")
-    df["ma20_slope"] = df["ma20"].diff() / atr
-    df["ma50_slope"] = df["ma50"].diff() / atr
+    atr_safe = atr.fillna(1e-9).replace(0, 1e-9)
+    df["ma20_slope"] = df["ma20"].diff() / atr_safe
+    df["ma50_slope"] = df["ma50"].diff() / atr_safe
 
     # ── Hurst Exponent (rolling 100 bars) ────────────────────────────────────
     # Only compute if we have enough rows AND not in fast_mode (slow — uses vectorised R/S)
@@ -391,7 +396,7 @@ class FeatureEngine:
         raw = self._drop_invalid_feature_rows(raw)
 
         if raw.empty:
-            raise ValueError(f"DataFrame empty after indicators. Need ≥{WARMUP_BARS} rows.")
+            raise ValueError(f"DataFrame empty after indicators. Need \u2265{WARMUP_BARS} rows.")
 
         self._scaler = StandardScaler()
         feature_block = raw.loc[:, FEATURE_COLS]
@@ -440,7 +445,7 @@ class FeatureEngine:
 
     def warm_up(self, history: pd.DataFrame) -> None:
         if len(history) < WARMUP_BARS:
-            raise ValueError(f"warm_up() needs ≥{WARMUP_BARS} rows, got {len(history)}.")
+            raise ValueError(f"warm_up() needs \u2265{WARMUP_BARS} rows, got {len(history)}.")
         
         # Pre-allocate numpy buffer for high-perf pushes
         self._raw_buffer_np = np.zeros(self._buffer_size, dtype=BAR_DTYPE)
@@ -595,13 +600,12 @@ class FeatureEngine:
         # 1970-01-01 was a Thursday (3)
         day_of_week = ((ts_s // 86400) + 3) % 7
         
-        h_sin = np.sin(2 * np.pi * hour / 24)
-        h_cos = np.cos(2 * np.pi * hour / 24)
-        d_sin = np.sin(2 * np.pi * day_of_week / 5) # Note: we use 5 for trading days
-        d_cos = np.cos(2 * np.pi * day_of_week / 5)
+        h_sin = np.sin(2 * np.pi * hour / 24.0)
+        h_cos = np.cos(2 * np.pi * hour / 24.0)
+        d_sin = np.sin(2 * np.pi * day_of_week / 7.0)
+        d_cos = np.cos(2 * np.pi * day_of_week / 7.0)
 
         # Assemble feature vector in FEATURE_COLS order
-        # log_return, body_size, candle_range, ma20_slope, ma50_slope, vol_norm_atr, spread_z, time_delta_z, h_sin, h_cos, d_sin, d_cos
         feat_dict = {
             "log_return": log_ret,
             "body_size": body_size,

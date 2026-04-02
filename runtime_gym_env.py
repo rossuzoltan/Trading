@@ -96,6 +96,7 @@ class RuntimeGymConfig:
     entry_spread_z_limit: float = 1.5
     window_size: int = 1
     random_start: bool = False
+    slim_info: bool = False
 
 
 def compute_participation_bonus(
@@ -595,6 +596,11 @@ class RuntimeGymEnv(gym.Env):
 
         self._reset_internal()
 
+    def set_participation_bonus_value(self, value: float) -> None:
+        """Dynamically update the participation bonus magnitude from the curriculum callback."""
+        if self._recovery_config and "participation_bonus" in self._recovery_config:
+            self._recovery_config["participation_bonus"]["bonus_value"] = float(value)
+
     def _reset_internal(self) -> None:
         self._bar_index = 0
         self._runtime = None
@@ -1020,23 +1026,29 @@ class RuntimeGymEnv(gym.Env):
             entry_signal_direction = int(result.action.direction)
             self._pending_entry_direction = entry_signal_direction
 
-        executed_events = [dict(item) for item in result.executed_events]
-        closed_trades = [dict(item) for item in result.closed_trades]
-        reward_components.setdefault("holding_penalty_applied", 0.0)
-        reward_components["pnl_reward"] = float(
-            reward_components.get("reward_raw_unclipped", reward_components.get("pnl_reward", 0.0))
-        )
-        reward_components["slippage_penalty_applied"] = self._estimate_slippage_penalty(
-            turnover_lots=turnover_lots,
-            current_price=float(bar.close),
-            equity_base=prev_equity,
-        )
-        reward_components["turnover_penalty_applied"] = self._estimate_turnover_penalty(reward_components)
-        reward_components["downside_risk_penalty_applied"] = self._estimate_downside_risk_penalty(reward_components)
-        reward_components["rapid_reversal_penalty_applied"] = self._estimate_rapid_reversal_penalty(
-            entry_filled_direction
-        )
-        reward_components["holding_penalty_applied"] = self._estimate_holding_penalty(closed_trades)
+        executed_events = [dict(item) for item in result.executed_events] if result.executed_events else []
+        closed_trades = [dict(item) for item in result.closed_trades] if result.closed_trades else []
+        
+        # Micro-optimization: Skip expensive penalty lookups if nothing happened and we are flat
+        if turnover_lots > 0.0 or closed_trades:
+            reward_components["slippage_penalty_applied"] = self._estimate_slippage_penalty(
+                turnover_lots=turnover_lots,
+                current_price=float(bar.close),
+                equity_base=prev_equity,
+            )
+            reward_components["turnover_penalty_applied"] = self._estimate_turnover_penalty(reward_components)
+            reward_components["downside_risk_penalty_applied"] = self._estimate_downside_risk_penalty(reward_components)
+            reward_components["rapid_reversal_penalty_applied"] = self._estimate_rapid_reversal_penalty(
+                entry_filled_direction
+            )
+            reward_components["holding_penalty_applied"] = self._estimate_holding_penalty(closed_trades)
+        else:
+            reward_components["slippage_penalty_applied"] = 0.0
+            reward_components["turnover_penalty_applied"] = 0.0
+            reward_components["downside_risk_penalty_applied"] = 0.0
+            reward_components["rapid_reversal_penalty_applied"] = 0.0
+            reward_components["holding_penalty_applied"] = 0.0
+
         terminated = bool(self._bar_index >= len(self._bars) - 1 or result.kill_switch_active)
         finalization: dict[str, Any] | None = None
         if terminated and not result.kill_switch_active:
@@ -1072,6 +1084,11 @@ class RuntimeGymEnv(gym.Env):
         )
         reward_components.update(composed_fields)
         reward_components["net_reward_with_bonus"] = float(final_reward)
+        reward_components["reward_unclipped_net"] = float(base_reward_unclipped + participation_bonus)
+        
+        # Track clip hits for telemetry
+        reward_components["clip_hit_high"] = float(reward_components["reward_unclipped_net"] >= self.config.reward_clip_high)
+        reward_components["clip_hit_low"] = float(reward_components["reward_unclipped_net"] <= self.config.reward_clip_low)
         if participation_bonus > 0.0:
             self._training_diagnostics.mark_bonus_awarded(self._global_step)
             self._runtime.confirmed_position.last_reward = float(final_reward)
@@ -1095,6 +1112,21 @@ class RuntimeGymEnv(gym.Env):
         forced_close_count = int(finalization["forced_close_count_delta"]) if finalization is not None else 0
         executed_order_count = int(len(executed_events)) + int(finalization["executed_order_count_delta"]) if finalization is not None else int(len(executed_events))
         trade_count = int(len(closed_trades)) + int(finalization["trade_closed_count_delta"]) if finalization is not None else int(len(closed_trades))
+        
+        if self.config.slim_info:
+            is_event = (
+                terminated or 
+                trade_count > 0 or 
+                executed_order_count > 0 or
+                bool(result.kill_switch_active) or 
+                bool(reward_components.get("forced_close_applied", 0.0) > 0.0) or
+                bool(reward_components.get("participation_bonus_applied", 0.0) > 0.0)
+            )
+            if not is_event:
+                if _GYM:
+                    return result.observation, float(final_reward), terminated, truncated, {}
+                return result.observation, float(final_reward), bool(terminated or truncated), {}
+
         gross_pnl_usd_delta = float(sum(float(trade.get("gross_pnl_usd", 0.0)) for trade in closed_trades))
         net_pnl_usd_delta = float(sum(float(trade.get("net_pnl_usd", 0.0)) for trade in closed_trades))
         transaction_cost_usd_delta = float(sum(float(trade.get("transaction_cost_usd", 0.0)) for trade in closed_trades))
@@ -1111,6 +1143,7 @@ class RuntimeGymEnv(gym.Env):
             closed_trades_delta.extend(
                 dict(item) for item in list(finalization.get("closed_trades", []) or []) if isinstance(item, dict)
             )
+
         info = {
             "equity": float(result.equity),
             "total_equity_usd": float(result.equity),
@@ -1125,6 +1158,8 @@ class RuntimeGymEnv(gym.Env):
                 reward_components.get("holding_penalty_applied", 0.0)
             ),
             "reward_components": dict(reward_components),
+            "reward_unclipped": float(reward_components.get("reward_unclipped_net", final_reward)),
+            "clip_hit_rate": float(reward_components.get("clip_hit_high", 0) + reward_components.get("clip_hit_low", 0)),
             "participation_bonus_applied": float(reward_components.get("participation_bonus_applied", 0.0)),
             "selected_action_index": int(result.action_index),
             "selected_action_label": action_label(result.action),

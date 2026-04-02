@@ -217,6 +217,33 @@ class ForexTradingEnv(gym.Env):
 
         self._reset_internal()
 
+    def set_participation_bonus_value(self, value: float) -> None:
+        """Dynamically update the per-bar participation bonus during training."""
+        self.participation_bonus_value = float(value)
+
+    def action_masks(self) -> np.ndarray:
+        """
+        Return a binary mask for the action space.
+        1: Action is allowed.
+        0: Action is forbidden.
+        """
+        mask = np.ones(self.action_space.n, dtype=np.int8)
+        for i in range(self.action_space.n):
+            spec = self._action_map[i]
+            act_type = spec.action_type.value
+            
+            if act_type == "OPEN":
+                # Forbidden if we already have a position
+                if self.position != 0:
+                    mask[i] = 0
+            elif act_type == "CLOSE":
+                # Forbidden if we are flat
+                if self.position == 0:
+                    mask[i] = 0
+                    
+        return mask
+
+
     # ── Internal helpers ─────────────────────────────────────────────────────
 
     def _reset_internal(self) -> None:
@@ -363,7 +390,7 @@ class ForexTradingEnv(gym.Env):
     def _slippage(self) -> float:
         if self.max_slippage_pips <= 0:
             return 0.0
-        return float(np.random.uniform(0.5, self.max_slippage_pips))
+        return float(np.random.uniform(0.0, self.max_slippage_pips))
 
     def _current_exposure_lots(self) -> float:
         if self.position == 0:
@@ -429,7 +456,7 @@ class ForexTradingEnv(gym.Env):
         # ── Dynamic Position Sizing (Phase 13: Risk Parity) ──────────────────
         if self.vol_scaling:
             # Risk X% of equity (e.g. $10) per trade.
-            risk_usd = self.equity_usd * self.target_risk_pct
+            risk_usd = max(self.equity_usd * self.target_risk_pct, 0.01)
             sl_pips  = sl_dist / self.pip_value
             if sl_pips > 0:
                 pip_val_base = (
@@ -654,6 +681,7 @@ class ForexTradingEnv(gym.Env):
                 self.trade_stats["executed_open_count"] += 1
                 if direction == 1: self.trade_stats["entered_long_count"] += 1
                 else: self.trade_stats["entered_short_count"] += 1
+                # Removed redundant _check_sl_tp to maintain causal integrity for trades opened at the close.
             else:
                 self.trade_stats["trade_reject_count"] += 1
         elif act_type == "CLOSE":
@@ -738,7 +766,7 @@ class ForexTradingEnv(gym.Env):
             # ── Phase 13: Regime-Aware Reward Intelligence ───────────────────
             # Hurst > 0.6: Trending. Reward holding profitable trends.
             # Hurst < 0.4: Mean-reverting. Penalise holding long trades.
-        self.last_reward = reward
+        self.last_reward = float(np.clip(reward, -10.0, 10.0))
         self.prev_total_equity = total_equity if total_equity > 0 else 1e-6
 
         self.current_step     += 1

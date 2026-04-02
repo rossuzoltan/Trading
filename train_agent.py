@@ -169,6 +169,16 @@ def _apply_profile_override(current_value: Any, env_var_name: str, override_valu
 
 
 # ── Curriculum config ─────────────────────────────────────────────────────────
+_BONUS_ANNEAL_START_STEP = 1_000_000
+_BONUS_ANNEAL_END_STEP   = 2_500_000
+_PARTICIPATION_BONUS_UNTIL_DEFAULT = 2_500_000
+_ENTROPY_PHASE_1_UNTIL_DEFAULT = 1_000_000
+_ENTROPY_PHASE_2_UNTIL_DEFAULT = 2_500_000
+_ENTROPY_MIN_FLOOR = 0.002  # Raised from 0.001 to prevent total policy freeze
+
+TRAIN_EXPERIMENT_PROFILE = os.environ.get("TRAIN_EXPERIMENT_PROFILE", "default").strip().lower()
+TRAIN_EXPERIMENT_PROFILE_SETTINGS = _resolve_training_experiment_profile(TRAIN_EXPERIMENT_PROFILE)
+
 SLIPPAGE_START   = DEFAULT_SLIPPAGE_START_PIPS
 SLIPPAGE_END     = DEFAULT_SLIPPAGE_END_PIPS
 TOTAL_TIMESTEPS  = int(os.environ.get("TRAIN_TOTAL_TIMESTEPS", "3000000"))
@@ -177,7 +187,7 @@ TRAIN_ENV_MODE = os.environ.get("TRAIN_ENV_MODE", "runtime").strip().lower()
 TRAIN_ACTION_SPACE_MODE = os.environ.get("TRAIN_ACTION_SPACE_MODE", "simple").strip().lower() or "simple"
 TRAIN_SIMPLE_ACTION_SL_MULT = float(os.environ.get("TRAIN_SIMPLE_ACTION_SL_MULT", "1.5"))
 TRAIN_SIMPLE_ACTION_TP_MULT = float(os.environ.get("TRAIN_SIMPLE_ACTION_TP_MULT", "3.0"))
-PPO_LEARNING_RATE = float(os.environ.get("TRAIN_PPO_LEARNING_RATE", str(DEFAULT_LEARNING_RATE)))
+PPO_LEARNING_RATE = float(os.environ.get("TRAIN_PPO_LEARNING_RATE", "4e-4"))
 PPO_MIN_LEARNING_RATE = float(os.environ.get("TRAIN_PPO_MIN_LEARNING_RATE", str(DEFAULT_MIN_LEARNING_RATE)))
 PPO_TARGET_KL = float(os.environ.get("TRAIN_PPO_TARGET_KL", str(DEFAULT_TARGET_KL)))
 MIN_EXPLAINED_VARIANCE = float(os.environ.get("TRAIN_MIN_EXPLAINED_VARIANCE", "0.30"))
@@ -272,15 +282,24 @@ _PHASE_2_UNTIL_DEFAULT = max(
     _timed_recovery_step(fraction=2.0 / 3.0, minimum=max(_PHASE_1_UNTIL_DEFAULT + 1, 100_000)),
     _PHASE_1_UNTIL_DEFAULT + 1,
 )
-_ENTROPY_PHASE_1_UNTIL_DEFAULT = _timed_recovery_step(fraction=0.20, minimum=25_000)
+def get_entropy_coef(current_step: int) -> float:
+    if current_step < _ENTROPY_PHASE_1_UNTIL_DEFAULT:
+        return 0.02
+    if current_step < _ENTROPY_PHASE_2_UNTIL_DEFAULT:
+        return 0.005
+    return _ENTROPY_MIN_FLOOR
+_ENTROPY_PHASE_1_UNTIL_DEFAULT = _timed_recovery_step(fraction=0.15, minimum=25_000)
 _ENTROPY_PHASE_2_UNTIL_DEFAULT = max(
     _timed_recovery_step(
-        fraction=0.60,
+        fraction=0.40,
+        maximum=1_200_000,
         minimum=max(_ENTROPY_PHASE_1_UNTIL_DEFAULT + 1, 75_000),
     ),
     _ENTROPY_PHASE_1_UNTIL_DEFAULT + 1,
 )
 _PARTICIPATION_BONUS_UNTIL_DEFAULT = _timed_recovery_step(fraction=0.33, minimum=20_000, maximum=1_000_000)
+_BONUS_ANNEAL_START_STEP = 1_000_000
+_BONUS_ANNEAL_END_STEP = 2_500_000
 
 TRAINING_RECOVERY_CONFIG: dict[str, Any] = {
     "training_stage": TRAINING_STAGE,
@@ -529,17 +548,40 @@ def get_current_phase(global_step: int, cfg: dict[str, Any]) -> int:
         if int(global_step) <= int(phase["until_step"]):
             return idx
     return len(phases)
-
-
 def get_current_ent_coef(global_step: int, cfg: dict[str, Any]) -> float:
     ecfg = cfg.get("entropy_schedule", {}) or {}
     if not bool(ecfg.get("enabled", False)):
-        return float(ecfg.get("final_ent_coef", PPO_ENT_COEF))
-    if int(global_step) <= int(ecfg.get("phase_1_until", 0)):
-        return float(ecfg.get("initial_ent_coef", PPO_ENT_COEF))
-    if int(global_step) <= int(ecfg.get("phase_2_until", 0)):
-        return float(ecfg.get("mid_ent_coef", PPO_ENT_COEF))
-    return float(ecfg.get("final_ent_coef", PPO_ENT_COEF))
+        return float(PPO_ENT_COEF)
+
+    step = int(global_step)
+    phase_1_until = int(ecfg.get("phase_1_until", _ENTROPY_PHASE_1_UNTIL_DEFAULT))
+    phase_2_until = int(ecfg.get("phase_2_until", _ENTROPY_PHASE_2_UNTIL_DEFAULT))
+
+    if step <= phase_1_until:
+        return float(ecfg.get("initial_ent_coef", 0.02))
+    if step <= phase_2_until:
+        return float(ecfg.get("mid_ent_coef", 0.005))
+    return float(ecfg.get("final_ent_coef", 0.001))
+
+
+def get_current_participation_bonus(global_step: int, cfg: dict[str, Any]) -> float:
+    """Linearly anneals participation bonus from its initial value to 0 over a specific range."""
+    pcfg = cfg.get("participation_bonus", {}) or {}
+    if not bool(pcfg.get("enabled", False)):
+        return 0.0
+    
+    base_bonus = float(pcfg.get("bonus_value", 0.00025))
+    step = int(global_step)
+    
+    # Annealing schedule: Full bonus until 1M, Decays to 0 at 2.5M
+    if step < _BONUS_ANNEAL_START_STEP:
+        return base_bonus
+    if step >= _BONUS_ANNEAL_END_STEP:
+        return 0.0
+    
+    # Linear interpolation
+    progress = (step - _BONUS_ANNEAL_START_STEP) / (_BONUS_ANNEAL_END_STEP - _BONUS_ANNEAL_START_STEP)
+    return float(base_bonus * (1.0 - progress))
 
 
 def get_final_slippage_pips(cfg: dict[str, Any]) -> float:
@@ -907,6 +949,7 @@ class CurriculumCallback(BaseCallback):
         step = int(self.num_timesteps)
         current_slippage = get_current_slippage_pips(step, self.recovery_cfg)
         current_ent_coef = get_current_ent_coef(step, self.recovery_cfg)
+        current_bonus = get_current_participation_bonus(step, self.recovery_cfg)
 
         targets = self._iter_target_envs()
         for env in targets:
@@ -915,6 +958,10 @@ class CurriculumCallback(BaseCallback):
             for env in targets:
                 self._set_env_method(env, "set_slippage_pips", current_slippage)
             self.last_slippage = float(current_slippage)
+        
+        # [ELITE] Dynamically update participation bonus magnitude
+        for env in targets:
+            self._set_env_method(env, "set_participation_bonus_value", current_bonus)
 
         # MaskablePPO.train() reads self.ent_coef directly on each update in the
         # installed sb3_contrib version, so updating the scalar here affects the
@@ -938,13 +985,16 @@ class CurriculumCallback(BaseCallback):
                 (self.recovery_cfg.get("participation_bonus", {}) or {}).get("enabled", False)
             ),
             "participation_bonus_active": bool(is_participation_bonus_active(step, self.recovery_cfg)),
+            "current_bonus_value": float(get_current_participation_bonus(step, self.recovery_cfg)),
         }
 
     def _on_training_start(self) -> None:
         self._apply_curriculum_state()
 
-    def _on_step(self) -> bool:
+    def _on_rollout_start(self) -> None:
         self._apply_curriculum_state()
+
+    def _on_step(self) -> bool:
         if self.verbose and (
             self._last_logged_step < 0 or (self.num_timesteps - self._last_logged_step) >= self.LOG_EVERY_STEPS
         ):
@@ -954,7 +1004,8 @@ class CurriculumCallback(BaseCallback):
                 f"[Curriculum] Step {self.num_timesteps:,} | "
                 f"phase={snapshot['current_phase']} | "
                 f"slippage={snapshot['current_slippage_pips']:.2f} pips | "
-                f"ent_coef={snapshot['entropy_coef']:.4f}"
+                f"ent_coef={snapshot['entropy_coef']:.4f} | "
+                f"bonus={snapshot['current_bonus_value']:.6f}"
             )
         return True
 
@@ -1112,9 +1163,13 @@ class EnhancedLoggingCallback(BaseCallback):
     def _on_step(self) -> bool:
         # Collect metrics from all vector environment workers
         infos = self.locals.get("infos")
-        if infos:
-            # Support both RuntimeGymEnv and ForexTradingEnv info dict formats
-            for info in infos:
+        if not infos:
+            return True
+            
+        # Support both RuntimeGymEnv and ForexTradingEnv info dict formats
+        for info in infos:
+            if not info:
+                continue
                 # 1. Rewards: use simplified top-level keys now shared by both env types
                 self.pnl_buffer.append(float(info.get("reward_pnl", 0.0)))
                 self.bonus_buffer.append(float(info.get("reward_bonus", 0.0)))
@@ -1137,6 +1192,23 @@ class EnhancedLoggingCallback(BaseCallback):
             self.ram_usage_buffer.append(sys_metrics.ram_pct)
         return True
 
+    def _get_current_curriculum_stats(self) -> dict[str, float]:
+        """Helper to extract current curriculum values from env/model."""
+        step = int(self.num_timesteps)
+        # Attempt to find the training env's attributes
+        try:
+            # curriculum_callback might have been installed on the model
+            for cb in self.model.callback.callbacks:
+                if cb.__class__.__name__ == "CurriculumCallback":
+                    return {
+                        "slippage": float(cb.last_slippage or 0.0),
+                        "entropy": float(cb.last_ent_coef or 0.0),
+                        "bonus": float(get_current_participation_bonus(step, cb.recovery_cfg))
+                    }
+        except Exception:
+            pass
+        return {"slippage": 0.0, "entropy": 0.0, "bonus": 0.0}
+
     def _on_rollout_end(self) -> None:
         if not self.pnl_buffer:
             return
@@ -1157,11 +1229,31 @@ class EnhancedLoggingCallback(BaseCallback):
         for act in standard_actions:
             count = int(action_counts.get(act, 0))
             audit_metrics[f"action_count_{act.lower()}"] = count
-            audit_metrics[f"action_pct_{act.lower()}"] = float(count / total_steps)
-            
-            # Record to SB3 logger (for TensorBoard/Stdout)
-            self.logger.record(f"rollout/action_count_{act.lower()}", count)
             self.logger.record(f"rollout/action_pct_{act.lower()}", count / total_steps)
+
+        # 1.1 Behavioral Insights (Dominance detection)
+        # HOLD-dominant if > 95% of steps are HOLD
+        is_hold_dominant = float(action_counts.get("HOLD", 0) / total_steps > 0.95)
+        # Entry-dominant if > 2.5% of steps are LONG/SHORT entries
+        is_entry_dominant = float((action_counts.get("LONG", 0) + action_counts.get("SHORT", 0)) / total_steps > 0.025)
+        
+        self.logger.record("rollout/is_hold_dominant", is_hold_dominant)
+        self.logger.record("rollout/is_entry_dominant", is_entry_dominant)
+
+        # 1.2 Robust Bonus Dependency Metric
+        sum_abs_pnl = float(np.sum(np.abs(pnls)))
+        sum_abs_bonus = float(np.sum(np.abs(bonuses)))
+        sum_abs_penalty = float(np.sum(np.abs(penalties)))
+        total_abs_magnitude = sum_abs_pnl + sum_abs_bonus + sum_abs_penalty + 1e-9
+        
+        bonus_share = sum_abs_bonus / total_abs_magnitude
+        self.logger.record("rollout/bonus_share_of_total_reward", bonus_share)
+
+        # 1.3 Track Curriculum Progress (Observation only)
+        curr_stats = self._get_current_curriculum_stats()
+        self.logger.record("rollout/curr_slippage_pips", curr_stats["slippage"])
+        self.logger.record("rollout/curr_entropy_coef", curr_stats["entropy"])
+        self.logger.record("rollout/curr_bonus_value", curr_stats["bonus"])
 
         # 2. Reward Component Breakdown
         avg_pnl = float(np.mean(pnls))
@@ -1566,6 +1658,7 @@ def make_env(
     bars: list[Any] | None = None,
     risk_limits=None,
     alpha_gate=None,
+    slim_info: bool = False,
 ):
     def _init():
         if TRAIN_ENV_MODE == "runtime":
@@ -1600,6 +1693,7 @@ def make_env(
                     entry_spread_z_limit=float(TRAIN_ENTRY_SPREAD_Z_LIMIT),
                     window_size=int(TRAIN_WINDOW_SIZE),
                     random_start=bool(random_start),
+                    slim_info=slim_info,
                 ),
                 recovery_config=copy.deepcopy(recovery_config) if recovery_config is not None else None,
             )
@@ -1628,10 +1722,12 @@ def make_env(
 
 
 def wrap_vecnormalize(vec_env, *, training: bool):
+    # CRITICAL: norm_obs MUST be False because our FeatureEngine/global_scaler 
+    # already handles scaling. Double-scaling destroys the feature distributions.
     return VecNormalize(
         vec_env,
         training=training,
-        norm_obs=True,
+        norm_obs=False,
         norm_reward=False,
         clip_obs=10.0,
         clip_reward=10.0,
@@ -1639,8 +1735,10 @@ def wrap_vecnormalize(vec_env, *, training: bool):
 
 
 def sync_vecnormalize_stats(source: VecNormalize, target: VecNormalize) -> None:
-    target.obs_rms = copy.deepcopy(source.obs_rms)
-    target.ret_rms = copy.deepcopy(source.ret_rms)
+    if hasattr(source, 'obs_rms') and source.obs_rms is not None:
+        target.obs_rms = copy.deepcopy(source.obs_rms)
+    if hasattr(source, 'ret_rms') and source.ret_rms is not None:
+        target.ret_rms = copy.deepcopy(source.ret_rms)
     target.training = False
     target.norm_reward = False
 
@@ -2779,8 +2877,8 @@ def main() -> None:
                 # Use pre-fitted global_scaler for consistency across all folds/symbols
                 fold_train = raw_fold_train.copy()
                 fold_val = raw_fold_val.copy()
-                fold_train.loc[:, FEATURE_COLS] = global_scaler.transform(fold_train.loc[:, FEATURE_COLS])
-                fold_val.loc[:, FEATURE_COLS] = global_scaler.transform(fold_val.loc[:, FEATURE_COLS])
+                fold_train.loc[:, FEATURE_COLS] = global_scaler.transform(fold_train.loc[:, FEATURE_COLS]).astype(np.float32)
+                fold_val.loc[:, FEATURE_COLS] = global_scaler.transform(fold_val.loc[:, FEATURE_COLS]).astype(np.float32)
                 fold_scaler = global_scaler
                 
                 fold_trains.append(fold_train)
@@ -2868,6 +2966,7 @@ def main() -> None:
                 bars=sym_bars_fold.get(sym),
                 risk_limits=train_risk_limits,
                 alpha_gate=fold_alpha_gates.get(sym),
+                slim_info=True,
             )
 
         val_symbol = primary_symbol
@@ -2965,6 +3064,7 @@ def main() -> None:
                         recovery_config=None,
                         risk_limits=eval_risk_limits,
                         alpha_gate=fold_alpha_gates.get(val_symbol),
+                        slim_info=False,
                     )
                 ]
             )
