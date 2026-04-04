@@ -123,6 +123,12 @@ class StubFeatureEngine:
             ]
         )
         self._latest = np.array([0.1, 0.2, 0.3], dtype=np.float32)
+        self._latest_raw = np.array(
+            [0.0] * (len(FEATURE_COLS) - 1) + [0.0],
+            dtype=np.float32,
+        )
+        self._latest_aux = {"atr_14": 0.0010, "spread_z": 0.0, "time_delta_z": 0.0}
+        self._feature_fast = False
 
     def push(self, bar_series: pd.Series) -> None:
         self._latest = np.array(
@@ -133,6 +139,8 @@ class StubFeatureEngine:
             ],
             dtype=np.float32,
         )
+        self._latest_raw = np.zeros(len(FEATURE_COLS), dtype=np.float32)
+        self._latest_raw[FEATURE_COLS.index("spread_z")] = 0.0
         self._buffer = pd.concat(
             [
                 self._buffer,
@@ -148,9 +156,27 @@ class StubFeatureEngine:
             ignore_index=True,
         )
 
+    def push_record(self, record, *, refresh_buffer: bool | None = None) -> None:
+        bar_series = pd.Series(
+            {
+                "Close": float(record["close"]),
+                "Volume": float(record["volume"]),
+                "time_delta_s": float(record["time_delta_s"]),
+            }
+        )
+        self.push(bar_series)
+
     @property
     def latest_observation(self) -> np.ndarray:
         return self._latest
+
+    @property
+    def latest_features_raw(self) -> np.ndarray:
+        return np.array(self._latest_raw, copy=True)
+
+    @property
+    def latest_aux_data(self) -> dict[str, float]:
+        return dict(self._latest_aux)
 
     def recent_observation_window(self, window_size: int) -> np.ndarray:
         window = max(int(window_size or 1), 1)
@@ -618,19 +644,32 @@ class RuntimeRefactorTests(unittest.TestCase):
 
         train_vec = wrap_vecnormalize(DummyVecEnv([make_env]), training=True)
         val_vec = wrap_vecnormalize(DummyVecEnv([make_env]), training=False)
-        train_vec.obs_rms.mean[:] = 3.0
-        train_vec.obs_rms.var[:] = 4.0
-        train_vec.ret_rms.mean = 2.0
-        train_vec.ret_rms.var = 5.0
-        sync_vecnormalize_stats(train_vec, val_vec)
-        np.testing.assert_allclose(val_vec.obs_rms.mean, train_vec.obs_rms.mean)
-        np.testing.assert_allclose(val_vec.obs_rms.var, train_vec.obs_rms.var)
-        self.assertEqual(val_vec.ret_rms.mean, train_vec.ret_rms.mean)
-        self.assertEqual(val_vec.ret_rms.var, train_vec.ret_rms.var)
-        self.assertFalse(val_vec.training)
-        self.assertFalse(val_vec.norm_reward)
-        train_vec.close()
-        val_vec.close()
+        try:
+            # NOTE: This project intentionally sets VecNormalize(norm_obs=False) to avoid
+            # double-scaling (FeatureEngine already scales features). Newer SB3 versions
+            # omit the `obs_rms` attribute entirely when norm_obs=False, so observation
+            # stats sync is optional and should not be required by this test.
+            if hasattr(train_vec, "obs_rms") and train_vec.obs_rms is not None:
+                train_vec.obs_rms.mean[:] = 3.0
+                train_vec.obs_rms.var[:] = 4.0
+
+            train_vec.ret_rms.mean = 2.0
+            train_vec.ret_rms.var = 5.0
+            sync_vecnormalize_stats(train_vec, val_vec)
+
+            if hasattr(train_vec, "obs_rms") and train_vec.obs_rms is not None:
+                np.testing.assert_allclose(val_vec.obs_rms.mean, train_vec.obs_rms.mean)
+                np.testing.assert_allclose(val_vec.obs_rms.var, train_vec.obs_rms.var)
+            else:
+                self.assertFalse(hasattr(val_vec, "obs_rms") and val_vec.obs_rms is not None)
+
+            self.assertEqual(val_vec.ret_rms.mean, train_vec.ret_rms.mean)
+            self.assertEqual(val_vec.ret_rms.var, train_vec.ret_rms.var)
+            self.assertFalse(val_vec.training)
+            self.assertFalse(val_vec.norm_reward)
+        finally:
+            train_vec.close()
+            val_vec.close()
 
     def test_jpy_pip_logic_is_symbol_aware(self):
         self.assertEqual(pip_size_for_symbol("EURUSD"), 0.0001)

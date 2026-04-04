@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
+from domain.models import BAR_DTYPE
 from event_pipeline import RuntimeEngine, RuntimeSnapshot
 from feature_engine import FEATURE_COLS, FeatureEngine, WARMUP_BARS, _compute_raw
 from runtime_common import ConfirmedPosition, build_action_map, build_state_vector
@@ -93,6 +94,38 @@ class RewardFeatureRedesignTests(unittest.TestCase):
         self.assertEqual(len(expected), len(engine.latest_observation))
         for legacy_col in ("rsi_14", "macd", "macdh", "bb_bw", "bb_pct", "adx", "hurst_exp", "frac_diff_z"):
             self.assertIn(legacy_col, raw.columns)
+
+    def test_feature_engine_fast_push_record_matches_compute_raw_latest_row(self) -> None:
+        history = _make_history(WARMUP_BARS + 40)
+        baseline_raw = _compute_raw(history).dropna(subset=FEATURE_COLS)
+        scaler = StandardScaler().fit(baseline_raw.loc[:, FEATURE_COLS])
+        engine = FeatureEngine.from_scaler(scaler)
+        engine.warm_up(history.iloc[:-1])
+
+        last_timestamp = history.index[-1]
+        last_row = history.iloc[-1]
+        record = np.zeros((), dtype=BAR_DTYPE)
+        record["timestamp_s"] = last_timestamp.timestamp()
+        record["open"] = float(last_row["Open"])
+        record["high"] = float(last_row["High"])
+        record["low"] = float(last_row["Low"])
+        record["close"] = float(last_row["Close"])
+        record["volume"] = float(last_row["Volume"])
+        record["avg_spread"] = float(last_row["avg_spread"])
+        record["time_delta_s"] = float(last_row["time_delta_s"])
+
+        engine.push_record(record, refresh_buffer=False)
+
+        expected_row = baseline_raw.iloc[-1]
+        expected_raw = expected_row.loc[FEATURE_COLS].to_numpy(dtype=np.float32, copy=True)
+        expected_scaled = scaler.transform(expected_row.loc[FEATURE_COLS].to_frame().T)[0].astype(np.float32)
+
+        np.testing.assert_allclose(engine.latest_features_raw, expected_raw, rtol=1e-4, atol=1e-4)
+        np.testing.assert_allclose(engine.latest_observation, expected_scaled, rtol=5e-3, atol=2e-3)
+        aux = engine.latest_aux_data
+        self.assertAlmostEqual(float(expected_row["spread_z"]), aux["spread_z"], places=4)
+        self.assertAlmostEqual(float(expected_row["time_delta_z"]), aux["time_delta_z"], places=4)
+        self.assertGreater(aux["atr_14"], 0.0)
 
     def test_reward_is_netted_and_components_log_the_applied_penalties(self) -> None:
         engine = self._make_runtime_engine()

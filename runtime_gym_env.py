@@ -586,6 +586,8 @@ class RuntimeGymEnv(gym.Env):
         self._runtime: RuntimeEngine | None = None
         self._last_observation: np.ndarray | None = None
         self.max_slippage_pips = float(self.config.slippage_pips)
+        self._drawdown_penalty = float(self.config.drawdown_penalty)
+        self._transaction_penalty = float(self.config.transaction_penalty)
         self._episode_start_index = 0
         self._recovery_config = copy.deepcopy(recovery_config) if recovery_config is not None else None
         self._global_step = 0
@@ -662,8 +664,8 @@ class RuntimeGymEnv(gym.Env):
             snapshot=snapshot,
             state_store=None,
             reward_scale=float(self.config.reward_scale),
-            reward_drawdown_penalty=float(self.config.drawdown_penalty),
-            reward_transaction_penalty=float(self.config.transaction_penalty),
+            reward_drawdown_penalty=float(self._drawdown_penalty),
+            reward_transaction_penalty=float(self._transaction_penalty),
             reward_clip_low=float(self.config.reward_clip_low),
             reward_clip_high=float(self.config.reward_clip_high),
             window_size=int(self.config.window_size),
@@ -739,6 +741,16 @@ class RuntimeGymEnv(gym.Env):
     def set_slippage_pips(self, value: float) -> None:
         self.max_slippage_pips = float(value)
         self._apply_runtime_slippage()
+
+    def set_transaction_penalty(self, value: float) -> None:
+        self._transaction_penalty = float(value)
+        if self._runtime is not None:
+            self._runtime.reward_transaction_penalty = float(value)
+
+    def set_drawdown_penalty(self, value: float) -> None:
+        self._drawdown_penalty = float(value)
+        if self._runtime is not None:
+            self._runtime.reward_drawdown_penalty = float(value)
 
     def set_global_step(self, value: int) -> None:
         self._global_step = int(value)
@@ -888,13 +900,21 @@ class RuntimeGymEnv(gym.Env):
         return updated_reward_components, total_turnover_lots, forced_close
 
     def action_masks(self) -> np.ndarray:
-        if self._runtime is None or self._runtime.feature_engine._buffer is None:
+        if self._runtime is None:
             return np.zeros(len(self.action_map), dtype=bool)
         self._last_alpha_gate_scores = None
-        
-        latest_row = self._runtime.feature_engine._buffer.iloc[-1]
-        spread_z = float(latest_row.get("spread_z", 0.0))
-        
+
+        feature_engine = self._runtime.feature_engine
+        latest_raw = getattr(feature_engine, "latest_features_raw", np.zeros(len(FEATURE_COLS), dtype=np.float32))
+        use_hot_path = bool(getattr(feature_engine, "_feature_fast", False)) or feature_engine._buffer is None
+        if use_hot_path:
+            spread_z = float(latest_raw[FEATURE_COLS.index("spread_z")]) if len(latest_raw) == len(FEATURE_COLS) else 0.0
+            latest_row = {col: float(latest_raw[idx]) for idx, col in enumerate(FEATURE_COLS)} if len(latest_raw) == len(FEATURE_COLS) else {}
+        else:
+            latest_buffer_row = feature_engine._buffer.iloc[-1]
+            spread_z = float(latest_buffer_row.get("spread_z", 0.0))
+            latest_row = latest_buffer_row
+
         # Base mask (spread filter and flat vs open logic)
         mask = build_action_mask(
             self.action_map,

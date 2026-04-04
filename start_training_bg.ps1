@@ -18,6 +18,35 @@ param(
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ScriptRoot
 
+function Stop-ProcessTree {
+    param([int]$RootPid)
+
+    $procs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Select-Object ProcessId,ParentProcessId
+    $children = @{}
+    foreach ($p in $procs) {
+        if (-not $children.ContainsKey([int]$p.ParentProcessId)) {
+            $children[[int]$p.ParentProcessId] = New-Object System.Collections.Generic.List[int]
+        }
+        $children[[int]$p.ParentProcessId].Add([int]$p.ProcessId)
+    }
+
+    $toStop = New-Object System.Collections.Generic.List[int]
+    $stack = New-Object System.Collections.Generic.Stack[int]
+    $stack.Push([int]$RootPid)
+    while ($stack.Count -gt 0) {
+        $pid = $stack.Pop()
+        if ($toStop.Contains($pid)) { continue }
+        $toStop.Add($pid)
+        if ($children.ContainsKey($pid)) {
+            foreach ($c in $children[$pid]) { $stack.Push([int]$c) }
+        }
+    }
+
+    foreach ($pid in ($toStop | Sort-Object -Descending)) {
+        Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+    }
+}
+
 $env:TRAIN_SYMBOL = $Symbol
 $env:TRAIN_NUM_ENVS = [string]$NumEnvs
 $env:TRAIN_TOTAL_TIMESTEPS = [string]$TotalTimesteps
@@ -42,13 +71,22 @@ if ($PpoEntCoef -gt 0) {
 
 Remove-Item Env:TRAIN_FORCE_DUMMY_VEC -ErrorAction SilentlyContinue
 
-# Only kill train_agent.py processes that belong to this repo (repo-filtered kill)
+# Prefer stopping the active run recorded in checkpoints/current_training_run.json (most reliable on Windows,
+# because child processes may launch train_agent.py with a relative path that won't include $ScriptRoot).
+$currentRunPath = Join-Path $ScriptRoot "checkpoints\\current_training_run.json"
+if (Test-Path $currentRunPath) {
+    try {
+        $ctx = Get-Content -LiteralPath $currentRunPath -Raw | ConvertFrom-Json
+        if ($ctx -and $ctx.pid) {
+            Stop-ProcessTree -RootPid ([int]$ctx.pid)
+        }
+    } catch { }
+}
+
+# Fallback: repo-filtered kill (best-effort; may miss relative-path child processes).
 $escapedRoot = [regex]::Escape($ScriptRoot)
 Get-CimInstance Win32_Process |
-  Where-Object {
-    $_.CommandLine -match 'train_agent\.py' -and
-    $_.CommandLine -match $escapedRoot
-  } |
+  Where-Object { $_.CommandLine -match 'train_agent\.py' -and $_.CommandLine -match $escapedRoot } |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 $stdoutLog = Join-Path $ScriptRoot "train_run.log"
@@ -64,7 +102,23 @@ $process = Start-Process `
   -RedirectStandardError $stderrLog `
   -PassThru
 
-Set-Content -Path (Join-Path $ScriptRoot "train_pid.txt") -Value $process.Id
-Write-Output "Started train_agent.py (PID=$($process.Id))"
+# Best-effort: resolve the "real" training PID from the current run context (may differ from $process.Id).
+$resolvedPid = $process.Id
+try {
+    $deadline = (Get-Date).AddSeconds(15)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-Path $currentRunPath) {
+            $ctx2 = Get-Content -LiteralPath $currentRunPath -Raw | ConvertFrom-Json
+            if ($ctx2 -and $ctx2.pid) {
+                $resolvedPid = [int]$ctx2.pid
+                break
+            }
+        }
+        Start-Sleep -Milliseconds 250
+    }
+} catch { }
+
+Set-Content -Path (Join-Path $ScriptRoot "train_pid.txt") -Value $resolvedPid
+Write-Output "Started train_agent.py (PID=$resolvedPid)"
 Write-Output "Stdout: $stdoutLog"
 Write-Output "Stderr: $stderrLog"

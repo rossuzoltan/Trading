@@ -22,6 +22,7 @@ from interpreter_guard import ensure_project_venv, project_venv_python
 ensure_project_venv(project_root=Path(__file__).resolve().parent, script_path=__file__)
 
 import os
+import ctypes
 import copy
 import importlib.util
 import json
@@ -187,6 +188,7 @@ TRAIN_ENV_MODE = os.environ.get("TRAIN_ENV_MODE", "runtime").strip().lower()
 TRAIN_ACTION_SPACE_MODE = os.environ.get("TRAIN_ACTION_SPACE_MODE", "simple").strip().lower() or "simple"
 TRAIN_SIMPLE_ACTION_SL_MULT = float(os.environ.get("TRAIN_SIMPLE_ACTION_SL_MULT", "1.5"))
 TRAIN_SIMPLE_ACTION_TP_MULT = float(os.environ.get("TRAIN_SIMPLE_ACTION_TP_MULT", "3.0"))
+TRAIN_MODEL_DIR = Path(os.environ.get("TRAIN_MODEL_DIR", "models"))
 PPO_LEARNING_RATE = float(os.environ.get("TRAIN_PPO_LEARNING_RATE", "4e-4"))
 PPO_MIN_LEARNING_RATE = float(os.environ.get("TRAIN_PPO_MIN_LEARNING_RATE", str(DEFAULT_MIN_LEARNING_RATE)))
 PPO_TARGET_KL = float(os.environ.get("TRAIN_PPO_TARGET_KL", str(DEFAULT_TARGET_KL)))
@@ -218,6 +220,12 @@ TRAIN_ASYNC_EVAL = os.environ.get("TRAIN_ASYNC_EVAL", "0") == "1"
 TRAIN_SHARED_DATASET = os.environ.get("TRAIN_SHARED_DATASET", "1") == "1"
 TRAIN_USE_AMP = os.environ.get("TRAIN_USE_AMP", "0") == "1"
 TRAIN_AMP_DTYPE = os.environ.get("TRAIN_AMP_DTYPE", "bf16").strip().lower()
+TRAIN_EXPORT_BEST_FOLD = os.environ.get("TRAIN_EXPORT_BEST_FOLD", "0") == "1"
+TRAIN_BENCH_SPS = os.environ.get("TRAIN_BENCH_SPS", "0") == "1"
+TRAIN_EVAL_STOCHASTIC_RUNS = max(int(os.environ.get("TRAIN_EVAL_STOCHASTIC_RUNS", "5")), 0)
+TRAIN_ADAPTIVE_KL_LR = os.environ.get("TRAIN_ADAPTIVE_KL_LR", "0") == "1"
+TRAIN_COLLAPSE_WARMUP_STEPS = max(int(os.environ.get("TRAIN_COLLAPSE_WARMUP_STEPS", "500000")), 0)
+TRAIN_COLLAPSE_CONSECUTIVE = max(int(os.environ.get("TRAIN_COLLAPSE_CONSECUTIVE", "2")), 1)
 
 if TRAIN_REDUCE_LOGGING:
     TRAIN_LOG_INTERVAL = max(TRAIN_LOG_INTERVAL, 20)
@@ -260,6 +268,12 @@ TRAIN_REWARD_DRAWDOWN_PENALTY = TRAIN_REWARD_DRAWDOWN_PENALTY  # Consistently us
 TRAIN_REWARD_TRANSACTION_PENALTY = float(os.environ.get("TRAIN_REWARD_TRANSACTION_PENALTY", "1.0"))
 TRAIN_REWARD_CLIP_LOW = float(os.environ.get("TRAIN_REWARD_CLIP_LOW", "-10.0"))
 TRAIN_REWARD_CLIP_HIGH = float(os.environ.get("TRAIN_REWARD_CLIP_HIGH", "10.0"))
+TRAIN_TX_PENALTY_START = float(os.environ.get("TRAIN_TX_PENALTY_START", str(TRAIN_REWARD_TRANSACTION_PENALTY)))
+TRAIN_TX_PENALTY_END = float(os.environ.get("TRAIN_TX_PENALTY_END", str(TRAIN_REWARD_TRANSACTION_PENALTY)))
+TRAIN_TX_PENALTY_RAMP_STEPS = max(int(os.environ.get("TRAIN_TX_PENALTY_RAMP_STEPS", "0")), 0)
+TRAIN_DRAWDOWN_PENALTY_START = float(os.environ.get("TRAIN_DRAWDOWN_PENALTY_START", str(TRAIN_REWARD_DRAWDOWN_PENALTY)))
+TRAIN_DRAWDOWN_PENALTY_END = float(os.environ.get("TRAIN_DRAWDOWN_PENALTY_END", str(TRAIN_REWARD_DRAWDOWN_PENALTY)))
+TRAIN_DRAWDOWN_PENALTY_RAMP_STEPS = max(int(os.environ.get("TRAIN_DRAWDOWN_PENALTY_RAMP_STEPS", "0")), 0)
 TRAIN_WINDOW_SIZE = int(os.environ.get("TRAIN_WINDOW_SIZE", "1"))
 TRAIN_ALPHA_GATE_ENABLED = os.environ.get("TRAIN_ALPHA_GATE_ENABLED", "0") == "1"
 TRAIN_ALPHA_GATE_MODEL = os.environ.get("TRAIN_ALPHA_GATE_MODEL", "auto").strip().lower() or "auto"
@@ -270,11 +284,49 @@ TRAIN_EXPERIMENT_PROFILE = os.environ.get("TRAIN_EXPERIMENT_PROFILE", "").strip(
 TRAIN_EXPERIMENT_PROFILE_SETTINGS = _resolve_training_experiment_profile(TRAIN_EXPERIMENT_PROFILE)
 
 
+class WindowsStayAwakeGuard:
+    ES_CONTINUOUS = 0x80000000
+    ES_SYSTEM_REQUIRED = 0x00000001
+
+    def __init__(self) -> None:
+        self._kernel32 = None
+        self._active = False
+
+    def activate(self) -> None:
+        if sys.platform != "win32":
+            return
+        try:
+            self._kernel32 = ctypes.windll.kernel32
+            result = self._kernel32.SetThreadExecutionState(self.ES_CONTINUOUS | self.ES_SYSTEM_REQUIRED)
+            self._active = bool(result)
+            if self._active:
+                log.info("Sleep prevention activated for training process.")
+        except Exception as exc:
+            log.warning("Failed to activate sleep prevention: %s", exc)
+
+    def restore(self) -> None:
+        if not self._active or self._kernel32 is None:
+            return
+        try:
+            self._kernel32.SetThreadExecutionState(self.ES_CONTINUOUS)
+        except Exception as exc:
+            log.warning("Failed to restore sleep settings: %s", exc)
+        finally:
+            self._active = False
+
+
 def _timed_recovery_step(*, fraction: float, minimum: int, maximum: int | None = None) -> int:
     candidate = max(int(TOTAL_TIMESTEPS * float(fraction)), int(minimum))
     if maximum is not None:
         candidate = min(candidate, int(maximum))
     return min(candidate, max(int(TOTAL_TIMESTEPS), 1))
+
+
+def linear_ramp_value(*, step: int, start: float, end: float, ramp_steps: int) -> float:
+    if ramp_steps <= 0:
+        return float(end)
+    progress = min(max(float(step) / float(ramp_steps), 0.0), 1.0)
+    return float(start + ((end - start) * progress))
 
 
 _PHASE_1_UNTIL_DEFAULT = _timed_recovery_step(fraction=1.0 / 3.0, minimum=50_000)
@@ -915,6 +967,8 @@ class CurriculumCallback(BaseCallback):
         self.eval_envs = list(eval_envs or [])
         self.last_slippage: float | None = None
         self.last_ent_coef: float | None = None
+        self.last_tx_penalty: float | None = None
+        self.last_drawdown_penalty: float | None = None
         self._last_logged_step = -1
 
     def _iter_target_envs(self) -> list[Any]:
@@ -945,11 +999,27 @@ class CurriculumCallback(BaseCallback):
             except Exception:
                 pass
 
+    def _current_penalty_state(self, step: int) -> tuple[float, float]:
+        tx_penalty = linear_ramp_value(
+            step=step,
+            start=TRAIN_TX_PENALTY_START,
+            end=TRAIN_TX_PENALTY_END,
+            ramp_steps=TRAIN_TX_PENALTY_RAMP_STEPS,
+        )
+        drawdown_penalty = linear_ramp_value(
+            step=step,
+            start=TRAIN_DRAWDOWN_PENALTY_START,
+            end=TRAIN_DRAWDOWN_PENALTY_END,
+            ramp_steps=TRAIN_DRAWDOWN_PENALTY_RAMP_STEPS,
+        )
+        return tx_penalty, drawdown_penalty
+
     def _apply_curriculum_state(self) -> None:
         step = int(self.num_timesteps)
         current_slippage = get_current_slippage_pips(step, self.recovery_cfg)
         current_ent_coef = get_current_ent_coef(step, self.recovery_cfg)
         current_bonus = get_current_participation_bonus(step, self.recovery_cfg)
+        current_tx_penalty, current_drawdown_penalty = self._current_penalty_state(step)
 
         targets = self._iter_target_envs()
         for env in targets:
@@ -962,6 +1032,16 @@ class CurriculumCallback(BaseCallback):
         # [ELITE] Dynamically update participation bonus magnitude
         for env in targets:
             self._set_env_method(env, "set_participation_bonus_value", current_bonus)
+
+        if self.last_tx_penalty != current_tx_penalty:
+            for env in targets:
+                self._set_env_method(env, "set_transaction_penalty", current_tx_penalty)
+            self.last_tx_penalty = float(current_tx_penalty)
+
+        if self.last_drawdown_penalty != current_drawdown_penalty:
+            for env in targets:
+                self._set_env_method(env, "set_drawdown_penalty", current_drawdown_penalty)
+            self.last_drawdown_penalty = float(current_drawdown_penalty)
 
         # MaskablePPO.train() reads self.ent_coef directly on each update in the
         # installed sb3_contrib version, so updating the scalar here affects the
@@ -986,6 +1066,12 @@ class CurriculumCallback(BaseCallback):
             ),
             "participation_bonus_active": bool(is_participation_bonus_active(step, self.recovery_cfg)),
             "current_bonus_value": float(get_current_participation_bonus(step, self.recovery_cfg)),
+            "transaction_penalty": float(
+                self.last_tx_penalty if self.last_tx_penalty is not None else self._current_penalty_state(step)[0]
+            ),
+            "drawdown_penalty": float(
+                self.last_drawdown_penalty if self.last_drawdown_penalty is not None else self._current_penalty_state(step)[1]
+            ),
         }
 
     def _on_training_start(self) -> None:
@@ -1037,6 +1123,14 @@ class FullPathEvalCallback(BaseCallback):
         eval_freq: int = 10_000,
         metric_key: str = "timed_sharpe",
         history_path: str | Path | None = None,
+        stochastic_runs: int = TRAIN_EVAL_STOCHASTIC_RUNS,
+        collapse_warmup_steps: int = TRAIN_COLLAPSE_WARMUP_STEPS,
+        collapse_consecutive_limit: int = TRAIN_COLLAPSE_CONSECUTIVE,
+        run_id: str | None = None,
+        symbol: str | None = None,
+        checkpoints_root: str | Path | None = None,
+        fold_index: int | None = None,
+        current_run_path: str | Path = CURRENT_TRAINING_RUN_PATH,
         verbose: int = 0,
     ) -> None:
         super().__init__(verbose=verbose)
@@ -1048,22 +1142,78 @@ class FullPathEvalCallback(BaseCallback):
         self.eval_freq = max(int(eval_freq), 0)
         self.metric_key = str(metric_key)
         self.history_path = Path(history_path) if history_path else None
+        self.stochastic_runs = max(int(stochastic_runs), 0)
+        self.collapse_warmup_steps = max(int(collapse_warmup_steps), 0)
+        self.collapse_consecutive_limit = max(int(collapse_consecutive_limit), 1)
+        self.run_id = str(run_id) if run_id is not None else None
+        self.symbol = str(symbol).upper() if symbol is not None else None
+        self.checkpoints_root = Path(checkpoints_root) if checkpoints_root is not None else None
+        self.fold_index = int(fold_index) if fold_index is not None else None
+        self.current_run_path = Path(current_run_path)
         self.best_metric = -float("inf")
         self.latest_metrics: dict[str, Any] | None = None
         self.history: list[dict[str, Any]] = []
+        self._collapse_streak = 0
+
+    @staticmethod
+    def _summarize_stochastic_metrics(metrics_list: list[dict[str, Any]]) -> dict[str, Any] | None:
+        if not metrics_list:
+            return None
+        summary: dict[str, Any] = {"runs": int(len(metrics_list))}
+        for key in ("final_equity", "timed_sharpe", "trade_count", "max_drawdown"):
+            values = [
+                float(item.get(key))
+                for item in metrics_list
+                if item.get(key) is not None and np.isfinite(float(item.get(key)))
+            ]
+            if not values:
+                continue
+            summary[key] = {
+                "mean": float(np.mean(values)),
+                "median": float(np.median(values)),
+                "min": float(np.min(values)),
+                "max": float(np.max(values)),
+            }
+        return summary
+
+    def _write_collapsed_state(self) -> None:
+        if self.run_id is None or self.symbol is None or self.checkpoints_root is None:
+            return
+        _write_current_training_run_context(
+            run_id=self.run_id,
+            symbol=self.symbol,
+            checkpoints_root=self.checkpoints_root,
+            state="collapsed",
+            fold_index=self.fold_index,
+            heartbeat_path=self.checkpoints_root / f"fold_{self.fold_index}" / "training_heartbeat.json" if self.fold_index is not None else None,
+            out_path=self.current_run_path,
+        )
 
     def _on_step(self) -> bool:
         if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
             sync_vecnormalize_stats(self._train_vecnormalize, self._eval_vecnormalize)
-            _, metrics = evaluate_model(self.model, self.eval_env)
-            # Add metadata before serialization
+            _, deterministic_metrics = evaluate_model(self.model, self.eval_env, deterministic=True)
+            stochastic_metrics = []
+            for _ in range(self.stochastic_runs):
+                _, sampled_metrics = evaluate_model(self.model, self.eval_env, deterministic=False)
+                stochastic_metrics.append(sampled_metrics)
             metrics = {
-                **metrics,
+                **deterministic_metrics,
                 "num_timesteps": int(self.num_timesteps),
-                "path_runs": 1,
+                "path_runs": 1 + len(stochastic_metrics),
                 "deterministic": True,
                 "full_path_eval_used": True,
+                "stochastic_runs": int(len(stochastic_metrics)),
+                "stochastic_summary": self._summarize_stochastic_metrics(stochastic_metrics),
             }
+            collapse_condition = (
+                self.num_timesteps >= self.collapse_warmup_steps
+                and float(metrics.get("trade_count", 0.0) or 0.0) <= 1.0
+                and float(metrics.get("final_equity", 0.0) or 0.0) <= 1000.0
+            )
+            self._collapse_streak = (self._collapse_streak + 1) if collapse_condition else 0
+            metrics["collapse_streak"] = int(self._collapse_streak)
+            metrics["collapse_detected"] = bool(self._collapse_streak >= self.collapse_consecutive_limit)
             self.latest_metrics = metrics
 
             # Strategy: Only append/save if accounting reconciliation passed
@@ -1077,6 +1227,9 @@ class FullPathEvalCallback(BaseCallback):
                     "serialization_error": str(e),
                 }
                 log.warning(f"FullPathEvalCallback: Skipping serialization of failed evaluation at step {self.num_timesteps}: {e}")
+                if bool(metrics.get("collapse_detected", False)):
+                    self._write_collapsed_state()
+                    return False
                 return True
 
             if self.history_path is not None:
@@ -1125,6 +1278,75 @@ class FullPathEvalCallback(BaseCallback):
                     f"timed_sharpe={float(metrics.get('timed_sharpe', 0.0)):.3f} | "
                     f"final_equity={float(metrics.get('final_equity', 0.0)):.2f} | "
                     f"max_drawdown={float(metrics.get('max_drawdown', 0.0)):.1%}"
+                )
+            if bool(metrics.get("collapse_detected", False)):
+                self._write_collapsed_state()
+                return False
+        return True
+
+
+class AdaptiveKLLearningRateCallback(BaseCallback):
+    def __init__(
+        self,
+        *,
+        min_lr: float,
+        max_lr: float = 2e-3,
+        low_kl: float = 0.005,
+        high_kl: float = 0.05,
+        verbose: int = 0,
+    ) -> None:
+        super().__init__(verbose=verbose)
+        self.min_lr = float(min_lr)
+        self.max_lr = float(max_lr)
+        self.low_kl = float(low_kl)
+        self.high_kl = float(high_kl)
+        self.current_base_lr = float(PPO_LEARNING_RATE)
+        self._last_n_updates: int | None = None
+
+    def _apply_learning_rate(self) -> None:
+        target_lr = max(float(self.current_base_lr), self.min_lr)
+        self.model.learning_rate = target_lr
+        self.model.lr_schedule = lambda _progress_remaining: target_lr
+        optimizer = getattr(getattr(self.model, "policy", None), "optimizer", None)
+        if optimizer is None:
+            return
+        if hasattr(self.model, "_update_learning_rate"):
+            self.model._update_learning_rate(optimizer)
+            return
+        for param_group in optimizer.param_groups:
+            param_group["lr"] = target_lr
+
+    def _on_training_start(self) -> None:
+        self._apply_learning_rate()
+
+    def _on_step(self) -> bool:
+        logger_values = getattr(self.model.logger, "name_to_value", {}) or {}
+        raw_update_index = logger_values.get("train/n_updates")
+        raw_approx_kl = logger_values.get("train/approx_kl")
+        try:
+            update_index = int(raw_update_index)
+            approx_kl = float(raw_approx_kl)
+        except (TypeError, ValueError):
+            return True
+        if self._last_n_updates is not None and update_index <= self._last_n_updates:
+            return True
+        self._last_n_updates = update_index
+        if not np.isfinite(approx_kl):
+            return True
+
+        target_base_lr = self.current_base_lr
+        if approx_kl < self.low_kl:
+            target_base_lr = min(self.current_base_lr * 1.5, self.max_lr)
+        elif approx_kl > self.high_kl:
+            target_base_lr = max(self.current_base_lr * 0.7, self.min_lr)
+
+        if abs(target_base_lr - self.current_base_lr) > 1e-12:
+            self.current_base_lr = float(target_base_lr)
+            self._apply_learning_rate()
+            if self.verbose:
+                print(
+                    f"[AdaptiveKL] Step {self.num_timesteps:,} | "
+                    f"approx_kl={approx_kl:.6f} | base_lr={self.current_base_lr:.6g}"
                 )
         return True
 
@@ -1435,6 +1657,11 @@ class TrainingHeartbeatCallback(BaseCallback):
         current_run_path: str | Path = CURRENT_TRAINING_RUN_PATH,
         every_steps: int = 5_000,
         total_timesteps: int | None = None,
+        env_workers: int | None = None,
+        ppo_n_steps: int | None = None,
+        ppo_batch_size: int | None = None,
+        ppo_n_epochs: int | None = None,
+        device: str | None = None,
         dataset_integrity_report_path: str | Path | None = None,
         dataset_integrity_verified: bool | None = None,
         baseline_report_path: str | Path | None = None,
@@ -1454,6 +1681,11 @@ class TrainingHeartbeatCallback(BaseCallback):
         self.current_run_path = Path(current_run_path)
         self.every_steps = max(int(every_steps), 0)
         self.total_timesteps = int(total_timesteps) if total_timesteps is not None else None
+        self.env_workers = int(env_workers) if env_workers is not None else None
+        self.ppo_n_steps = int(ppo_n_steps) if ppo_n_steps is not None else None
+        self.ppo_batch_size = int(ppo_batch_size) if ppo_batch_size is not None else None
+        self.ppo_n_epochs = int(ppo_n_epochs) if ppo_n_epochs is not None else None
+        self.device = str(device) if device is not None else None
         self.dataset_integrity_report_path = (
             Path(dataset_integrity_report_path) if dataset_integrity_report_path is not None else None
         )
@@ -1467,6 +1699,8 @@ class TrainingHeartbeatCallback(BaseCallback):
         )
         self.fold_started_utc = datetime.now(timezone.utc).isoformat()
         self._fold_started_perf_counter = time.perf_counter()
+        self._last_heartbeat_perf_counter = self._fold_started_perf_counter
+        self._last_heartbeat_timesteps = 0
         self._next_write = self.every_steps if self.every_steps else 0
 
     def _collect_training_diagnostics(self) -> dict[str, Any]:
@@ -1484,6 +1718,7 @@ class TrainingHeartbeatCallback(BaseCallback):
         self._next_write += self.every_steps
         diagnostics_summary = self.diagnostics_cb.summary()
         now_utc = datetime.now(timezone.utc)
+        now_perf_counter = time.perf_counter()
         elapsed_seconds = max((now_utc - datetime.fromisoformat(PROCESS_STARTED_UTC)).total_seconds(), 0.0)
         fold_elapsed_seconds = max(time.perf_counter() - self._fold_started_perf_counter, 0.0)
         steps_per_second = (
@@ -1491,13 +1726,21 @@ class TrainingHeartbeatCallback(BaseCallback):
             if fold_elapsed_seconds > 0
             else None
         )
+        window_seconds = max(now_perf_counter - self._last_heartbeat_perf_counter, 0.0)
+        window_steps = max(int(self.num_timesteps) - int(self._last_heartbeat_timesteps), 0)
+        steps_per_second_window = (
+            float(window_steps) / float(window_seconds)
+            if window_seconds > 0
+            else None
+        )
         progress_fraction = None
         estimated_remaining_seconds = None
         if self.total_timesteps:
             progress_fraction = min(float(self.num_timesteps) / float(self.total_timesteps), 1.0)
-            if steps_per_second and np.isfinite(steps_per_second) and steps_per_second > 0:
+            preferred_sps = steps_per_second_window if steps_per_second_window and np.isfinite(steps_per_second_window) else steps_per_second
+            if preferred_sps and np.isfinite(preferred_sps) and preferred_sps > 0:
                 estimated_remaining_seconds = max(
-                    float(self.total_timesteps - self.num_timesteps) / float(steps_per_second),
+                    float(self.total_timesteps - self.num_timesteps) / float(preferred_sps),
                     0.0,
                 )
         latest_eval_metrics = copy.deepcopy(self.eval_cb.latest_metrics) if self.eval_cb and self.eval_cb.latest_metrics else None
@@ -1516,8 +1759,16 @@ class TrainingHeartbeatCallback(BaseCallback):
             "elapsed_seconds": elapsed_seconds,
             "fold_elapsed_seconds": fold_elapsed_seconds,
             "steps_per_second": steps_per_second,
+            "steps_per_second_window": steps_per_second_window,
+            "window_seconds": window_seconds,
+            "window_steps": window_steps,
             "progress_fraction": progress_fraction,
             "estimated_remaining_seconds": estimated_remaining_seconds,
+            "env_workers": self.env_workers,
+            "ppo_n_steps": self.ppo_n_steps,
+            "ppo_batch_size": self.ppo_batch_size,
+            "ppo_n_epochs": self.ppo_n_epochs,
+            "device": self.device,
             "n_updates": diagnostics_summary.get("n_updates"),
             "diagnostic_sample_count": diagnostics_summary.get("diagnostic_sample_count"),
             "ppo_diagnostics": diagnostics_summary,
@@ -1557,12 +1808,19 @@ class TrainingHeartbeatCallback(BaseCallback):
             total_timesteps=self.total_timesteps,
             progress_fraction=progress_fraction,
             estimated_remaining_seconds=estimated_remaining_seconds,
+            env_workers=self.env_workers,
+            ppo_n_steps=self.ppo_n_steps,
+            ppo_batch_size=self.ppo_batch_size,
+            ppo_n_epochs=self.ppo_n_epochs,
+            device=self.device,
             dataset_integrity_report_path=self.dataset_integrity_report_path,
             dataset_integrity_verified=self.dataset_integrity_verified,
             baseline_report_path=self.baseline_report_path,
         )
         if self.verbose:
             print(f"[Heartbeat] Wrote -> {self.out_path}")
+        self._last_heartbeat_perf_counter = now_perf_counter
+        self._last_heartbeat_timesteps = int(self.num_timesteps)
         return True
 
 
@@ -1721,13 +1979,44 @@ def make_env(
     return _init
 
 
+def _resolve_vecnormalize_norm_obs(vec_env) -> bool:
+    override = os.environ.get("TRAIN_VECNORM_NORM_OBS", "auto").strip().lower()
+    if override in {"1", "true", "yes", "y"}:
+        return True
+    if override in {"0", "false", "no", "n"}:
+        return False
+
+    # Auto:
+    # - RuntimeGymEnv observations are already scaled by FeatureEngine/global_scaler:
+    #   enabling VecNormalize(norm_obs=True) would double-scale and distort inputs.
+    # - Legacy ForexTradingEnv observations are typically unscaled -> enable norm_obs.
+    try:
+        if hasattr(vec_env, "envs") and vec_env.envs:
+            base_env = vec_env.envs[0]
+            for _ in range(8):
+                wrapped = getattr(base_env, "env", None)
+                if wrapped is None:
+                    break
+                base_env = wrapped
+            env_name = base_env.__class__.__name__
+            if env_name == "ForexTradingEnv":
+                return True
+            if env_name == "RuntimeGymEnv":
+                return False
+            if getattr(base_env, "scaler", None) is not None:
+                return False
+    except Exception:
+        pass
+
+    return False
+
+
 def wrap_vecnormalize(vec_env, *, training: bool):
-    # CRITICAL: norm_obs MUST be False because our FeatureEngine/global_scaler 
-    # already handles scaling. Double-scaling destroys the feature distributions.
+    norm_obs = _resolve_vecnormalize_norm_obs(vec_env)
     return VecNormalize(
         vec_env,
         training=training,
-        norm_obs=False,
+        norm_obs=norm_obs,
         norm_reward=False,
         clip_obs=10.0,
         clip_reward=10.0,
@@ -1735,10 +2024,19 @@ def wrap_vecnormalize(vec_env, *, training: bool):
 
 
 def sync_vecnormalize_stats(source: VecNormalize, target: VecNormalize) -> None:
-    if hasattr(source, 'obs_rms') and source.obs_rms is not None:
-        target.obs_rms = copy.deepcopy(source.obs_rms)
-    if hasattr(source, 'ret_rms') and source.ret_rms is not None:
-        target.ret_rms = copy.deepcopy(source.ret_rms)
+    try:
+        obs_rms = getattr(source, "obs_rms", None)
+    except Exception:
+        obs_rms = None
+    try:
+        ret_rms = getattr(source, "ret_rms", None)
+    except Exception:
+        ret_rms = None
+
+    if obs_rms is not None:
+        target.obs_rms = copy.deepcopy(obs_rms)
+    if ret_rms is not None:
+        target.ret_rms = copy.deepcopy(ret_rms)
     target.training = False
     target.norm_reward = False
 
@@ -1829,6 +2127,29 @@ def _extract_eval_trade_log(eval_env) -> list[dict[str, Any]]:
     return []
 
 
+def _install_maskable_fast_masking_patch() -> None:
+    """Avoid sb3_contrib slow-path when masks arrive as list[np.ndarray]."""
+    try:
+        import numpy as _np
+        from sb3_contrib.common.maskable.distributions import MaskableCategorical
+
+        patched = getattr(MaskableCategorical.apply_masking, "_turbo_fast_masks", False)
+        if patched:
+            return
+
+        original_apply = MaskableCategorical.apply_masking
+
+        def _apply_masking_fast(self, masks):  # type: ignore[no-untyped-def]
+            if isinstance(masks, list):
+                masks = _np.asarray(masks, dtype=bool)
+            return original_apply(self, masks)
+
+        _apply_masking_fast._turbo_fast_masks = True  # type: ignore[attr-defined]
+        MaskableCategorical.apply_masking = _apply_masking_fast  # type: ignore[assignment]
+    except Exception:
+        return
+
+
 def _extract_eval_execution_log(eval_env) -> list[dict[str, Any]]:
     """Extract execution log from eval env using a robust 3-strategy fallback chain.
 
@@ -1867,7 +2188,7 @@ def _extract_eval_execution_log(eval_env) -> list[dict[str, Any]]:
     return []
 
 
-def evaluate_model(model, eval_env) -> tuple[list[float], dict[str, Any]]:
+def evaluate_model(model, eval_env, *, deterministic: bool = True) -> tuple[list[float], dict[str, Any]]:
     obs = eval_env.reset()
     equity_curve: list[float] = []
     timestamps: list[pd.Timestamp] = []
@@ -1877,7 +2198,7 @@ def evaluate_model(model, eval_env) -> tuple[list[float], dict[str, Any]]:
     episode_diagnostics: dict[str, Any] | None = None
     while True:
         masks  = eval_env.env_method("action_masks")
-        action, _ = model.predict(obs, action_masks=masks, deterministic=True)
+        action, _ = model.predict(obs, action_masks=masks, deterministic=deterministic)
         step_out   = eval_env.step(action)
         if len(step_out) == 4:
             obs, reward, dones, infos = step_out
@@ -1948,6 +2269,7 @@ def evaluate_model(model, eval_env) -> tuple[list[float], dict[str, Any]]:
         "execution_event_count": int(len(execution_log)),
         "validation_status": val_status,
         "accounting_gap_detected": not val_status["passed"],
+        "deterministic": bool(deterministic),
     }
     metrics["metric_reconciliation"] = metrics["metrics_reconciliation"]
     return equity_curve, metrics
@@ -2205,6 +2527,11 @@ def _write_current_training_run_context(
     total_timesteps: int | None = None,
     progress_fraction: float | None = None,
     estimated_remaining_seconds: float | None = None,
+    env_workers: int | None = None,
+    ppo_n_steps: int | None = None,
+    ppo_batch_size: int | None = None,
+    ppo_n_epochs: int | None = None,
+    device: str | None = None,
     dataset_integrity_report_path: str | Path | None = None,
     dataset_integrity_verified: bool | None = None,
     baseline_report_path: str | Path | None = None,
@@ -2229,6 +2556,16 @@ def _write_current_training_run_context(
         payload["progress_fraction"] = float(progress_fraction)
     if estimated_remaining_seconds is not None:
         payload["estimated_remaining_seconds"] = float(estimated_remaining_seconds)
+    if env_workers is not None:
+        payload["env_workers"] = int(env_workers)
+    if ppo_n_steps is not None:
+        payload["ppo_n_steps"] = int(ppo_n_steps)
+    if ppo_batch_size is not None:
+        payload["ppo_batch_size"] = int(ppo_batch_size)
+    if ppo_n_epochs is not None:
+        payload["ppo_n_epochs"] = int(ppo_n_epochs)
+    if device is not None:
+        payload["device"] = str(device)
     if dataset_integrity_report_path is not None:
         payload["dataset_integrity_report_path"] = str(Path(dataset_integrity_report_path))
     if dataset_integrity_verified is not None:
@@ -2274,7 +2611,14 @@ def _load_training_resume_state(
         return None
 
     state = str(current_run.get("state", "")).strip().lower()
-    if state in {"completed", "failed_dataset_integrity", "failed_data_minimums", "failed_baseline_gate"}:
+    if state in {
+        "completed",
+        "collapsed",
+        "stopped",
+        "failed_dataset_integrity",
+        "failed_data_minimums",
+        "failed_baseline_gate",
+    }:
         return None
 
     checkpoints_root_raw = current_run.get("checkpoints_root")
@@ -2429,20 +2773,20 @@ def _clear_current_run_artifacts(
     vecnormalize_artifact_path: Path,
     run_id: str,
 ) -> list[str]:
-    report_paths = deployment_paths(primary_symbol)
+    report_paths = deployment_paths(primary_symbol, model_dir=TRAIN_MODEL_DIR)
     paths_to_archive = [
         model_artifact_path,
         vecnormalize_artifact_path,
-        Path(f"models/scaler_{primary_symbol}.pkl"),
+        TRAIN_MODEL_DIR / f"scaler_{primary_symbol}.pkl",
         SCALER_PATH,
-        Path(f"models/artifact_manifest_{primary_symbol}.json"),
-        Path("models") / DEFAULT_MANIFEST_NAME,
+        TRAIN_MODEL_DIR / f"artifact_manifest_{primary_symbol}.json",
+        TRAIN_MODEL_DIR / DEFAULT_MANIFEST_NAME,
         report_paths.diagnostics_path,
         report_paths.gate_path,
         report_paths.live_preflight_path,
         report_paths.ops_attestation_path,
     ]
-    archive_root = Path("models") / "archive" / primary_symbol.lower() / run_id
+    archive_root = TRAIN_MODEL_DIR / "archive" / primary_symbol.lower() / run_id
     return _archive_paths(paths_to_archive, archive_root=archive_root)
 
 
@@ -2490,13 +2834,18 @@ def _publish_primary_candidate_artifacts(
     elif vecnormalize_artifact_path.exists():
         vecnormalize_artifact_path.unlink()
 
-    primary_scaler_path = Path(f"models/scaler_{primary_symbol}.pkl")
+    primary_scaler_path = TRAIN_MODEL_DIR / f"scaler_{primary_symbol}.pkl"
     shutil.copyfile(candidate_scaler_source, primary_scaler_path)
-    shutil.copyfile(candidate_scaler_source, SCALER_PATH)
+    try:
+        default_models_dir = (Path(__file__).resolve().parent / "models").resolve()
+        if TRAIN_MODEL_DIR.resolve() == default_models_dir:
+            shutil.copyfile(candidate_scaler_source, SCALER_PATH)
+    except Exception:
+        pass
 
     action_map = build_runtime_action_map(list(ACTION_SL_MULTS), list(ACTION_TP_MULTS))
     observation_shape = [int(TRAIN_WINDOW_SIZE), len(FEATURE_COLS) + STATE_FEATURE_COUNT]
-    diagnostics_path = deployment_paths(primary_symbol).diagnostics_path
+    diagnostics_path = deployment_paths(primary_symbol, model_dir=TRAIN_MODEL_DIR).diagnostics_path
     manifest = create_manifest(
         strategy_symbol=primary_symbol,
         model_path=model_artifact_path,
@@ -2513,19 +2862,21 @@ def _publish_primary_candidate_artifacts(
         execution_cost_profile=execution_cost_profile,
         reward_profile=reward_profile,
     )
-    save_manifest(manifest, Path(f"models/artifact_manifest_{primary_symbol}.json"))
-    save_manifest(manifest, Path("models") / DEFAULT_MANIFEST_NAME)
+    save_manifest(manifest, TRAIN_MODEL_DIR / f"artifact_manifest_{primary_symbol}.json")
+    save_manifest(manifest, TRAIN_MODEL_DIR / DEFAULT_MANIFEST_NAME)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     ensure_runtime_dirs()
+    TRAIN_MODEL_DIR.mkdir(parents=True, exist_ok=True)
     log_config = configure_run_logging(
         "train_agent",
         symbol=TRAIN_SYMBOL or None,
         capture_print=True,
     )
+    _install_maskable_fast_masking_patch()
     if TRAIN_ENV_MODE not in {"runtime", "legacy"}:
         raise RuntimeError(f"Unsupported TRAIN_ENV_MODE={TRAIN_ENV_MODE!r}. Expected 'runtime' or 'legacy'.")
     requested_envs = int(os.environ.get("TRAIN_NUM_ENVS", "0")) or None
@@ -2609,8 +2960,8 @@ def main() -> None:
         raise RuntimeError("No symbols available after filtering dataset.")
     primary_symbol = TRAIN_SYMBOL or symbols[0]
     model_basename = f"model_{primary_symbol.lower()}_best"
-    model_artifact_path = Path("models") / f"{model_basename}.zip"
-    vecnormalize_artifact_path = Path("models") / f"{model_basename}_vecnormalize.pkl"
+    model_artifact_path = TRAIN_MODEL_DIR / f"{model_basename}.zip"
+    vecnormalize_artifact_path = TRAIN_MODEL_DIR / f"{model_basename}_vecnormalize.pkl"
     resume_state = (
         _load_training_resume_state(
             symbol=primary_symbol,
@@ -2845,6 +3196,10 @@ def main() -> None:
             checkpoints_root=run_checkpoints_root,
             primary_symbol=primary_symbol,
         )
+        best_export_ckpt_dir = None
+        best_export_scaler = None
+        best_export_vecnormalize = None
+        best_export_model_zip = None
         recovered_folds = len(list(run_checkpoints_root.glob("fold_*/training_diagnostics.json")))
         if recovered_folds:
             print(f"[Resume] Recovered {recovered_folds} completed fold diagnostics from {run_checkpoints_root}.")
@@ -2856,6 +3211,10 @@ def main() -> None:
         candidate_model_source = None
         candidate_vecnormalize_source = None
         candidate_scaler_source = None
+        best_export_ckpt_dir = None
+        best_export_scaler = None
+        best_export_vecnormalize = None
+        best_export_model_zip = None
 
     for fold_idx in range(N_FOLDS):
         if resume_state is not None and fold_idx < resume_fold_index:
@@ -3096,6 +3455,11 @@ def main() -> None:
             state="training",
             fold_index=fold_idx,
             heartbeat_path=ckpt_dir / "training_heartbeat.json",
+            env_workers=effective_envs,
+            ppo_n_steps=PPO_N_STEPS,
+            ppo_batch_size=PPO_BATCH_SIZE,
+            ppo_n_epochs=PPO_N_EPOCHS,
+            device=str(device),
             dataset_integrity_report_path=dataset_integrity_report_path,
             dataset_integrity_verified=dataset_integrity_verified,
             baseline_report_path=baseline_report_path,
@@ -3167,6 +3531,8 @@ def main() -> None:
         if TRAIN_ASYNC_EVAL:
             # We delay saving vecnormalize and evaluating deeply by using a much larger frequency
             eval_freq = max(eval_freq, 50_000)
+        if TRAIN_BENCH_SPS:
+            eval_freq = 0
 
         eval_cb = FullPathEvalCallback(
             val_vec,
@@ -3176,10 +3542,21 @@ def main() -> None:
             best_vecnormalize_path=best_vecnormalize_path,
             history_path=Path(ckpt_dir) / "full_path_evaluations.json",
             eval_freq=eval_freq,
+            stochastic_runs=TRAIN_EVAL_STOCHASTIC_RUNS,
+            collapse_warmup_steps=TRAIN_COLLAPSE_WARMUP_STEPS,
+            collapse_consecutive_limit=TRAIN_COLLAPSE_CONSECUTIVE,
+            run_id=run_id,
+            symbol=primary_symbol,
+            checkpoints_root=run_checkpoints_root,
+            fold_index=fold_idx,
             verbose=1,
         )
         if resume_current_fold:
             _prime_eval_callback_from_history(eval_cb)
+        adaptive_kl_cb = AdaptiveKLLearningRateCallback(
+            min_lr=PPO_MIN_LEARNING_RATE,
+            verbose=1,
+        ) if TRAIN_ADAPTIVE_KL_LR else None
         heartbeat_cb = TrainingHeartbeatCallback(
             out_path=Path(ckpt_dir) / "training_heartbeat.json",
             diagnostics_cb=diagnostics_cb,
@@ -3191,6 +3568,11 @@ def main() -> None:
             fold_index=fold_idx,
             every_steps=heartbeat_every,
             total_timesteps=TOTAL_TIMESTEPS,
+            env_workers=effective_envs,
+            ppo_n_steps=PPO_N_STEPS,
+            ppo_batch_size=PPO_BATCH_SIZE,
+            ppo_n_epochs=PPO_N_EPOCHS,
+            device=str(device),
             dataset_integrity_report_path=dataset_integrity_report_path,
             dataset_integrity_verified=dataset_integrity_verified,
             baseline_report_path=baseline_report_path,
@@ -3200,6 +3582,10 @@ def main() -> None:
         )
 
         enhanced_logging_cb = EnhancedLoggingCallback(verbose=1)
+        active_callbacks = [curriculum_cb, diagnostics_cb]
+        if adaptive_kl_cb is not None:
+            active_callbacks.append(adaptive_kl_cb)
+        active_callbacks.extend([eval_cb, heartbeat_cb, enhanced_logging_cb])
 
         if remaining_timesteps > 0:
             if TRAIN_TORCH_COMPILE and hasattr(model, "policy"):
@@ -3224,7 +3610,7 @@ def main() -> None:
 
             model.learn(
                 total_timesteps=remaining_timesteps,
-                callback=[curriculum_cb, diagnostics_cb, eval_cb, heartbeat_cb, enhanced_logging_cb],
+                callback=active_callbacks,
                 log_interval=max(TRAIN_LOG_INTERVAL, 1),
                 tb_log_name=f"{primary_symbol.lower()}_fold_{fold_idx}",
                 reset_num_timesteps=not resume_current_fold,
@@ -3371,6 +3757,11 @@ def main() -> None:
                     else "Best-evaluated fold from this run is deployment eligible but was not selected as the canonical candidate."
                 ),
             )
+            if TRAIN_EXPORT_BEST_FOLD:
+                best_export_ckpt_dir = Path(ckpt_dir)
+                best_export_model_zip = Path(ckpt_dir) / "best_model.zip"
+                best_export_vecnormalize = Path(best_vecnormalize_path) if best_vecnormalize_path.exists() else None
+                best_export_scaler = copy.deepcopy(fold_scalers.get(primary_symbol))
         print(
             f"\n  Fold {fold_idx} VAL: equity=${fin_val:,.2f}  "
             f"Sharpe={sharpe:.3f}  MaxDD={max_dd:.1%}  "
@@ -3433,9 +3824,29 @@ def main() -> None:
         dataset_integrity_verified=dataset_integrity_verified,
         baseline_report_path=baseline_report_path,
     )
-    report_paths = deployment_paths(primary_symbol)
+    report_paths = deployment_paths(primary_symbol, model_dir=TRAIN_MODEL_DIR)
     save_json_report(canonical_summary, report_paths.diagnostics_path)
     print(f"Canonical diagnostics -> {report_paths.diagnostics_path}")
+
+    if (
+        candidate_summary is None
+        and TRAIN_EXPORT_BEST_FOLD
+        and best_export_ckpt_dir is not None
+        and best_export_model_zip is not None
+        and best_export_scaler is not None
+    ):
+        export_scaler_path = _candidate_scaler_artifact_path(best_export_ckpt_dir, primary_symbol)
+        joblib.dump(best_export_scaler, export_scaler_path)
+        candidate_summary = _build_promoted_training_diagnostics(
+            canonical_summary,
+            run_id=run_id,
+            artifact_candidate_selected=True,
+            artifact_candidate_reason="Exported best observed fold for downstream evaluation (TRAIN_EXPORT_BEST_FOLD=1).",
+        )
+        candidate_model_source = best_export_model_zip
+        candidate_scaler_source = export_scaler_path
+        candidate_vecnormalize_source = best_export_vecnormalize
+
     if candidate_summary is not None and candidate_model_source is not None and candidate_scaler_source is not None:
         _publish_primary_candidate_artifacts(
             primary_symbol=primary_symbol,
@@ -3458,8 +3869,9 @@ def main() -> None:
 if __name__ == "__main__":
     # Start resource monitor early
     resource_monitor.start()
-    
+    sleep_guard = WindowsStayAwakeGuard()
     try:
+        sleep_guard.activate()
         # Check if we should run in benchmark mode to find optimal n_envs
         if os.environ.get("TRAIN_ADAPTIVE_TUNE", "false").lower() == "true":
             # We need a base env creator to pass to the tuner
@@ -3501,4 +3913,5 @@ if __name__ == "__main__":
         # Run the official training
         main()
     finally:
+        sleep_guard.restore()
         resource_monitor.stop()

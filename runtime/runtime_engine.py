@@ -26,7 +26,7 @@ from domain.models import (
 )
 from execution.broker import BaseBroker
 from edge_research import BaselineAlphaGate
-from feature_engine import FeatureEngine
+from feature_engine import FEATURE_COLS, FeatureEngine
 from risk.risk_engine import RiskEngine, sync_confirmed_position
 from runtime_common import (
     build_action_mask,
@@ -39,6 +39,7 @@ from symbol_utils import (
 )
 
 logger = logging.getLogger(__name__)
+SPREAD_Z_INDEX = FEATURE_COLS.index("spread_z")
 
 
 @dataclass
@@ -544,8 +545,12 @@ class RuntimeEngine:
         }
 
     def _build_open_intent(self, action: ActionSpec, bar: VolumeBar, equity: float) -> OrderIntent:
-        latest = self.feature_engine._buffer.iloc[-1] if self.feature_engine._buffer is not None else pd.Series()
-        atr = float(latest.get("atr_14", pip_size_for_symbol(self.symbol) * 20.0))
+        latest_aux = getattr(self.feature_engine, "latest_aux_data", {}) or {}
+        atr = float(latest_aux.get("atr_14", 0.0) or 0.0)
+        if atr <= 0.0 and self.feature_engine._buffer is not None and not self.feature_engine._buffer.empty:
+            atr = float(self.feature_engine._buffer.iloc[-1].get("atr_14", 0.0) or 0.0)
+        if atr <= 0.0:
+            atr = float(pip_size_for_symbol(self.symbol) * 20.0)
         if action.direction is None or action.sl_value is None or action.tp_value is None:
             raise RuntimeError("OPEN action missing direction or SL/TP values.")
         sl_distance = float(action.sl_value) * atr
@@ -627,15 +632,15 @@ class RuntimeEngine:
         # Use the structured-array fast path only when the bar actually carries a raw record.
         raw_record = getattr(bar, "row", None)
         if hasattr(self.feature_engine, "push_record") and isinstance(raw_record, np.void):
-            self.feature_engine.push_record(raw_record)
+            self.feature_engine.push_record(raw_record, refresh_buffer=(self.window_size > 1))
         else:
             self.feature_engine.push(bar.to_series() if hasattr(bar, "to_series") else bar)
 
         feature_rows = self.feature_engine.recent_observation_window(self.window_size)
         feature_vector = feature_rows[-1]
-        latest_row = self.feature_engine._buffer.iloc[-1] if self.feature_engine._buffer is not None else pd.Series()
-        spread_z = float(latest_row.get("spread_z", 0.0))
-        
+        latest_raw_features = getattr(self.feature_engine, "latest_features_raw", np.zeros(len(FEATURE_COLS), dtype=np.float32))
+        spread_z = float(latest_raw_features[SPREAD_Z_INDEX]) if len(latest_raw_features) > SPREAD_Z_INDEX else 0.0
+
         pre_action_equity = self._current_equity(mark_price=close_price, avg_spread=avg_spread)
         prev_exposure_lots = abs(float(self.broker.current_position(self.symbol).volume))
         
@@ -650,7 +655,12 @@ class RuntimeEngine:
         mask = build_action_mask(self.action_map, position=self.confirmed_position, spread_z=spread_z)
         self.last_alpha_gate_scores = None
         if self.confirmed_position.is_flat and self.alpha_gate is not None:
-            allow_long, allow_short, scores = self.alpha_gate.allowed_directions(latest_row)
+            feature_row = (
+                {col: float(latest_raw_features[idx]) for idx, col in enumerate(FEATURE_COLS)}
+                if len(latest_raw_features) == len(FEATURE_COLS)
+                else (self.feature_engine._buffer.iloc[-1] if self.feature_engine._buffer is not None else pd.Series())
+            )
+            allow_long, allow_short, scores = self.alpha_gate.allowed_directions(feature_row)
             self.last_alpha_gate_scores = dict(scores)
             for idx, candidate in enumerate(self.action_map):
                 if candidate.action_type != ActionType.OPEN:

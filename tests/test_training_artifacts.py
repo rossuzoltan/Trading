@@ -11,6 +11,7 @@ from artifact_manifest import create_manifest, load_manifest, save_manifest
 from evaluate_oos import _resolve_execution_cost_profile, _resolve_reward_profile
 from runtime_common import ActionSpec, ActionType, build_trade_metric_reconciliation
 from train_agent import (
+    AdaptiveKLLearningRateCallback,
     TrainingDiagnosticsCallback,
     _archive_paths,
     _build_promoted_training_diagnostics,
@@ -124,6 +125,40 @@ class TrainingArtifactTests(unittest.TestCase):
         self.assertEqual([0.15], callback.metrics["train/explained_variance"])
         self.assertEqual([1.5], callback.metrics["train/value_loss"])
 
+    def test_adaptive_kl_callback_applies_constant_lr_schedule_after_adjustment(self):
+        optimizer = SimpleNamespace(param_groups=[{"lr": 0.0}])
+
+        class _DummyModel:
+            def __init__(self):
+                self.learning_rate = 0.0
+                self.lr_schedule = lambda _progress_remaining: 0.0
+                self.policy = SimpleNamespace(optimizer=optimizer)
+                self.logger = SimpleNamespace(
+                    name_to_value={
+                        "train/approx_kl": 1e-6,
+                        "train/n_updates": 1,
+                    }
+                )
+
+            def _update_learning_rate(self, optimizer_obj):
+                lr = float(self.lr_schedule(0.25))
+                for param_group in optimizer_obj.param_groups:
+                    param_group["lr"] = lr
+
+        callback = AdaptiveKLLearningRateCallback(min_lr=1e-5, verbose=0)
+        callback.model = _DummyModel()
+        callback.num_timesteps = 4096
+
+        callback._on_training_start()
+        callback._on_step()
+
+        expected_lr = min(4e-4 * 1.5, 2e-3)
+        self.assertAlmostEqual(expected_lr, callback.current_base_lr)
+        self.assertAlmostEqual(expected_lr, callback.model.learning_rate)
+        self.assertAlmostEqual(expected_lr, callback.model.lr_schedule(0.9))
+        self.assertAlmostEqual(expected_lr, callback.model.lr_schedule(0.1))
+        self.assertAlmostEqual(expected_lr, optimizer.param_groups[0]["lr"])
+
     def test_holdout_blockers_include_trade_quality_checks(self):
         blockers = _holdout_deployment_blockers(
             holdout_sharpe=0.35,
@@ -193,6 +228,40 @@ class TrainingArtifactTests(unittest.TestCase):
             self.assertEqual(resume_model_path, state["model_path"])
             self.assertEqual(resume_vecnormalize_path, state["vecnormalize_path"])
             self.assertEqual(50000 - 12345, state["remaining_timesteps_hint"])
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_load_training_resume_state_ignores_terminal_stopped_and_collapsed_runs(self):
+        tmpdir = make_test_dir("resume_state_terminal")
+        try:
+            checkpoints_root = tmpdir / "run_resume"
+            ckpt_dir = checkpoints_root / "fold_1"
+            ckpt_dir.mkdir(parents=True, exist_ok=True)
+            _resume_model_checkpoint_path(ckpt_dir).write_bytes(b"model")
+
+            for state_name in ("stopped", "collapsed"):
+                current_run_path = tmpdir / f"current_training_run_{state_name}.json"
+                current_run_path.write_text(
+                    json.dumps(
+                        {
+                            "run_id": f"run-{state_name}",
+                            "symbol": "GBPUSD",
+                            "checkpoints_root": str(checkpoints_root),
+                            "fold_index": 1,
+                            "state": state_name,
+                            "num_timesteps": 12345,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                state = _load_training_resume_state(
+                    symbol="GBPUSD",
+                    total_timesteps=50000,
+                    current_run_path=current_run_path,
+                )
+
+                self.assertIsNone(state)
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 

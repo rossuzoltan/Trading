@@ -60,6 +60,37 @@ _INSTALLED_STDOUT: _LoggerWriter | None = None
 _INSTALLED_STDERR: _LoggerWriter | None = None
 
 
+class _SafeStream(io.TextIOBase):
+    """Best-effort text stream wrapper.
+
+    Windows consoles and some redirected streams can throw UnicodeEncodeError
+    when log messages contain non-ASCII characters. Logging should never crash
+    long training/eval runs, so we fall back to writing UTF-8 bytes with
+    replacement when needed.
+    """
+
+    def __init__(self, stream: TextIO) -> None:
+        super().__init__()
+        self._stream = stream
+
+    def write(self, s: str) -> int:  # type: ignore[override]
+        try:
+            return int(self._stream.write(s))
+        except UnicodeEncodeError:
+            buffer = getattr(self._stream, "buffer", None)
+            if buffer is not None:
+                buffer.write(str(s).encode("utf-8", errors="replace"))
+                return len(s)
+            safe = str(s).encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+            return int(self._stream.write(safe))
+
+    def flush(self) -> None:  # type: ignore[override]
+        try:
+            self._stream.flush()
+        except Exception:
+            pass
+
+
 @dataclass(frozen=True)
 class RunLoggingConfig:
     component: str
@@ -289,6 +320,20 @@ def configure_run_logging(
     level: str | int | None = None,
 ) -> RunLoggingConfig:
     ensure_runtime_dirs()
+    # Default to "production-style" logging behavior: handler failures should not
+    # spam stderr nor risk recursive logging loops when stdout/stderr are captured.
+    # Opt-in to noisy handler exceptions via TRADING_LOG_RAISE_EXCEPTIONS=1.
+    if os.environ.get("TRADING_LOG_RAISE_EXCEPTIONS", "0") != "1":
+        logging.raiseExceptions = False
+
+    # Best-effort: make console streams tolerant of Unicode to prevent
+    # UnicodeEncodeError inside StreamHandler on Windows.
+    for stream in (_ORIGINAL_STDOUT, _ORIGINAL_STDERR):
+        try:
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(encoding="utf-8", errors="backslashreplace")  # type: ignore[attr-defined]
+        except Exception:
+            pass
     component_value = str(component).strip() or "run"
     logger_name_value = str(logger_name or component_value)
     resolved_level = _resolve_level(level)
@@ -313,7 +358,7 @@ def configure_run_logging(
     human_formatter = _HumanFormatter()
     json_formatter = _JsonFormatter()
 
-    stdout_handler = logging.StreamHandler(_ORIGINAL_STDOUT)
+    stdout_handler = logging.StreamHandler(_SafeStream(_ORIGINAL_STDOUT))
     stdout_handler.setLevel(resolved_level)
     stdout_handler.addFilter(_MaxLevelFilter(logging.WARNING))
     stdout_handler.addFilter(context_filter)
@@ -321,7 +366,7 @@ def configure_run_logging(
     stdout_handler._trading_run_logging = True  # type: ignore[attr-defined]
     root_logger.addHandler(stdout_handler)
 
-    stderr_handler = logging.StreamHandler(_ORIGINAL_STDERR)
+    stderr_handler = logging.StreamHandler(_SafeStream(_ORIGINAL_STDERR))
     stderr_handler.setLevel(logging.ERROR)
     stderr_handler.addFilter(context_filter)
     stderr_handler.setFormatter(human_formatter)

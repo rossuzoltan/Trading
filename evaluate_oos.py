@@ -69,6 +69,15 @@ from validation_metrics import build_deployment_gate, load_json_report, save_jso
 
 
 TARGET_SYM = os.environ.get("EVAL_SYMBOL", "EURUSD").strip().upper() or "EURUSD"
+EVAL_MANIFEST_PATH = os.environ.get("EVAL_MANIFEST_PATH")
+_eval_output_dir_env = os.environ.get("EVAL_OUTPUT_DIR")
+EVAL_OUTPUT_DIR = (
+    Path(_eval_output_dir_env)
+    if _eval_output_dir_env
+    else (Path(EVAL_MANIFEST_PATH).resolve().parent if EVAL_MANIFEST_PATH else Path("models"))
+)
+EVAL_MAX_BARS = int(os.environ.get("EVAL_MAX_BARS", "0") or "0")
+EVAL_SKIP_PLOT = os.environ.get("EVAL_SKIP_PLOT", "0") == "1"
 CURRENT_RUN_CONTEXT_PATH = Path("checkpoints") / "current_training_run.json"
 log = logging.getLogger("evaluate_oos")
 
@@ -186,7 +195,7 @@ def _load_symbol_raw_frame(
 
 def _load_promoted_manifest_context(symbol: str) -> ReplayContext | None:
     try:
-        manifest_path = resolve_manifest_path(symbol=symbol)
+        manifest_path = resolve_manifest_path(symbol=symbol, preferred=EVAL_MANIFEST_PATH)
     except FileNotFoundError:
         return None
     manifest = load_manifest(manifest_path)
@@ -212,6 +221,14 @@ def _load_promoted_manifest_context(symbol: str) -> ReplayContext | None:
         trainable_feature_frame = featured.loc[featured.index < split_ts].copy()
     if replay_frame.empty or warmup_frame.empty or holdout_feature_frame.empty:
         raise RuntimeError(f"Holdout split produced empty replay, warmup, or feature frames for {symbol}.")
+    if EVAL_MAX_BARS and int(EVAL_MAX_BARS) > 0:
+        max_bars = int(EVAL_MAX_BARS)
+        if len(replay_frame) > max_bars:
+            replay_frame = replay_frame.iloc[-max_bars:].copy()
+        if len(holdout_feature_frame) > max_bars:
+            holdout_feature_frame = holdout_feature_frame.iloc[-max_bars:].copy()
+        if len(trainable_feature_frame) > max_bars:
+            trainable_feature_frame = trainable_feature_frame.iloc[-max_bars:].copy()
 
     dataset_id = dataset_id_for_path(dataset_path)
     action_map = deserialize_action_map(manifest.action_map)
@@ -611,6 +628,7 @@ def run_replay(
 
 def main() -> None:
     ensure_runtime_dirs()
+    EVAL_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     context = load_replay_context(TARGET_SYM)
     log_config = configure_run_logging(
         "evaluate_oos",
@@ -660,7 +678,7 @@ def main() -> None:
     n_trades = int(replay_metrics["trade_count"])
     avg_holding_bars = float(replay_metrics["avg_holding_bars"])
     total_return = float(replay_metrics["total_return"])
-    report_paths = deployment_paths(TARGET_SYM)
+    report_paths = deployment_paths(TARGET_SYM, model_dir=EVAL_OUTPUT_DIR)
     training_diagnostics = (
         load_json_report(context.diagnostics_path)
         if context.diagnostics_path is not None and context.diagnostics_path.exists()
@@ -701,7 +719,7 @@ def main() -> None:
         "reward_shaping_in_eval": False,
     }
     validate_evaluation_payload(replay_report)
-    replay_report_path = Path(f"models/replay_report_{TARGET_SYM.lower()}.json")
+    replay_report_path = EVAL_OUTPUT_DIR / f"replay_report_{TARGET_SYM.lower()}.json"
     save_json_report(replay_report, replay_report_path)
     gate = build_deployment_gate(
         symbol=TARGET_SYM,
@@ -717,16 +735,17 @@ def main() -> None:
         for blocker in gate["blockers"]:
             print(f"BLOCKER: {blocker}")
 
-    out_path = Path(f"models/equity_curve_oos_{TARGET_SYM.lower()}.png")
-    plt.figure(figsize=(12, 5))
-    plt.plot(equity_curve, color="#2ecc71", linewidth=1.5)
-    plt.axhline(1_000, color="grey", linestyle="--", alpha=0.5, label="Start")
-    plt.title(f"OOS Replay Equity - {TARGET_SYM}  TimedSharpe={timed_sharpe:.2f}  MaxDD={max_dd:.1%}")
-    plt.xlabel("Replay bar")
-    plt.ylabel("Equity ($)")
-    plt.tight_layout()
-    plt.savefig(out_path)
-    print(f"Saved -> {out_path}")
+    out_path = EVAL_OUTPUT_DIR / f"equity_curve_oos_{TARGET_SYM.lower()}.png"
+    if not EVAL_SKIP_PLOT:
+        plt.figure(figsize=(12, 5))
+        plt.plot(equity_curve, color="#2ecc71", linewidth=1.5)
+        plt.axhline(1_000, color="grey", linestyle="--", alpha=0.5, label="Start")
+        plt.title(f"OOS Replay Equity - {TARGET_SYM}  TimedSharpe={timed_sharpe:.2f}  MaxDD={max_dd:.1%}")
+        plt.xlabel("Replay bar")
+        plt.ylabel("Equity ($)")
+        plt.tight_layout()
+        plt.savefig(out_path)
+        print(f"Saved -> {out_path}")
     print(f"Saved -> {replay_report_path}")
     print(f"Saved -> {report_paths.gate_path}")
     log.info(

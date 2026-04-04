@@ -31,6 +31,7 @@ from domain.models import BAR_DTYPE
 
 WARMUP_BARS: int = 150
 SCALER_PATH: str = "models/scaler_features.pkl"
+FEATURE_ENGINE_FAST: bool = os.environ.get("FEATURE_ENGINE_FAST", "0") == "1"
 
 FEATURE_COLS: list[str] = [
     "log_return",
@@ -380,6 +381,14 @@ class FeatureEngine:
         self._scaler_scale: np.ndarray | None = None
         self._buffer_size: int = 400  # Increased for safety with indicators
         self._count: int = 0
+        self._feature_fast: bool = FEATURE_ENGINE_FAST
+        self._last_features_raw: np.ndarray = np.zeros(len(FEATURE_COLS), dtype=np.float32)
+        self._last_features_scaled: np.ndarray = np.zeros(len(FEATURE_COLS), dtype=np.float32)
+        self._last_aux_data: dict[str, float] = {
+            "atr_14": 0.0,
+            "spread_z": 0.0,
+            "time_delta_z": 0.0,
+        }
 
     def _sync_scaler_cache(self) -> None:
         if self._scaler is not None:
@@ -388,6 +397,58 @@ class FeatureEngine:
         else:
             self._scaler_mean = None
             self._scaler_scale = None
+
+    def _set_feature_cache(
+        self,
+        raw_features: np.ndarray,
+        scaled_features: np.ndarray,
+        *,
+        atr_14: float,
+        spread_z: float,
+        time_delta_z: float,
+    ) -> None:
+        self._last_features_raw = np.nan_to_num(
+            np.asarray(raw_features, dtype=np.float32),
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0,
+        )
+        self._last_features_scaled = np.nan_to_num(
+            np.asarray(scaled_features, dtype=np.float32),
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0,
+        )
+        self._last_aux_data = {
+            "atr_14": float(atr_14),
+            "spread_z": float(spread_z),
+            "time_delta_z": float(time_delta_z),
+        }
+
+    def _refresh_feature_cache_from_buffer(self) -> None:
+        if self._buffer is None or self._buffer.empty:
+            self._set_feature_cache(
+                np.zeros(len(FEATURE_COLS), dtype=np.float32),
+                np.zeros(len(FEATURE_COLS), dtype=np.float32),
+                atr_14=0.0,
+                spread_z=0.0,
+                time_delta_z=0.0,
+            )
+            return
+
+        row = self._buffer.iloc[-1]
+        raw_features = np.array([float(row.get(col, 0.0)) for col in FEATURE_COLS], dtype=np.float32)
+        if self._scaler_mean is not None and self._scaler_scale is not None:
+            scaled_features = (raw_features - self._scaler_mean) / self._scaler_scale
+        else:
+            scaled_features = raw_features.copy()
+        self._set_feature_cache(
+            raw_features,
+            scaled_features,
+            atr_14=float(row.get("atr_14", 0.0)),
+            spread_z=float(row.get("spread_z", 0.0)),
+            time_delta_z=float(row.get("time_delta_z", 0.0)),
+        )
 
     def fit_transform(
         self, df: pd.DataFrame, scaler_path: str = SCALER_PATH
@@ -466,6 +527,7 @@ class FeatureEngine:
             self._raw_buffer_np[idx]['volume'] = row.get('Volume', 0.0)
             self._raw_buffer_np[idx]['timestamp_s'] = ts.timestamp()
             self._raw_buffer_np[idx]['avg_spread'] = row.get('avg_spread', 0.0)
+            self._raw_buffer_np[idx]['time_delta_s'] = row.get('time_delta_s', 3600.0)
             self._timestamps_np[idx] = ts.to_datetime64()
         self._count = count
 
@@ -475,16 +537,15 @@ class FeatureEngine:
             raise ValueError("warm_up() produced no valid feature rows after indicator/scaler filtering.")
         self._buffer = raw
         self._sync_scaler_cache()
+        self._refresh_feature_cache_from_buffer()
 
     def push(self, bar: pd.Series) -> None:
         """Legacy path for pd.Series inputs."""
         if self._raw_buffer_np is None:
             raise RuntimeError("Call warm_up() before push().")
-        
-        # Shift
-        self._raw_buffer_np[:-1] = self._raw_buffer_np[1:]
-        self._timestamps_np[:-1] = self._timestamps_np[1:]
-        
+
+        self._shift_for_append()
+
         # Update tail
         idx = -1
         bar_timestamp = pd.Timestamp(bar.name)
@@ -497,25 +558,37 @@ class FeatureEngine:
         self._raw_buffer_np[idx]['avg_spread'] = bar.get('avg_spread', 0.0)
         self._raw_buffer_np[idx]['time_delta_s'] = bar.get('time_delta_s', 3600.0)
         self._timestamps_np[idx] = bar_timestamp.to_datetime64()
-        self._count = min(self._count + 1, self._buffer_size)
 
         self._refresh_buffer()
 
-    def push_record(self, record: np.void) -> None:
+    def _shift_for_append(self) -> None:
+        if self._count < self._buffer_size:
+            start_idx = self._buffer_size - self._count
+            if self._count > 0:
+                self._raw_buffer_np[start_idx - 1 : -1] = self._raw_buffer_np[start_idx:]
+                self._timestamps_np[start_idx - 1 : -1] = self._timestamps_np[start_idx:]
+            self._count += 1
+            return
+        self._raw_buffer_np[:-1] = self._raw_buffer_np[1:]
+        self._timestamps_np[:-1] = self._timestamps_np[1:]
+
+    def push_record(self, record: np.void, *, refresh_buffer: bool | None = None) -> None:
         """Fast path for push() using raw numpy structured array records."""
         if self._raw_buffer_np is None:
             raise RuntimeError("Call warm_up() before push().")
-        
-        # Zero-allocation shift through slicing
-        self._raw_buffer_np[:-1] = self._raw_buffer_np[1:]
-        self._timestamps_np[:-1] = self._timestamps_np[1:]
-        
+
+        self._shift_for_append()
+
         # Direct copy
         self._raw_buffer_np[-1] = record
-        self._timestamps_np[-1] = pd.Timestamp(record['timestamp_s'], unit='s', tz='UTC').to_datetime64()
-        self._count = min(self._count + 1, self._buffer_size)
+        timestamp_value = float(np.asarray(record["timestamp_s"]).item())
+        self._timestamps_np[-1] = pd.Timestamp(timestamp_value, unit='s', tz='UTC').to_datetime64()
 
-        self._refresh_buffer()
+        should_refresh = (not self._feature_fast) if refresh_buffer is None else bool(refresh_buffer)
+        if should_refresh:
+            self._refresh_buffer()
+        else:
+            self._get_obs_hot_path()
 
     def _refresh_buffer(self) -> None:
         """Core optimized step: convert ONLY valid numpy buffer rows to DF."""
@@ -535,8 +608,8 @@ class FeatureEngine:
         
         raw = _compute_raw(df, latest_only_hurst=True, fast_mode=True)
         self._buffer = self._drop_invalid_feature_rows(raw)
-        
         self._sync_scaler_cache()
+        self._refresh_feature_cache_from_buffer()
 
     def _get_obs_hot_path(self) -> np.ndarray:
         """
@@ -544,7 +617,9 @@ class FeatureEngine:
         Zero DataFrame creation. Zero pandas_ta logic.
         """
         if self._count < WARMUP_BARS:
-            return np.zeros(len(FEATURE_COLS), dtype=np.float32)
+            zeros = np.zeros(len(FEATURE_COLS), dtype=np.float32)
+            self._set_feature_cache(zeros, zeros, atr_14=0.0, spread_z=0.0, time_delta_z=0.0)
+            return zeros
 
         # Slice relevant buffers - LIMIT TO LAST 500 BARS FOR PERFORMANCE
         # All indicators (SMA50, ATR14, RSI14) converge within 200-500 bars.
@@ -552,13 +627,13 @@ class FeatureEngine:
         raw = self._raw_buffer_np[-window:]
         ts  = self._timestamps_np[-window:]
         
-        c = raw['close']
-        h = raw['high']
-        l = raw['low']
-        o = raw['open']
+        c = raw['close'].astype(np.float64, copy=False)
+        h = raw['high'].astype(np.float64, copy=False)
+        l = raw['low'].astype(np.float64, copy=False)
+        o = raw['open'].astype(np.float64, copy=False)
         # volume = raw['volume'] (unused)
-        s = raw['avg_spread']
-        d = raw['time_delta_s']
+        s = raw['avg_spread'].astype(np.float64, copy=False)
+        d = raw['time_delta_s'].astype(np.float64, copy=False)
 
         # 1. log_return
         log_ret = np.log(c[-1] / c[-2]) if len(c) > 1 else 0.0
@@ -583,7 +658,7 @@ class FeatureEngine:
         
         # 5. Z-Scores (Last 200 bars)
         def z_score(val, series):
-            roll = series[-200:]
+            roll = series[-200:].astype(np.float64, copy=False)
             m = np.mean(roll)
             std = np.std(roll)
             return (val - m) / std if std > 0 else 0.0
@@ -621,15 +696,23 @@ class FeatureEngine:
             "day_cos": d_cos
         }
         
-        obs_raw = np.array([feat_dict[col] for col in FEATURE_COLS], dtype=np.float32)
-        
+        raw_features = np.array([feat_dict[col] for col in FEATURE_COLS], dtype=np.float32)
+
         # 7. Scaling (Pure Numpy)
         if self._scaler_mean is not None:
-            obs = (obs_raw - self._scaler_mean) / self._scaler_scale
+            obs = (raw_features - self._scaler_mean) / self._scaler_scale
         else:
-            obs = obs_raw
-            
-        return np.nan_to_num(obs.astype(np.float32), nan=0.0)
+            obs = raw_features
+
+        scaled_features = np.nan_to_num(obs.astype(np.float32), nan=0.0)
+        self._set_feature_cache(
+            raw_features,
+            scaled_features,
+            atr_14=float(atr),
+            spread_z=float(spread_z),
+            time_delta_z=float(time_delta_z),
+        )
+        return scaled_features
 
     @property
     def latest_observation(self) -> np.ndarray:
@@ -651,7 +734,27 @@ class FeatureEngine:
             obs = np.array([row.get(c, 0.0) for c in FEATURE_COLS], dtype=np.float32)
         if np.any(np.isnan(obs)):
             obs = np.nan_to_num(obs, nan=0.0)
-        return obs
+        raw_features = np.array([float(row.get(col, 0.0)) for col in FEATURE_COLS], dtype=np.float32)
+        self._set_feature_cache(
+            raw_features,
+            obs,
+            atr_14=float(row.get("atr_14", 0.0)),
+            spread_z=float(row.get("spread_z", 0.0)),
+            time_delta_z=float(row.get("time_delta_z", 0.0)),
+        )
+        return self._last_features_scaled.copy()
+
+    @property
+    def latest_features_raw(self) -> np.ndarray:
+        if self._raw_buffer_np is not None and self._count >= WARMUP_BARS and not np.any(self._last_features_raw):
+            self._get_obs_hot_path()
+        return np.array(self._last_features_raw, copy=True)
+
+    @property
+    def latest_aux_data(self) -> dict[str, float]:
+        if self._raw_buffer_np is not None and self._count >= WARMUP_BARS and not np.any(self._last_features_raw):
+            self._get_obs_hot_path()
+        return dict(self._last_aux_data)
 
     def recent_observation_window(self, window_size: int = 1) -> np.ndarray:
         size = max(int(window_size), 1)

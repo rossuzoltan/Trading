@@ -57,9 +57,10 @@ def _heartbeat_from_current_run(current_run: dict[str, Any] | None) -> Path | No
 
 
 def _latest_heartbeat(checkpoints_dir: Path, *, current_run: dict[str, Any] | None = None) -> Path | None:
-    current_run_heartbeat = _heartbeat_from_current_run(current_run)
-    if current_run_heartbeat is not None:
-        return current_run_heartbeat
+    # If we have an active run context, prefer accuracy over "something to show":
+    # do not fall back to older runs when the current run hasn't emitted a heartbeat yet.
+    if current_run is not None:
+        return _heartbeat_from_current_run(current_run)
     candidates = list(checkpoints_dir.glob("fold_*/training_heartbeat.json"))
     candidates.extend(checkpoints_dir.glob("run_*/fold_*/training_heartbeat.json"))
     if not candidates:
@@ -156,10 +157,24 @@ def build_status_summary(symbol: str, checkpoints_dir: Path) -> dict[str, Any]:
     replay_report = _maybe_load(replay_report_path)
 
     baseline_report = None
-    baseline_report_path = None
-    if run_context and run_context.get("baseline_report_path"):
-        baseline_report_path = Path(str(run_context["baseline_report_path"]))
-        baseline_report = _maybe_load(baseline_report_path)
+    baseline_report_path: Path | None = None
+    if run_context is not None:
+        # When a run is active, avoid showing stale baseline reports from prior diagnostics.
+        # Prefer run_context -> current checkpoints root -> nothing (if not generated yet).
+        raw_path = run_context.get("baseline_report_path")
+        if raw_path:
+            candidate = Path(str(raw_path))
+            if candidate.exists():
+                baseline_report_path = candidate
+                baseline_report = _maybe_load(candidate)
+        if baseline_report is None:
+            checkpoints_root = run_context.get("checkpoints_root")
+            if checkpoints_root:
+                root = Path(str(checkpoints_root))
+                candidate = root / f"baseline_diagnostics_{symbol.upper()}.json"
+                if candidate.exists():
+                    baseline_report_path = candidate
+                    baseline_report = _maybe_load(candidate)
     elif diagnostics and diagnostics.get("baseline_report_path"):
         baseline_report_path = Path(str(diagnostics["baseline_report_path"]))
         baseline_report = _maybe_load(baseline_report_path)
@@ -248,8 +263,16 @@ def main() -> int:
             ts = heartbeat.get("timestamp_utc")
             steps = heartbeat.get("num_timesteps")
             ppo = heartbeat.get("ppo_diagnostics", {}) or {}
+            window_sps = heartbeat.get("steps_per_second_window")
+            mean_sps = heartbeat.get("steps_per_second")
             print(f"  timestamp_utc     : {ts}")
             print(f"  num_timesteps     : {steps}")
+            if window_sps is not None:
+                print(f"  sps_window        : {window_sps}")
+                print(f"  window_seconds    : {heartbeat.get('window_seconds')}")
+                print(f"  window_steps      : {heartbeat.get('window_steps')}")
+            if mean_sps is not None:
+                print(f"  sps_mean          : {mean_sps}")
             print(f"  schema_version    : {heartbeat_schema.get('schema_version')}")
             print(f"  schema_state      : {heartbeat_schema.get('schema_state')}")
             print(f"  freshness_state   : {heartbeat_schema.get('freshness_state')}")
