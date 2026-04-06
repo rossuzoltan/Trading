@@ -98,6 +98,18 @@ def _resolve_reward_profile(manifest) -> dict[str, float]:
         "reward_clip_low": float(profile.get("reward_clip_low", -5.0)),
         "reward_clip_high": float(profile.get("reward_clip_high", 5.0)),
     }
+
+
+def _load_training_runtime_options(diagnostics_path: Path | None) -> dict[str, Any]:
+    payload = load_json_report(diagnostics_path) if diagnostics_path is not None and diagnostics_path.exists() else {}
+    return {
+        "window_size": int(payload.get("training_window_size", 1) or 1),
+        "churn_min_hold_bars": int(payload.get("training_churn_min_hold_bars", 0) or 0),
+        "churn_action_cooldown": int(payload.get("training_churn_action_cooldown", 0) or 0),
+        "entry_spread_z_limit": float(payload.get("training_entry_spread_z_limit", 1.5)),
+    }
+
+
 DAILY_LOSS_FRACTION = float(os.environ.get("TRADING_DAILY_LOSS_FRACTION", "0.05"))
 STALE_FEED_MS = int(os.environ.get("TRADING_STALE_FEED_MS", "30000"))
 MAX_BROKER_FAILURES = int(os.environ.get("TRADING_MAX_BROKER_FAILURES", "3"))
@@ -675,6 +687,8 @@ def bootstrap_live_runtime(
             "Retrain/rebuild manifests or set LIVE_ALLOW_BAR_SPEC_MISMATCH=1 for an explicit override."
         )
     dataset_id = dataset_id_for_path(dataset_path)
+    diagnostics_path = Path(manifest.training_diagnostics_path) if manifest.training_diagnostics_path else None
+    runtime_options = _load_training_runtime_options(diagnostics_path)
 
     action_map = deserialize_action_map(manifest.action_map)
     observation_shape = list(getattr(manifest, "observation_shape", None) or [1, len(FEATURE_COLS) + STATE_FEATURE_COUNT])
@@ -752,6 +766,10 @@ def bootstrap_live_runtime(
         reward_transaction_penalty=reward_profile["transaction_penalty"],
         reward_clip_low=reward_profile["reward_clip_low"],
         reward_clip_high=reward_profile["reward_clip_high"],
+        window_size=int(runtime_options.get("window_size", observation_shape[0] if observation_shape else 1)),
+        churn_min_hold_bars=int(runtime_options.get("churn_min_hold_bars", 0)),
+        churn_action_cooldown=int(runtime_options.get("churn_action_cooldown", 0)),
+        entry_spread_z_limit=float(runtime_options.get("entry_spread_z_limit", 1.5)),
     )
     runtime.startup_reconcile()
     source = Mt5CursorTickSource(broker_module)

@@ -139,6 +139,36 @@ def build_action_mask(
     return mask
 
 
+def apply_execution_action_guards(
+    mask: Sequence[bool],
+    *,
+    position: ConfirmedPosition,
+    spread_z: float,
+    entry_spread_z_limit: float,
+    churn_min_hold_bars: int,
+    current_bar_index: int,
+    last_close_bar_index: int | None,
+    churn_action_cooldown: int,
+) -> np.ndarray:
+    guarded = np.asarray(mask, dtype=bool).copy()
+    if guarded.size == 0:
+        return guarded
+    if position.is_flat and float(spread_z) >= float(entry_spread_z_limit):
+        guarded[2:] = False
+    if not position.is_flat and int(churn_min_hold_bars) > 0:
+        if int(position.time_in_trade_bars) < int(churn_min_hold_bars):
+            forced_hold = np.zeros_like(guarded)
+            forced_hold[0] = True
+            return forced_hold
+    if position.is_flat and int(churn_action_cooldown) > 0 and last_close_bar_index is not None:
+        bars_since_close = int(current_bar_index) - int(last_close_bar_index)
+        if bars_since_close < int(churn_action_cooldown):
+            forced_hold = np.zeros_like(guarded)
+            forced_hold[0] = True
+            return forced_hold
+    return guarded
+
+
 def action_label(action: ActionSpec) -> str:
     if action.action_type == ActionType.HOLD:
         return "FLAT"

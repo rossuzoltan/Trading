@@ -153,6 +153,7 @@ class TrainRehabTests(unittest.TestCase):
         reward_strip = _resolve_training_experiment_profile("reward_strip")
         hard_churn = _resolve_training_experiment_profile("reward_strip_hard_churn")
         hard_churn_alpha = _resolve_training_experiment_profile("reward_strip_hard_churn_alpha_gate")
+        rehab_safer = _resolve_training_experiment_profile("reward_strip_rehab_safer_alpha_gate")
 
         self.assertEqual(0.0, reward_strip["reward_downside_risk_coef"])
         self.assertEqual(0.0, reward_strip["reward_turnover_coef"])
@@ -165,6 +166,11 @@ class TrainRehabTests(unittest.TestCase):
         self.assertEqual(3, hard_churn["churn_action_cooldown"])
         self.assertTrue(hard_churn_alpha["alpha_gate_enabled"])
         self.assertEqual("auto", hard_churn_alpha["alpha_gate_model"])
+        self.assertEqual(8, rehab_safer["churn_min_hold_bars"])
+        self.assertEqual(5, rehab_safer["churn_action_cooldown"])
+        self.assertAlmostEqual(0.75, rehab_safer["entry_spread_z_limit"])
+        self.assertTrue(rehab_safer["alpha_gate_enabled"])
+        self.assertEqual("auto", rehab_safer["alpha_gate_model"])
 
     def test_explicit_env_var_values_beat_profile_defaults(self):
         with patch.dict("os.environ", {"TRAIN_REWARD_SCALE": "2500"}, clear=False):

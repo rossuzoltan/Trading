@@ -114,11 +114,12 @@ class FakeMt5:
 
 class StubFeatureEngine:
     def __init__(self):
+        self.next_spread_z = 0.0
         self._buffer = pd.DataFrame(
             [
                 {
                     "atr_14": 0.0010,
-                    "spread_z": 0.0,
+                    "spread_z": self.next_spread_z,
                 }
             ]
         )
@@ -140,7 +141,8 @@ class StubFeatureEngine:
             dtype=np.float32,
         )
         self._latest_raw = np.zeros(len(FEATURE_COLS), dtype=np.float32)
-        self._latest_raw[FEATURE_COLS.index("spread_z")] = 0.0
+        self._latest_raw[FEATURE_COLS.index("spread_z")] = float(self.next_spread_z)
+        self._latest_aux = {"atr_14": 0.0010, "spread_z": float(self.next_spread_z), "time_delta_z": 0.0}
         self._buffer = pd.concat(
             [
                 self._buffer,
@@ -148,7 +150,7 @@ class StubFeatureEngine:
                     [
                         {
                             "atr_14": 0.0010,
-                            "spread_z": 0.0,
+                            "spread_z": float(self.next_spread_z),
                         }
                     ]
                 ),
@@ -259,7 +261,7 @@ def make_bar(index: int, close: float) -> VolumeBar:
     )
 
 
-def make_runtime(broker: BaseBroker, policy) -> RuntimeEngine:
+def make_runtime(broker: BaseBroker, policy, **runtime_kwargs) -> RuntimeEngine:
     snapshot = RuntimeSnapshot(last_equity=1000.0, high_water_mark=1000.0, day_start_equity=1000.0)
     return RuntimeEngine(
         symbol="EURUSD",
@@ -270,6 +272,7 @@ def make_runtime(broker: BaseBroker, policy) -> RuntimeEngine:
         risk_engine=RiskEngine(RiskLimits(), snapshot=snapshot, initial_equity=1000.0),
         snapshot=snapshot,
         state_store=None,
+        **runtime_kwargs,
     )
 
 
@@ -399,6 +402,61 @@ class RuntimeRefactorTests(unittest.TestCase):
         self.assertEqual(runtime.confirmed_position.direction, 0)
         self.assertFalse(result.submit_result.accepted)
         self.assertEqual(runtime.snapshot.consecutive_broker_failures, 1)
+
+    def test_runtime_blocks_close_before_min_hold_bars(self):
+        broker = ReplayBroker(symbol="EURUSD", commission_per_lot=0.0, slippage_pips=0.0)
+        runtime = make_runtime(
+            broker,
+            SequencePolicy([2, 1, 1]),
+            churn_min_hold_bars=3,
+        )
+        runtime.startup_reconcile()
+
+        open_result = runtime.process_bar(make_bar(0, 1.1000))
+        first_live_bar = runtime.process_bar(make_bar(1, 1.1002))
+        blocked_close = runtime.process_bar(make_bar(2, 1.1001))
+
+        self.assertEqual(ActionType.OPEN, open_result.action.action_type)
+        self.assertEqual(1, first_live_bar.position_direction)
+        self.assertEqual(ActionType.HOLD, blocked_close.action.action_type)
+        self.assertEqual(0, blocked_close.action_index)
+        self.assertEqual(1, blocked_close.position_direction)
+
+    def test_runtime_blocks_reentry_during_cooldown(self):
+        broker = ReplayBroker(symbol="EURUSD", commission_per_lot=0.0, slippage_pips=0.0)
+        runtime = make_runtime(
+            broker,
+            SequencePolicy([2, 1, 0, 2]),
+            churn_action_cooldown=2,
+        )
+        runtime.startup_reconcile()
+
+        runtime.process_bar(make_bar(0, 1.1000))
+        close_result = runtime.process_bar(make_bar(1, 1.1002))
+        close_fill_bar = runtime.process_bar(make_bar(2, 1.1001))
+        blocked_reentry = runtime.process_bar(make_bar(3, 1.1003))
+
+        self.assertEqual(ActionType.CLOSE, close_result.action.action_type)
+        self.assertEqual(0, close_fill_bar.position_direction)
+        self.assertEqual(ActionType.HOLD, blocked_reentry.action.action_type)
+        self.assertEqual(0, blocked_reentry.action_index)
+        self.assertEqual(0, blocked_reentry.position_direction)
+
+    def test_runtime_blocks_entry_when_spread_z_exceeds_training_limit(self):
+        broker = ReplayBroker(symbol="EURUSD", commission_per_lot=0.0, slippage_pips=0.0)
+        runtime = make_runtime(
+            broker,
+            SequencePolicy([2]),
+            entry_spread_z_limit=0.25,
+        )
+        runtime.startup_reconcile()
+        runtime.feature_engine.next_spread_z = 0.5
+
+        result = runtime.process_bar(make_bar(0, 1.1000))
+
+        self.assertEqual(ActionType.HOLD, result.action.action_type)
+        self.assertEqual(0, result.action_index)
+        self.assertEqual(0, result.position_direction)
 
     def test_artifact_mismatch_blocks_inference(self):
         tmpdir = make_test_dir("artifact_mismatch")

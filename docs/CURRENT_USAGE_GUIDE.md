@@ -94,6 +94,12 @@ Available profiles:
   - sets `TRAIN_CHURN_ACTION_COOLDOWN=3`
 - `reward_strip_hard_churn_alpha_gate`
   - `reward_strip_hard_churn` plus baseline-driven alpha gate
+- `reward_strip_rehab_safer_alpha_gate`
+  - stricter corrective profile for churn rehab
+  - sets `TRAIN_CHURN_MIN_HOLD_BARS=8`
+  - sets `TRAIN_CHURN_ACTION_COOLDOWN=5`
+  - sets `TRAIN_ENTRY_SPREAD_Z_LIMIT=0.75`
+  - enables the baseline-driven alpha gate
 
 Example:
 
@@ -145,7 +151,9 @@ Current behavior:
 
 - replay uses the current runtime path
 - if training used a non-default window size, OOS replay honors it
+- if training diagnostics recorded churn min-hold, cooldown, or entry-spread guard settings, OOS replay applies the same execution-time masks
 - if training diagnostics recorded alpha gate usage, OOS replay rebuilds and applies the same gate
+- replay reports now include an authoritative `runtime_parity_verdict`; the deployment gate reads that verdict directly instead of relying on a separately-run comparison file
 - use `.\.venv\Scripts\python.exe .\compare_oos_baselines.py --symbol EURUSD` to compare the RL replay against simple baselines; it now falls back to checkpoint artifacts and can recompute the RL replay when no saved replay report exists
 
 If you need a quick postmortem after a losing replay or a closed-trade audit:
@@ -198,7 +206,7 @@ $env:EVAL_SYMBOL='EURUSD'
 Fast corrective run after a bad PPO diagnosis:
 
 ```powershell
-$env:TRAIN_EXPERIMENT_PROFILE='reward_strip_hard_churn_alpha_gate'
+$env:TRAIN_EXPERIMENT_PROFILE='reward_strip_rehab_safer_alpha_gate'
 $env:TRAIN_WINDOW_SIZE='8'
 $env:TRAIN_SYMBOL='EURUSD'
 $env:TRAIN_TOTAL_TIMESTEPS='120000'

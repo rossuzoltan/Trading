@@ -167,6 +167,7 @@ def build_deployment_gate(
     max_drawdown = float(replay_metrics.get("max_drawdown", 1.0))
     profit_factor = float(replay_metrics.get("profit_factor", 0.0))
     expectancy = float(replay_metrics.get("expectancy", 0.0))
+    runtime_parity_verdict = dict(replay_metrics.get("runtime_parity_verdict", {}) or {})
 
     if timed_sharpe < DEPLOY_TIMED_SHARPE_MIN:
         blockers.append(f"Timed Sharpe {timed_sharpe:.3f} < {DEPLOY_TIMED_SHARPE_MIN:.2f}")
@@ -176,6 +177,16 @@ def build_deployment_gate(
         blockers.append(f"Profit factor {profit_factor:.3f} < {DEPLOY_PROFIT_FACTOR_MIN:.2f}")
     if expectancy < DEPLOY_EXPECTANCY_MIN:
         blockers.append(f"Expectancy {expectancy:.3f} < {DEPLOY_EXPECTANCY_MIN:.2f}")
+    if runtime_parity_verdict:
+        research_summary = dict(runtime_parity_verdict.get("research_baseline_summary", {}) or {})
+        if bool(research_summary.get("research_baseline_viable", False)) and not bool(
+            runtime_parity_verdict.get("research_vs_runtime_parity_aligned", True)
+        ):
+            blockers.append(
+                "Research baseline looks viable but runtime-parity baselines do not; replay economics and baseline gate are misaligned."
+            )
+        if bool(runtime_parity_verdict.get("fragile_under_cost_stress", False)):
+            blockers.append("Replay is profitable only under base costs and fails slippage stress.")
 
     if training_diagnostics is None:
         blockers.append("Training diagnostics missing.")
@@ -230,6 +241,7 @@ def build_deployment_gate(
         "replay_metrics": replay_metrics,
         "training_diagnostics": training_diagnostics,
         "ops_attestation": ops_attestation,
+        "runtime_parity_verdict": runtime_parity_verdict or None,
         "blockers": blockers,
     }
 

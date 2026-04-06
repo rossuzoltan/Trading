@@ -8,6 +8,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
 
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import StandardScaler
+
 from artifact_manifest import ArtifactManifest
 from trading_config import DeploymentPaths
 
@@ -212,6 +216,97 @@ class LiveReadinessTests(unittest.TestCase):
             with self.assertRaises(RuntimeError) as ctx:
                 live_bridge.bootstrap_live_runtime(symbol="EURUSD", ticks_per_bar=2000, mt5_module=object())
         self.assertIn("ticks_per_bar", str(ctx.exception))
+
+    def test_bootstrap_live_runtime_loads_trained_churn_guards_from_diagnostics(self):
+        tmpdir = make_test_dir("live_bootstrap_guards")
+        try:
+            diagnostics_path = tmpdir / "training_diagnostics.json"
+            diagnostics_path.write_text(
+                json.dumps(
+                    {
+                        "training_window_size": 3,
+                        "training_churn_min_hold_bars": 8,
+                        "training_churn_action_cooldown": 5,
+                        "training_entry_spread_z_limit": 0.75,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            manifest = ArtifactManifest(
+                manifest_version="1",
+                strategy_symbol="EURUSD",
+                model_path="dummy.zip",
+                scaler_path="dummy.pkl",
+                model_version="dummy-v1",
+                model_sha256="x",
+                scaler_sha256="y",
+                feature_columns=[],
+                observation_shape=[3, 1],
+                action_map=[],
+                dataset_id="dataset",
+                sb3_version="2.5.0",
+                sb3_contrib_version="2.5.0",
+                sklearn_version=__import__("sklearn").__version__,
+                ticks_per_bar=2000,
+                training_diagnostics_path=str(diagnostics_path),
+            )
+            warmup_idx = pd.date_range("2024-01-01", periods=160, freq="min", tz="UTC")
+            warmup_frame = pd.DataFrame(
+                {
+                    "Open": np.linspace(1.0, 1.1, 160),
+                    "High": np.linspace(1.0002, 1.1002, 160),
+                    "Low": np.linspace(0.9998, 1.0998, 160),
+                    "Close": np.linspace(1.0, 1.1, 160),
+                    "Volume": np.full(160, 5000.0),
+                    "avg_spread": np.full(160, 0.0001),
+                    "time_delta_s": np.full(160, 60.0),
+                },
+                index=warmup_idx,
+            )
+            scaler = StandardScaler().fit(np.ones((20, len(live_bridge.FEATURE_COLS))))
+
+            class FakeMt5:
+                def initialize(self):
+                    return True
+
+                def login(self, *_args):
+                    return True
+
+                def shutdown(self):
+                    return None
+
+                def account_info(self):
+                    return SimpleNamespace(equity=1000.0, login=123)
+
+                def positions_get(self, symbol=None):
+                    return []
+
+                def symbol_info_tick(self, symbol):
+                    return SimpleNamespace(bid=1.1000, ask=1.1001)
+
+                def symbol_info(self, symbol):
+                    return SimpleNamespace(point=0.00001, visible=True)
+
+            with patch("live_bridge.resolve_dataset_path", return_value=tmpdir / "dataset.csv"), \
+                patch("live_bridge.dataset_id_for_path", return_value="dataset"), \
+                patch("live_bridge.resolve_manifest_path", return_value=tmpdir / "artifact_manifest.json"), \
+                patch("live_bridge.load_manifest", return_value=manifest), \
+                patch("live_bridge.load_validated_model", return_value=SimpleNamespace()), \
+                patch("live_bridge.load_validated_vecnormalize", return_value=None), \
+                patch("live_bridge.load_validated_scaler", return_value=scaler), \
+                patch("live_bridge._load_warmup_bars", return_value=warmup_frame):
+                runtime, *_ = live_bridge.bootstrap_live_runtime(
+                    symbol="EURUSD",
+                    state_path=str(tmpdir / "state.json"),
+                    ticks_per_bar=2000,
+                    mt5_module=FakeMt5(),
+                )
+            self.assertEqual(3, runtime.window_size)
+            self.assertEqual(8, runtime.churn_min_hold_bars)
+            self.assertEqual(5, runtime.churn_action_cooldown)
+            self.assertAlmostEqual(0.75, runtime.entry_spread_z_limit)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
     def test_preflight_reports_gate_and_manifest_blockers(self):
         tmpdir = make_test_dir("preflight")

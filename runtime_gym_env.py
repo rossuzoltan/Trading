@@ -24,7 +24,15 @@ from runtime.runtime_engine import RuntimeEngine, RuntimeSnapshot
 
 from edge_research import BaselineAlphaGate
 from feature_engine import FEATURE_COLS, FeatureEngine, WARMUP_BARS
-from runtime_common import STATE_FEATURE_COUNT, ActionSpec, ActionType, action_label, build_action_mask, build_observation
+from runtime_common import (
+    STATE_FEATURE_COUNT,
+    ActionSpec,
+    ActionType,
+    action_label,
+    apply_execution_action_guards,
+    build_action_mask,
+    build_observation,
+)
 from symbol_utils import pip_value_for_volume
 
 
@@ -670,6 +678,9 @@ class RuntimeGymEnv(gym.Env):
             reward_clip_high=float(self.config.reward_clip_high),
             window_size=int(self.config.window_size),
             alpha_gate=self._alpha_gate,
+            churn_min_hold_bars=int(self.config.churn_min_hold_bars),
+            churn_action_cooldown=int(self.config.churn_action_cooldown),
+            entry_spread_z_limit=float(self.config.entry_spread_z_limit),
         )
         runtime.startup_reconcile()
         return runtime
@@ -924,31 +935,18 @@ class RuntimeGymEnv(gym.Env):
             position=self._runtime.confirmed_position,
             spread_z=spread_z
         )
-        if self._runtime.confirmed_position.is_flat and float(spread_z) >= float(self.config.entry_spread_z_limit):
-            mask[2:] = False
-        
-        # Phase 4: Churn/Selectivity constraints
-        position = self._runtime.confirmed_position
-        current_bar_index = self._runtime.processed_bars_count
-        
-        if not position.is_flat and self.config.churn_min_hold_bars > 0:
-            if int(position.time_in_trade_bars) < self.config.churn_min_hold_bars:
-                # Forced HOLD: block all except index 0 (HOLD)
-                churn_mask = np.zeros_like(mask)
-                churn_mask[0] = True
-                return churn_mask
-                
-        if position.is_flat and self.config.churn_action_cooldown > 0:
-            last_close = self._runtime.last_close_bar_index
-            if last_close is not None:
-                bars_since = current_bar_index - last_close
-                if bars_since < self.config.churn_action_cooldown:
-                    # Forced HOLD: block all except index 0 (HOLD)
-                    cooldown_mask = np.zeros_like(mask)
-                    cooldown_mask[0] = True
-                    return cooldown_mask
+        mask = apply_execution_action_guards(
+            mask,
+            position=self._runtime.confirmed_position,
+            spread_z=spread_z,
+            entry_spread_z_limit=float(self.config.entry_spread_z_limit),
+            churn_min_hold_bars=int(self.config.churn_min_hold_bars),
+            current_bar_index=int(self._runtime.processed_bars_count),
+            last_close_bar_index=self._runtime.last_close_bar_index,
+            churn_action_cooldown=int(self.config.churn_action_cooldown),
+        )
 
-        if position.is_flat and self._alpha_gate is not None:
+        if self._runtime.confirmed_position.is_flat and self._alpha_gate is not None:
             allow_long, allow_short, scores = self._alpha_gate.allowed_directions(latest_row)
             self._last_alpha_gate_scores = dict(scores)
             for idx, action in enumerate(self.action_map):

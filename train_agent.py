@@ -156,10 +156,22 @@ def _resolve_training_experiment_profile(profile_name: str) -> dict[str, Any]:
             }
         )
         return profile
+    if normalized in {"reward_strip_rehab_safer_alpha_gate", "finalboss_reward_strip_rehab_safer_alpha_gate"}:
+        profile = _resolve_training_experiment_profile("reward_strip")
+        profile.update(
+            {
+                "churn_min_hold_bars": 8,
+                "churn_action_cooldown": 5,
+                "entry_spread_z_limit": 0.75,
+                "alpha_gate_enabled": True,
+                "alpha_gate_model": "auto",
+            }
+        )
+        return profile
     raise ValueError(
         "Unsupported TRAIN_EXPERIMENT_PROFILE="
         f"{profile_name!r}. Expected one of: reward_strip, reward_strip_hard_churn, "
-        "reward_strip_hard_churn_alpha_gate."
+        "reward_strip_hard_churn_alpha_gate, reward_strip_rehab_safer_alpha_gate."
     )
 
 
@@ -433,6 +445,13 @@ if TRAIN_EXPERIMENT_PROFILE_SETTINGS:
             TRAIN_CHURN_PENALTY_USD,
             "TRAIN_CHURN_PENALTY_USD",
             TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("churn_penalty_usd", TRAIN_CHURN_PENALTY_USD),
+        )
+    )
+    TRAIN_ENTRY_SPREAD_Z_LIMIT = float(
+        _apply_profile_override(
+            TRAIN_ENTRY_SPREAD_Z_LIMIT,
+            "TRAIN_ENTRY_SPREAD_Z_LIMIT",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("entry_spread_z_limit", TRAIN_ENTRY_SPREAD_Z_LIMIT),
         )
     )
     TRAIN_REWARD_DOWNSIDE_RISK_COEF = float(
@@ -3717,6 +3736,9 @@ def main() -> None:
         diagnostics["baseline_target_horizon_bars"] = int(BASELINE_TARGET_HORIZON_BARS)
         diagnostics["baseline_report_path"] = str(baseline_report_path)
         diagnostics["training_experiment_profile"] = TRAIN_EXPERIMENT_PROFILE or "default"
+        diagnostics["training_churn_min_hold_bars"] = int(TRAIN_CHURN_MIN_HOLD_BARS)
+        diagnostics["training_churn_action_cooldown"] = int(TRAIN_CHURN_ACTION_COOLDOWN)
+        diagnostics["training_entry_spread_z_limit"] = float(TRAIN_ENTRY_SPREAD_Z_LIMIT)
         diagnostics["training_window_size"] = int(TRAIN_WINDOW_SIZE)
         diagnostics["training_alpha_gate_enabled"] = bool(TRAIN_ALPHA_GATE_ENABLED)
         diagnostics["training_alpha_gate_model"] = str(TRAIN_ALPHA_GATE_MODEL)

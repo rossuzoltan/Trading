@@ -161,6 +161,48 @@ class DataQualityGateTests(unittest.TestCase):
         self.assertTrue(gate["approved_for_live"])
         self.assertEqual([], gate["blockers"])
 
+    def test_deployment_gate_blocks_replay_embedded_parity_mismatch(self):
+        replay_metrics = {
+            "timed_sharpe": 0.5,
+            "max_drawdown": 0.1,
+            "profit_factor": 1.5,
+            "expectancy": 1.0,
+            "runtime_parity_verdict": {
+                "research_vs_runtime_parity_aligned": False,
+                "fragile_under_cost_stress": False,
+                "research_baseline_summary": {"research_baseline_viable": True},
+            },
+        }
+        with patch.dict("os.environ", {"LIVE_REQUIRE_OPS_ATTESTATION": "0"}, clear=False):
+            gate = build_deployment_gate(
+                symbol="EURUSD",
+                replay_metrics=replay_metrics,
+                training_diagnostics=self._deployment_ready_training_diagnostics(),
+            )
+        self.assertFalse(gate["approved_for_live"])
+        self.assertTrue(any("runtime-parity baselines do not" in blocker for blocker in gate["blockers"]))
+
+    def test_deployment_gate_blocks_cost_stress_fragility_only_when_flagged(self):
+        replay_metrics = {
+            "timed_sharpe": 0.5,
+            "max_drawdown": 0.1,
+            "profit_factor": 1.5,
+            "expectancy": 1.0,
+            "runtime_parity_verdict": {
+                "research_vs_runtime_parity_aligned": True,
+                "fragile_under_cost_stress": True,
+                "research_baseline_summary": {"research_baseline_viable": False},
+            },
+        }
+        with patch.dict("os.environ", {"LIVE_REQUIRE_OPS_ATTESTATION": "0"}, clear=False):
+            gate = build_deployment_gate(
+                symbol="EURUSD",
+                replay_metrics=replay_metrics,
+                training_diagnostics=self._deployment_ready_training_diagnostics(),
+            )
+        self.assertFalse(gate["approved_for_live"])
+        self.assertIn("Replay is profitable only under base costs and fails slippage stress.", gate["blockers"])
+
     def test_assess_training_data_sufficiency_includes_validation_floor(self):
         with patch.dict(
             "os.environ",

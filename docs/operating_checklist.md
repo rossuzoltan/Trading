@@ -14,6 +14,7 @@ Use this checklist after a training run, restart drill, and shadow session.
 ## What the checklist enforces
 
 - deployment gate approval
+  - includes replay-embedded runtime parity and slippage-stress blockers
 - live preflight approval
 - artifact manifest parity for `ticks_per_bar`
 - execution audit sample count

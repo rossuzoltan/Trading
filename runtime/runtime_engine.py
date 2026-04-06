@@ -29,6 +29,7 @@ from edge_research import BaselineAlphaGate
 from feature_engine import FEATURE_COLS, FeatureEngine
 from risk.risk_engine import RiskEngine, sync_confirmed_position
 from runtime_common import (
+    apply_execution_action_guards,
     build_action_mask,
     build_observation,
 )
@@ -333,6 +334,9 @@ class RuntimeEngine:
         reward_clip_high: float = 5.0,
         window_size: int = 1,
         alpha_gate: BaselineAlphaGate | None = None,
+        churn_min_hold_bars: int = 0,
+        churn_action_cooldown: int = 0,
+        entry_spread_z_limit: float = 1.5,
         drawdown_penalty: float | None = None,
         transaction_penalty: float | None = None,
     ) -> None:
@@ -356,6 +360,9 @@ class RuntimeEngine:
         self.reward_clip_high = float(reward_clip_high)
         self.window_size = max(int(window_size), 1)
         self.alpha_gate = alpha_gate
+        self.churn_min_hold_bars = max(int(churn_min_hold_bars), 0)
+        self.churn_action_cooldown = max(int(churn_action_cooldown), 0)
+        self.entry_spread_z_limit = float(entry_spread_z_limit)
         self.last_alpha_gate_scores: dict[str, float] | None = None
         self.confirmed_position = snapshot.confirmed_position
         self.last_equity = float(snapshot.last_equity)
@@ -653,6 +660,16 @@ class RuntimeEngine:
         )
 
         mask = build_action_mask(self.action_map, position=self.confirmed_position, spread_z=spread_z)
+        mask = apply_execution_action_guards(
+            mask,
+            position=self.confirmed_position,
+            spread_z=spread_z,
+            entry_spread_z_limit=self.entry_spread_z_limit,
+            churn_min_hold_bars=self.churn_min_hold_bars,
+            current_bar_index=self.processed_bars_count,
+            last_close_bar_index=self.last_close_bar_index,
+            churn_action_cooldown=self.churn_action_cooldown,
+        )
         self.last_alpha_gate_scores = None
         if self.confirmed_position.is_flat and self.alpha_gate is not None:
             feature_row = (

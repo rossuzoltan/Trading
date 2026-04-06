@@ -153,6 +153,33 @@ class CompareOosBaselinesTests(unittest.TestCase):
         self.assertIn("runtime_trend", results)
         self.assertEqual(0, int(results["runtime_flat"]["metrics"]["trade_count"]))
 
+    def test_runtime_parity_verdict_marks_fragility_only_after_positive_base(self) -> None:
+        context = self._build_context()
+        replay_metrics = {
+            "trade_count": 10,
+            "net_pnl_usd": 25.0,
+            "validation_status": {"passed": True},
+        }
+        stress_side_effects = [
+            {"metrics": {"trade_count": 10, "net_pnl_usd": 5.0, "validation_status": {"passed": True}}},
+            {"metrics": {"trade_count": 10, "net_pnl_usd": -1.0, "validation_status": {"passed": True}}},
+        ]
+        with (
+            patch.object(evaluate_oos, "_evaluate_runtime_baselines", return_value={"runtime_flat": {"metrics": {"trade_count": 0, "net_pnl_usd": 0.0, "validation_status": {"passed": True}}}}),
+            patch.object(evaluate_oos, "_load_research_baseline_summary", return_value={"research_baseline_viable": True, "best_baseline": "mean_reversion"}),
+            patch.object(evaluate_oos, "_evaluate_policy", side_effect=stress_side_effects),
+        ):
+            verdict = evaluate_oos._build_runtime_parity_verdict(
+                context=context,
+                replay_metrics=replay_metrics,
+                training_diagnostics={"baseline_report_path": "unused.json"},
+            )
+
+        self.assertFalse(verdict["research_vs_runtime_parity_aligned"])
+        self.assertTrue(verdict["fragile_under_cost_stress"])
+        self.assertIn("1.5x", verdict["slippage_stress"])
+        self.assertIn("2.0x", verdict["slippage_stress"])
+
     def test_build_baseline_comparison_uses_replay_context_fallback(self) -> None:
         context = self._build_context()
         baseline_report = {
@@ -181,6 +208,17 @@ class CompareOosBaselinesTests(unittest.TestCase):
                     "_evaluate_policy",
                     return_value={"metrics": {"trade_count": 9.0, "net_pnl_usd": 12.5, "profit_factor": 1.3}},
                 ),
+                patch.object(
+                    baseline_tool,
+                    "_shared_build_runtime_parity_verdict",
+                    return_value={
+                        "best_runtime_baseline": "runtime_flat",
+                        "best_runtime_baseline_metrics": {"trade_count": 0.0, "net_pnl_usd": 0.0},
+                        "runtime_holdout_models": {"runtime_flat": {"metrics": {"trade_count": 0.0, "net_pnl_usd": 0.0}}},
+                        "research_vs_runtime_parity_aligned": False,
+                        "fragile_under_cost_stress": False,
+                    },
+                ),
             ):
                 report = baseline_tool.build_baseline_comparison(symbol="EURUSD", report_path=report_path)
             self.assertTrue(report_path.exists())
@@ -188,6 +226,7 @@ class CompareOosBaselinesTests(unittest.TestCase):
         self.assertEqual("mean_reversion", report["best_baseline"])
         self.assertIn(report["best_runtime_baseline"], {"runtime_flat", "runtime_mean_reversion", "runtime_trend"})
         self.assertIn("runtime_holdout_models", report)
+        self.assertIn("runtime_parity_verdict", report)
         self.assertAlmostEqual(7.0, float(report["cost_profile"]["commission_per_lot"]))
         self.assertEqual(9.0, float(report["rl_replay_metrics"]["trade_count"]))
 

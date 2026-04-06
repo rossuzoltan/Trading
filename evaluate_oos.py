@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import pickle
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable
@@ -106,6 +106,225 @@ class ReplayContext:
     runtime_options: dict[str, Any]
 
 
+def _clone_context_with_segment(context: ReplayContext, segment: pd.DataFrame) -> ReplayContext:
+    if segment.empty:
+        raise RuntimeError("Segment must not be empty.")
+    warmup_source = _prepend_runtime_warmup_context(context.full_feature_frame, segment)
+    warmup_count = max(len(warmup_source) - len(segment), 0)
+    return replace(
+        context,
+        warmup_frame=warmup_source.iloc[:warmup_count].copy(),
+        replay_frame=segment.copy(),
+        replay_feature_frame=segment.copy(),
+        holdout_feature_frame=segment.copy(),
+        holdout_start_utc=pd.Timestamp(segment.index[0]).isoformat(),
+    )
+
+
+def _with_cost_stress(context: ReplayContext, *, slippage_multiplier: float) -> ReplayContext:
+    stressed = dict(context.execution_cost_profile)
+    stressed["slippage_pips"] = float(stressed.get("slippage_pips", 0.25)) * float(slippage_multiplier)
+    return replace(context, execution_cost_profile=stressed)
+
+
+def _best_model_name(models: dict[str, Any]) -> str | None:
+    if not models:
+        return None
+    return max(
+        models.items(),
+        key=lambda item: (
+            float(((item[1] or {}).get("metrics", {}) or {}).get("expectancy_usd", 0.0)),
+            float(((item[1] or {}).get("metrics", {}) or {}).get("profit_factor", 0.0)),
+            float(((item[1] or {}).get("metrics", {}) or {}).get("trade_count", 0.0)),
+        ),
+    )[0]
+
+
+def _flat_provider(**_: object) -> int:
+    return 0
+
+
+def _resolve_action_indexes(action_map) -> dict[str, int]:
+    indexes = {"hold": 0, "close": 0, "long": 0, "short": 0}
+    for idx, action in enumerate(action_map):
+        if action.action_type.value == "HOLD":
+            indexes["hold"] = int(idx)
+        elif action.action_type.value == "CLOSE":
+            indexes["close"] = int(idx)
+        elif action.action_type.value == "OPEN" and int(action.direction or 0) > 0:
+            indexes["long"] = int(idx)
+        elif action.action_type.value == "OPEN" and int(action.direction or 0) < 0:
+            indexes["short"] = int(idx)
+    return indexes
+
+
+def _target_direction_to_action_index(*, action_map, position_direction: int, target_direction: int) -> int:
+    indexes = _resolve_action_indexes(action_map)
+    current_direction = int(position_direction or 0)
+    desired_direction = int(target_direction or 0)
+    if current_direction == desired_direction:
+        return indexes["hold"]
+    if desired_direction == 0:
+        return indexes["close"] if current_direction != 0 else indexes["hold"]
+    if current_direction == 0:
+        return indexes["long"] if desired_direction > 0 else indexes["short"]
+    return indexes["close"]
+
+
+def _trend_provider(*, feature_row, position_direction: int, action_map, **_: object) -> int:
+    ma20_slope = float(feature_row.get("ma20_slope", 0.0) or 0.0)
+    ma50_slope = float(feature_row.get("ma50_slope", 0.0) or 0.0)
+    target_direction = 0
+    if ma20_slope > 0.0 and ma50_slope > 0.0:
+        target_direction = 1
+    elif ma20_slope < 0.0 and ma50_slope < 0.0:
+        target_direction = -1
+    return _target_direction_to_action_index(
+        action_map=action_map,
+        position_direction=int(position_direction or 0),
+        target_direction=target_direction,
+    )
+
+
+def _mean_reversion_provider(*, feature_row, position_direction: int, action_map, **_: object) -> int:
+    spread_z = float(feature_row.get("spread_z", 0.0) or 0.0)
+    target_direction = 0
+    if spread_z <= -1.0:
+        target_direction = 1
+    elif spread_z >= 1.0:
+        target_direction = -1
+    return _target_direction_to_action_index(
+        action_map=action_map,
+        position_direction=int(position_direction or 0),
+        target_direction=target_direction,
+    )
+
+
+def _metrics_profitable(metrics: dict[str, Any] | None) -> bool:
+    if not metrics:
+        return False
+    validation_status = dict(metrics.get("validation_status", {}) or {})
+    if validation_status and not bool(validation_status.get("passed", False)):
+        return False
+    return bool(int(metrics.get("trade_count", 0) or 0) > 0 and float(metrics.get("net_pnl_usd", 0.0)) > 0.0)
+
+
+def _compute_expectancy_slice(trades: list[dict[str, Any]]) -> dict[str, float]:
+    if not trades:
+        return {"trade_count": 0.0, "net_pnl_usd": 0.0, "expectancy_usd": 0.0, "win_rate": 0.0}
+    wins = sum(1 for trade in trades if float(trade.get("net_pnl_usd", 0.0)) > 0.0)
+    total = sum(float(trade.get("net_pnl_usd", 0.0)) for trade in trades)
+    return {
+        "trade_count": float(len(trades)),
+        "net_pnl_usd": float(total),
+        "expectancy_usd": float(total / max(len(trades), 1)),
+        "win_rate": float(wins / max(len(trades), 1)),
+    }
+
+
+def _direction_expectancy(trade_log: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
+    longs = [dict(trade) for trade in trade_log if int(trade.get("direction", 0) or 0) > 0]
+    shorts = [dict(trade) for trade in trade_log if int(trade.get("direction", 0) or 0) < 0]
+    return {
+        "long": _compute_expectancy_slice(longs),
+        "short": _compute_expectancy_slice(shorts),
+    }
+
+
+def _hour_bucket_expectancy(
+    trade_log: list[dict[str, Any]],
+    execution_log: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    close_events = [
+        dict(event)
+        for event in execution_log
+        if isinstance(event, dict) and str(event.get("side", "")).lower() == "close" and event.get("time_msc") is not None
+    ]
+    matched = min(len(close_events), len(trade_log))
+    if matched <= 0:
+        return None
+    buckets: dict[int, list[dict[str, Any]]] = {}
+    for idx in range(matched):
+        hour = int(pd.Timestamp(int(close_events[idx]["time_msc"]), unit="ms", tz="UTC").hour)
+        buckets.setdefault(hour, []).append(dict(trade_log[idx]))
+    return {
+        "matched_trade_count": int(matched),
+        "close_hour_utc": {
+            str(hour): _compute_expectancy_slice(trades)
+            for hour, trades in sorted(buckets.items(), key=lambda item: item[0])
+        },
+    }
+
+
+def _pnl_concentration(trade_log: list[dict[str, Any]]) -> dict[str, float]:
+    pnl_values = sorted((float(trade.get("net_pnl_usd", 0.0)) for trade in trade_log), reverse=True)
+    if not pnl_values:
+        return {
+            "top_1_share_of_abs_net_pnl": 0.0,
+            "top_3_share_of_abs_net_pnl": 0.0,
+            "top_5_share_of_abs_net_pnl": 0.0,
+        }
+    denominator = max(sum(abs(value) for value in pnl_values), 1e-6)
+    return {
+        "top_1_share_of_abs_net_pnl": float(sum(abs(value) for value in pnl_values[:1]) / denominator),
+        "top_3_share_of_abs_net_pnl": float(sum(abs(value) for value in pnl_values[:3]) / denominator),
+        "top_5_share_of_abs_net_pnl": float(sum(abs(value) for value in pnl_values[:5]) / denominator),
+    }
+
+
+def _build_reject_fast_diagnostics(
+    *,
+    replay_metrics: dict[str, Any],
+    trade_log: list[dict[str, Any]],
+    execution_log: list[dict[str, Any]],
+) -> dict[str, Any]:
+    trade_count = int(replay_metrics.get("trade_count", 0) or 0)
+    gross_pnl_usd = float(replay_metrics.get("gross_pnl_usd", 0.0))
+    total_cost_usd = float(replay_metrics.get("total_transaction_cost_usd", 0.0))
+    diagnostics = {
+        "trade_count_vs_net_pnl": {
+            "trade_count": trade_count,
+            "net_pnl_usd": float(replay_metrics.get("net_pnl_usd", 0.0)),
+            "net_pnl_per_trade_usd": float(replay_metrics.get("expectancy_usd", 0.0)),
+            "trades_per_100_bars": float(100.0 * trade_count / max(int(replay_metrics.get("steps", 0) or 0), 1)),
+        },
+        "cost_share_of_gross_pnl": {
+            "gross_pnl_usd": gross_pnl_usd,
+            "total_transaction_cost_usd": total_cost_usd,
+            "cost_share_of_abs_gross_pnl": float(total_cost_usd / max(abs(gross_pnl_usd), 1e-6)),
+        },
+        "expectancy_by_direction": _direction_expectancy(trade_log),
+        "pnl_concentration": _pnl_concentration(trade_log),
+    }
+    hour_bucket = _hour_bucket_expectancy(trade_log, execution_log)
+    if hour_bucket is not None:
+        diagnostics["time_bucket_expectancy"] = hour_bucket
+    return diagnostics
+
+
+def _load_research_baseline_summary(training_diagnostics: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not training_diagnostics:
+        return None
+    baseline_report_path = training_diagnostics.get("baseline_report_path")
+    if not baseline_report_path:
+        return None
+    report_path = Path(str(baseline_report_path))
+    if not report_path.exists():
+        return None
+    baseline_report = load_json_report(report_path)
+    holdout_models = dict((baseline_report.get("holdout_metrics", {}) or {}).get("models", {}) or {})
+    best_baseline = _best_model_name(holdout_models)
+    best_metrics = dict((holdout_models.get(best_baseline, {}) or {}).get("metrics", {}) or {}) if best_baseline else {}
+    viable = bool(int(best_metrics.get("trade_count", 0) or 0) > 0 and float(best_metrics.get("net_pnl_usd", 0.0)) > 0.0)
+    return {
+        "report_path": str(report_path),
+        "target_definition": dict(baseline_report.get("target_definition", {}) or {}),
+        "best_baseline": best_baseline,
+        "best_baseline_metrics": best_metrics or None,
+        "research_baseline_viable": viable,
+    }
+
+
 def _resolve_execution_cost_profile(manifest) -> dict[str, float]:
     profile = dict(getattr(manifest, "execution_cost_profile", None) or {})
     return {
@@ -130,6 +349,9 @@ def _load_training_runtime_options(diagnostics_path: Path | None) -> dict[str, A
     payload = load_json_report(diagnostics_path) if diagnostics_path is not None and diagnostics_path.exists() else {}
     return {
         "window_size": int(payload.get("training_window_size", 1) or 1),
+        "churn_min_hold_bars": int(payload.get("training_churn_min_hold_bars", 0) or 0),
+        "churn_action_cooldown": int(payload.get("training_churn_action_cooldown", 0) or 0),
+        "entry_spread_z_limit": float(payload.get("training_entry_spread_z_limit", 1.5)),
         "alpha_gate_enabled": bool(payload.get("training_alpha_gate_enabled", False)),
         "alpha_gate_model": str(payload.get("training_alpha_gate_model", "auto") or "auto"),
         "alpha_gate_probability_threshold": float(payload.get("training_alpha_gate_probability_threshold", 0.55)),
@@ -520,6 +742,9 @@ def _build_runtime(
         state_store=None,
         window_size=int(runtime_options.get("window_size", 1)),
         alpha_gate=alpha_gate,
+        churn_min_hold_bars=int(runtime_options.get("churn_min_hold_bars", 0)),
+        churn_action_cooldown=int(runtime_options.get("churn_action_cooldown", 0)),
+        entry_spread_z_limit=float(runtime_options.get("entry_spread_z_limit", 1.5)),
         **context.reward_profile,
     )
     runtime.startup_reconcile()
@@ -626,6 +851,107 @@ def run_replay(
     return equity_curve, timestamps, broker.trade_log, getattr(broker, "execution_log", []), diagnostics.snapshot()
 
 
+def _evaluate_policy(
+    *,
+    replay_context: ReplayContext,
+    action_index_provider: Callable[..., int] | None,
+) -> dict[str, Any]:
+    equity_curve, timestamps, trade_log, execution_log, diagnostics = run_replay(
+        replay_context=replay_context,
+        action_index_provider=action_index_provider,
+    )
+    execution_diagnostics = aggregate_training_diagnostics([diagnostics])
+    accounting = build_evaluation_accounting(
+        trade_log=trade_log,
+        execution_diagnostics=execution_diagnostics,
+        execution_log_count=len(execution_log),
+        initial_equity=1000.0,
+    )
+    validation_status = validate_evaluation_accounting(accounting)
+    metrics = {
+        "final_equity": float(equity_curve[-1]) if equity_curve else 1000.0,
+        "total_return": float(((equity_curve[-1] if equity_curve else 1000.0) - 1000.0) / 1000.0),
+        "timed_sharpe": float(compute_timed_sharpe(equity_curve, timestamps)),
+        "max_drawdown": float(compute_max_drawdown(equity_curve)),
+        "steps": int(len(equity_curve)),
+        **accounting,
+        "validation_status": validation_status,
+        "accounting_gap_detected": not bool(validation_status.get("passed", False)),
+    }
+    return {
+        "metrics": metrics,
+        "trade_log": trade_log,
+        "execution_log": execution_log,
+        "timestamps": timestamps,
+        "diagnostics": diagnostics,
+        "execution_diagnostics": execution_diagnostics,
+    }
+
+
+def _evaluate_runtime_baselines(*, replay_context: ReplayContext) -> dict[str, dict[str, Any]]:
+    providers = {
+        "runtime_flat": _flat_provider,
+        "runtime_mean_reversion": _mean_reversion_provider,
+        "runtime_trend": _trend_provider,
+    }
+    results: dict[str, dict[str, Any]] = {}
+    for name, provider in providers.items():
+        payload = _evaluate_policy(
+            replay_context=replay_context,
+            action_index_provider=provider,
+        )
+        results[name] = {"metrics": payload["metrics"]}
+    return results
+
+
+def _build_runtime_parity_verdict(
+    *,
+    context: ReplayContext,
+    replay_metrics: dict[str, Any],
+    training_diagnostics: dict[str, Any] | None,
+) -> dict[str, Any]:
+    runtime_baselines = _evaluate_runtime_baselines(replay_context=context)
+    best_runtime_baseline = _best_model_name(runtime_baselines)
+    best_runtime_metrics = (
+        dict((runtime_baselines.get(best_runtime_baseline, {}) or {}).get("metrics", {}) or {})
+        if best_runtime_baseline
+        else {}
+    )
+    research_summary = _load_research_baseline_summary(training_diagnostics)
+    stress_results: dict[str, Any] = {}
+    for multiplier in (1.5, 2.0):
+        stressed_context = _with_cost_stress(context, slippage_multiplier=multiplier)
+        stressed_payload = _evaluate_policy(
+            replay_context=stressed_context,
+            action_index_provider=None,
+        )
+        stress_results[f"{multiplier:.1f}x"] = {
+            "slippage_multiplier": float(multiplier),
+            "metrics": stressed_payload["metrics"],
+            "profitable": _metrics_profitable(stressed_payload["metrics"]),
+        }
+    base_profitable = _metrics_profitable(replay_metrics)
+    fragile_under_cost_stress = bool(
+        base_profitable and any(not bool(result.get("profitable", False)) for result in stress_results.values())
+    )
+    runtime_baseline_viable = _metrics_profitable(best_runtime_metrics)
+    research_baseline_viable = bool((research_summary or {}).get("research_baseline_viable", False))
+    return {
+        "base_replay_profitable": base_profitable,
+        "rl_beats_best_runtime_baseline": bool(
+            float(replay_metrics.get("net_pnl_usd", 0.0)) > float(best_runtime_metrics.get("net_pnl_usd", 0.0))
+        ),
+        "best_runtime_baseline": best_runtime_baseline,
+        "best_runtime_baseline_metrics": best_runtime_metrics or None,
+        "runtime_baseline_viable": runtime_baseline_viable,
+        "research_baseline_summary": research_summary,
+        "research_vs_runtime_parity_aligned": bool(not research_baseline_viable or runtime_baseline_viable),
+        "runtime_holdout_models": runtime_baselines,
+        "slippage_stress": stress_results,
+        "fragile_under_cost_stress": fragile_under_cost_stress,
+    }
+
+
 def main() -> None:
     ensure_runtime_dirs()
     EVAL_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -684,6 +1010,17 @@ def main() -> None:
         if context.diagnostics_path is not None and context.diagnostics_path.exists()
         else None
     )
+    reject_fast_diagnostics = _build_reject_fast_diagnostics(
+        replay_metrics=replay_metrics,
+        trade_log=trade_log,
+        execution_log=execution_log,
+    )
+    runtime_parity_verdict = _build_runtime_parity_verdict(
+        context=context,
+        replay_metrics=replay_metrics,
+        training_diagnostics=training_diagnostics,
+    )
+    replay_metrics["runtime_parity_verdict"] = runtime_parity_verdict
 
     print("=" * 60)
     print("Replay OOS Evaluation")
@@ -704,6 +1041,9 @@ def main() -> None:
     print(f"Avg hold bars  : {avg_holding_bars:.2f}")
     print(f"Orders exec'd  : {int(replay_metrics['executed_order_count'])}")
     print(f"Forced closes  : {int(replay_metrics['forced_close_count'])}")
+    print(f"Best runtime baseline : {runtime_parity_verdict.get('best_runtime_baseline') or 'n/a'}")
+    print(f"Base replay profitable: {bool(runtime_parity_verdict.get('base_replay_profitable', False))}")
+    print(f"Fragile @ stress      : {bool(runtime_parity_verdict.get('fragile_under_cost_stress', False))}")
     print("=" * 60)
 
     replay_report = {
@@ -716,6 +1056,8 @@ def main() -> None:
         "execution_diagnostics": execution_diagnostics,
         "execution_log_count": int(len(execution_log)),
         "trade_log_count": int(len(trade_log)),
+        "reject_fast_diagnostics": reject_fast_diagnostics,
+        "runtime_parity_verdict": runtime_parity_verdict,
         "reward_shaping_in_eval": False,
     }
     validate_evaluation_payload(replay_report)

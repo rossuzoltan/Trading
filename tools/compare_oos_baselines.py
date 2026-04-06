@@ -13,15 +13,24 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from edge_research import run_edge_baseline_research
-from evaluate_oos import load_replay_context, run_replay
+from evaluate_oos import (
+    _best_model_name as _shared_best_model_name,
+    _build_runtime_parity_verdict as _shared_build_runtime_parity_verdict,
+    _evaluate_policy as _shared_evaluate_policy,
+    _evaluate_runtime_baselines as _shared_evaluate_runtime_baselines,
+    _flat_provider as _shared_flat_provider,
+    _mean_reversion_provider as _shared_mean_reversion_provider,
+    _trend_provider as _shared_trend_provider,
+    _with_cost_stress as _shared_with_cost_stress,
+    load_replay_context,
+)
 from feature_engine import FEATURE_COLS
-from runtime_common import ActionType, build_evaluation_accounting, compute_max_drawdown, compute_timed_sharpe, validate_evaluation_accounting
-from train_agent import aggregate_training_diagnostics
+from runtime_common import ActionType
 from validation_metrics import load_json_report, save_json_report
 
 
 def _flat_provider(**_: object) -> int:
-    return 0
+    return _shared_flat_provider(**_)
 
 
 def _resolve_action_indexes(action_map) -> dict[str, int]:
@@ -58,17 +67,11 @@ def _trend_provider(
     action_map,
     **_: object,
 ) -> int:
-    ma20_slope = float(feature_row.get("ma20_slope", 0.0) or 0.0)
-    ma50_slope = float(feature_row.get("ma50_slope", 0.0) or 0.0)
-    target_direction = 0
-    if ma20_slope > 0.0 and ma50_slope > 0.0:
-        target_direction = 1
-    elif ma20_slope < 0.0 and ma50_slope < 0.0:
-        target_direction = -1
-    return _target_direction_to_action_index(
+    return _shared_trend_provider(
+        feature_row=feature_row,
+        position_direction=position_direction,
         action_map=action_map,
-        position_direction=int(position_direction or 0),
-        target_direction=target_direction,
+        **_,
     )
 
 
@@ -79,63 +82,20 @@ def _mean_reversion_provider(
     action_map,
     **_: object,
 ) -> int:
-    spread_z = float(feature_row.get("spread_z", 0.0) or 0.0)
-    target_direction = 0
-    if spread_z <= -1.0:
-        target_direction = 1
-    elif spread_z >= 1.0:
-        target_direction = -1
-    return _target_direction_to_action_index(
+    return _shared_mean_reversion_provider(
+        feature_row=feature_row,
+        position_direction=position_direction,
         action_map=action_map,
-        position_direction=int(position_direction or 0),
-        target_direction=target_direction,
+        **_,
     )
 
 
 def _evaluate_policy(*, replay_context, action_index_provider):
-    equity_curve, timestamps, trade_log, execution_log, diagnostics = run_replay(
-        replay_context=replay_context,
-        action_index_provider=action_index_provider,
-    )
-    accounting = build_evaluation_accounting(
-        trade_log=trade_log,
-        execution_diagnostics=aggregate_training_diagnostics([diagnostics]),
-        execution_log_count=len(execution_log),
-        initial_equity=1000.0,
-    )
-    validation_status = validate_evaluation_accounting(accounting)
-    metrics = {
-        "final_equity": float(equity_curve[-1]) if equity_curve else 1000.0,
-        "total_return": float(((equity_curve[-1] if equity_curve else 1000.0) - 1000.0) / 1000.0),
-        "timed_sharpe": float(compute_timed_sharpe(equity_curve, timestamps)),
-        "max_drawdown": float(compute_max_drawdown(equity_curve)),
-        "steps": int(len(equity_curve)),
-        **accounting,
-        "validation_status": validation_status,
-        "accounting_gap_detected": not bool(validation_status.get("passed", False)),
-    }
-    return {
-        "metrics": metrics,
-        "trade_log": trade_log,
-        "execution_log": execution_log,
-        "timestamps": timestamps,
-    }
+    return _shared_evaluate_policy(replay_context=replay_context, action_index_provider=action_index_provider)
 
 
 def _evaluate_runtime_baselines(*, replay_context) -> dict[str, dict[str, Any]]:
-    providers = {
-        "runtime_flat": _flat_provider,
-        "runtime_mean_reversion": _mean_reversion_provider,
-        "runtime_trend": _trend_provider,
-    }
-    results: dict[str, dict[str, Any]] = {}
-    for name, provider in providers.items():
-        payload = _evaluate_policy(
-            replay_context=replay_context,
-            action_index_provider=provider,
-        )
-        results[name] = {"metrics": payload["metrics"]}
-    return results
+    return _shared_evaluate_runtime_baselines(replay_context=replay_context)
 
 
 def _build_folds(trainable_frame: pd.DataFrame, *, validation_frac: float) -> list[tuple[pd.DataFrame, pd.DataFrame]]:
@@ -149,16 +109,7 @@ def _build_folds(trainable_frame: pd.DataFrame, *, validation_frac: float) -> li
 
 
 def _best_model_name(models: dict[str, Any]) -> str | None:
-    if not models:
-        return None
-    return max(
-        models.items(),
-        key=lambda item: (
-            float(((item[1] or {}).get("metrics", {}) or {}).get("expectancy_usd", 0.0)),
-            float(((item[1] or {}).get("metrics", {}) or {}).get("profit_factor", 0.0)),
-            float(((item[1] or {}).get("metrics", {}) or {}).get("trade_count", 0.0)),
-        ),
-    )[0]
+    return _shared_best_model_name(models)
 
 
 def build_baseline_comparison(
@@ -193,8 +144,6 @@ def build_baseline_comparison(
         probability_margin=0.05,
         min_trade_count=20,
     )
-    runtime_holdout_models = _evaluate_runtime_baselines(replay_context=replay_context)
-
     replay_report_path = Path("models") / f"replay_report_{symbol.lower()}.json"
     replay_report = load_json_report(replay_report_path) if replay_report_path.exists() else None
     if replay_report is None:
@@ -205,15 +154,25 @@ def build_baseline_comparison(
             )["metrics"]
         }
     replay_metrics = dict((replay_report or {}).get("replay_metrics", {}) or {})
+    training_diagnostics = (
+        load_json_report(replay_context.diagnostics_path)
+        if replay_context.diagnostics_path is not None and replay_context.diagnostics_path.exists()
+        else None
+    )
+    runtime_parity_verdict = dict(replay_metrics.get("runtime_parity_verdict", {}) or {})
+    if not runtime_parity_verdict:
+        runtime_parity_verdict = _shared_build_runtime_parity_verdict(
+            context=replay_context,
+            replay_metrics=replay_metrics,
+            training_diagnostics=training_diagnostics,
+        )
+        replay_metrics["runtime_parity_verdict"] = runtime_parity_verdict
     holdout_models = dict((baseline_report.get("holdout_metrics", {}) or {}).get("models", {}) or {})
     best_baseline = _best_model_name(holdout_models)
     best_baseline_metrics = dict((holdout_models.get(best_baseline, {}) or {}).get("metrics", {}) or {}) if best_baseline else {}
-    best_runtime_baseline = _best_model_name(runtime_holdout_models)
-    best_runtime_baseline_metrics = (
-        dict((runtime_holdout_models.get(best_runtime_baseline, {}) or {}).get("metrics", {}) or {})
-        if best_runtime_baseline
-        else {}
-    )
+    best_runtime_baseline = runtime_parity_verdict.get("best_runtime_baseline")
+    best_runtime_baseline_metrics = dict(runtime_parity_verdict.get("best_runtime_baseline_metrics", {}) or {})
+    runtime_holdout_models = dict(runtime_parity_verdict.get("runtime_holdout_models", {}) or {})
 
     comparison = {
         "symbol": symbol.upper(),
@@ -225,6 +184,7 @@ def build_baseline_comparison(
         "runtime_holdout_models": runtime_holdout_models,
         "best_runtime_baseline": best_runtime_baseline,
         "best_runtime_baseline_metrics": best_runtime_baseline_metrics or None,
+        "runtime_parity_verdict": runtime_parity_verdict,
         "baseline_holdout_models": holdout_models,
         "best_baseline": best_baseline,
         "best_baseline_metrics": best_baseline_metrics or None,

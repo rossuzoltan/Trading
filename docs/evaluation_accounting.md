@@ -29,15 +29,22 @@ claims.
   PPO metrics.
 - `tools/training_status.py` falls back to the latest checkpoint diagnostics
   when promoted `models/training_diagnostics_<symbol>.json` is absent.
+- `evaluate_oos.py` now writes an authoritative `runtime_parity_verdict`
+  inside the replay report. That verdict contains the best runtime baseline
+  under replay costs, the best research baseline summary for reference, and
+  slippage-stress results at stricter execution assumptions.
 - `compare_oos_baselines.py` compares RL replay against both research baselines
-  and simple runtime-rule baselines under the same replay cost model.
+  and simple runtime-rule baselines under the same replay cost model, but it is
+  now secondary to the replay-embedded verdict.
 
 ## Practical Workflow
 
 1. Run `.\.venv\Scripts\python.exe .\training_status.py --symbol EURUSD`
 2. Check `latest_eval` net PnL, transaction costs, and the best holdout
    baseline in the status output.
-3. Run `.\.venv\Scripts\python.exe .\compare_oos_baselines.py --symbol EURUSD`
-   after producing replay artifacts.
-4. Reject deployment when reconciliation fails, costs dominate gross PnL, or
-   simple baselines beat the RL replay.
+3. Run `.\.venv\Scripts\python.exe .\evaluate_oos.py` and inspect
+   `runtime_parity_verdict`, reject-fast cost diagnostics, and reconciliation.
+4. Run `.\.venv\Scripts\python.exe .\compare_oos_baselines.py --symbol EURUSD`
+   when you want a standalone comparison report.
+5. Reject deployment when reconciliation fails, runtime-parity baselines do not
+   support the research gate, or profitability fails under stricter slippage.
