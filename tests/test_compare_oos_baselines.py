@@ -180,6 +180,29 @@ class CompareOosBaselinesTests(unittest.TestCase):
         self.assertIn("1.5x", verdict["slippage_stress"])
         self.assertIn("2.0x", verdict["slippage_stress"])
 
+    def test_decision_summary_flags_no_trade_and_concentration_risks(self) -> None:
+        summary = evaluate_oos._build_decision_summary(
+            reject_fast_diagnostics={
+                "cost_share_of_gross_pnl": {"cost_share_of_abs_gross_pnl": 1.2},
+                "expectancy_by_direction": {
+                    "long": {"trade_count": 0.0, "expectancy_usd": 0.0},
+                    "short": {"trade_count": 10.0, "expectancy_usd": 2.0},
+                },
+                "pnl_concentration": {"top_3_share_of_abs_net_pnl": 0.9},
+            },
+            runtime_parity_verdict={
+                "best_runtime_baseline": "runtime_flat",
+                "fragile_under_cost_stress": True,
+            },
+        )
+
+        self.assertEqual("reject_trade_deployment", summary["verdict"])
+        self.assertIn("overtrading_or_weak_entry_quality", summary["flags"])
+        self.assertIn("direction_concentration", summary["flags"])
+        self.assertIn("pnl_concentrated_in_few_trades", summary["flags"])
+        self.assertIn("fragile_under_slippage_stress", summary["flags"])
+        self.assertIn("no_trade_baseline_preferred", summary["flags"])
+
     def test_build_baseline_comparison_uses_replay_context_fallback(self) -> None:
         context = self._build_context()
         baseline_report = {
@@ -207,6 +230,11 @@ class CompareOosBaselinesTests(unittest.TestCase):
                     baseline_tool,
                     "_evaluate_policy",
                     return_value={"metrics": {"trade_count": 9.0, "net_pnl_usd": 12.5, "profit_factor": 1.3}},
+                ),
+                patch.object(
+                    baseline_tool,
+                    "load_json_report",
+                    return_value={"replay_metrics": {"trade_count": 9.0, "net_pnl_usd": 12.5, "profit_factor": 1.3}},
                 ),
                 patch.object(
                     baseline_tool,

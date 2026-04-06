@@ -15,6 +15,7 @@ from sklearn.preprocessing import StandardScaler
 from artifact_manifest import ArtifactManifest
 from trading_config import DeploymentPaths
 
+import evaluate_oos
 import live_bridge
 import mt5_live_preflight
 
@@ -305,6 +306,118 @@ class LiveReadinessTests(unittest.TestCase):
             self.assertEqual(8, runtime.churn_min_hold_bars)
             self.assertEqual(5, runtime.churn_action_cooldown)
             self.assertAlmostEqual(0.75, runtime.entry_spread_z_limit)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_replay_and_live_load_the_same_training_runtime_options(self):
+        tmpdir = make_test_dir("runtime_option_parity")
+        try:
+            diagnostics_path = tmpdir / "training_diagnostics.json"
+            diagnostics_path.write_text(
+                json.dumps(
+                    {
+                        "training_window_size": 8,
+                        "training_churn_min_hold_bars": 6,
+                        "training_churn_action_cooldown": 4,
+                        "training_entry_spread_z_limit": 0.8,
+                        "training_alpha_gate_enabled": True,
+                        "training_alpha_gate_model": "auto",
+                        "training_alpha_gate_probability_threshold": 0.57,
+                        "training_alpha_gate_probability_margin": 0.04,
+                        "training_alpha_gate_min_edge_pips": 0.2,
+                        "baseline_target_horizon_bars": 12,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            replay_options = evaluate_oos._load_training_runtime_options(diagnostics_path)
+            live_options = live_bridge._load_training_runtime_options(diagnostics_path, default_window_size=1)
+
+            self.assertEqual(replay_options, live_options)
+            self.assertEqual(8, replay_options["window_size"])
+            self.assertEqual(6, replay_options["churn_min_hold_bars"])
+            self.assertEqual(4, replay_options["churn_action_cooldown"])
+            self.assertAlmostEqual(0.8, replay_options["entry_spread_z_limit"])
+            self.assertTrue(replay_options["alpha_gate_enabled"])
+            self.assertEqual(12, replay_options["baseline_target_horizon_bars"])
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_bootstrap_live_runtime_warns_when_training_diagnostics_are_missing(self):
+        tmpdir = make_test_dir("live_bootstrap_missing_diag")
+        try:
+            manifest = ArtifactManifest(
+                manifest_version="1",
+                strategy_symbol="EURUSD",
+                model_path="dummy.zip",
+                scaler_path="dummy.pkl",
+                model_version="dummy-v1",
+                model_sha256="x",
+                scaler_sha256="y",
+                feature_columns=[],
+                observation_shape=[3, 1],
+                action_map=[],
+                dataset_id="dataset",
+                sb3_version="2.5.0",
+                sb3_contrib_version="2.5.0",
+                sklearn_version=__import__("sklearn").__version__,
+                ticks_per_bar=2000,
+                training_diagnostics_path=str(tmpdir / "missing_training_diagnostics.json"),
+            )
+            warmup_idx = pd.date_range("2024-01-01", periods=160, freq="min", tz="UTC")
+            warmup_frame = pd.DataFrame(
+                {
+                    "Open": np.linspace(1.0, 1.1, 160),
+                    "High": np.linspace(1.0002, 1.1002, 160),
+                    "Low": np.linspace(0.9998, 1.0998, 160),
+                    "Close": np.linspace(1.0, 1.1, 160),
+                    "Volume": np.full(160, 5000.0),
+                    "avg_spread": np.full(160, 0.0001),
+                    "time_delta_s": np.full(160, 60.0),
+                },
+                index=warmup_idx,
+            )
+            scaler = StandardScaler().fit(np.ones((20, len(live_bridge.FEATURE_COLS))))
+
+            class FakeMt5:
+                def initialize(self):
+                    return True
+
+                def login(self, *_args):
+                    return True
+
+                def shutdown(self):
+                    return None
+
+                def account_info(self):
+                    return SimpleNamespace(equity=1000.0, login=123)
+
+                def positions_get(self, symbol=None):
+                    return []
+
+                def symbol_info_tick(self, symbol):
+                    return SimpleNamespace(bid=1.1000, ask=1.1001)
+
+                def symbol_info(self, symbol):
+                    return SimpleNamespace(point=0.00001, visible=True)
+
+            with patch("live_bridge.resolve_dataset_path", return_value=tmpdir / "dataset.csv"), \
+                patch("live_bridge.dataset_id_for_path", return_value="dataset"), \
+                patch("live_bridge.resolve_manifest_path", return_value=tmpdir / "artifact_manifest.json"), \
+                patch("live_bridge.load_manifest", return_value=manifest), \
+                patch("live_bridge.load_validated_model", return_value=SimpleNamespace()), \
+                patch("live_bridge.load_validated_vecnormalize", return_value=None), \
+                patch("live_bridge.load_validated_scaler", return_value=scaler), \
+                patch("live_bridge._load_warmup_bars", return_value=warmup_frame), \
+                self.assertLogs("live_bridge", level="WARNING") as captured:
+                live_bridge.bootstrap_live_runtime(
+                    symbol="EURUSD",
+                    state_path=str(tmpdir / "state.json"),
+                    ticks_per_bar=2000,
+                    mt5_module=FakeMt5(),
+                )
+            self.assertTrue(any("default runtime guard settings" in line for line in captured.output))
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 

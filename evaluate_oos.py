@@ -44,6 +44,7 @@ from runtime_common import (
     compute_timed_sharpe,
     compute_trade_metrics,
     deserialize_action_map,
+    runtime_options_from_training_payload,
     validate_evaluation_accounting,
     validate_evaluation_payload,
 )
@@ -302,6 +303,53 @@ def _build_reject_fast_diagnostics(
     return diagnostics
 
 
+def _build_decision_summary(
+    *,
+    reject_fast_diagnostics: dict[str, Any],
+    runtime_parity_verdict: dict[str, Any],
+) -> dict[str, Any]:
+    flags: list[str] = []
+    cost_share = float(
+        ((reject_fast_diagnostics.get("cost_share_of_gross_pnl") or {}).get("cost_share_of_abs_gross_pnl", 0.0))
+    )
+    if cost_share >= 1.0:
+        flags.append("overtrading_or_weak_entry_quality")
+    expectancy_by_direction = dict(reject_fast_diagnostics.get("expectancy_by_direction", {}) or {})
+    long_expectancy = float(((expectancy_by_direction.get("long") or {}).get("expectancy_usd", 0.0)))
+    short_expectancy = float(((expectancy_by_direction.get("short") or {}).get("expectancy_usd", 0.0)))
+    long_trades = int(((expectancy_by_direction.get("long") or {}).get("trade_count", 0.0)) or 0)
+    short_trades = int(((expectancy_by_direction.get("short") or {}).get("trade_count", 0.0)) or 0)
+    if (long_trades > 0 and short_trades > 0 and ((long_expectancy > 0.0) != (short_expectancy > 0.0))) or (
+        long_trades == 0 < short_trades or short_trades == 0 < long_trades
+    ):
+        flags.append("direction_concentration")
+    top_3_share = float(((reject_fast_diagnostics.get("pnl_concentration") or {}).get("top_3_share_of_abs_net_pnl", 0.0)))
+    if top_3_share >= 0.8:
+        flags.append("pnl_concentrated_in_few_trades")
+    if bool(runtime_parity_verdict.get("fragile_under_cost_stress", False)):
+        flags.append("fragile_under_slippage_stress")
+    if str(runtime_parity_verdict.get("best_runtime_baseline") or "") == "runtime_flat":
+        flags.append("no_trade_baseline_preferred")
+    if "no_trade_baseline_preferred" in flags:
+        verdict = "reject_trade_deployment"
+    elif flags:
+        verdict = "needs_targeted_ablation"
+    else:
+        verdict = "no_immediate_reject_flag"
+    return {
+        "verdict": verdict,
+        "flags": flags,
+        "metrics_snapshot": {
+            "cost_share_of_abs_gross_pnl": cost_share,
+            "long_expectancy_usd": long_expectancy,
+            "short_expectancy_usd": short_expectancy,
+            "top_3_share_of_abs_net_pnl": top_3_share,
+            "best_runtime_baseline": runtime_parity_verdict.get("best_runtime_baseline"),
+            "fragile_under_cost_stress": bool(runtime_parity_verdict.get("fragile_under_cost_stress", False)),
+        },
+    }
+
+
 def _load_research_baseline_summary(training_diagnostics: dict[str, Any] | None) -> dict[str, Any] | None:
     if not training_diagnostics:
         return None
@@ -347,18 +395,7 @@ def _resolve_reward_profile(manifest) -> dict[str, float]:
 
 def _load_training_runtime_options(diagnostics_path: Path | None) -> dict[str, Any]:
     payload = load_json_report(diagnostics_path) if diagnostics_path is not None and diagnostics_path.exists() else {}
-    return {
-        "window_size": int(payload.get("training_window_size", 1) or 1),
-        "churn_min_hold_bars": int(payload.get("training_churn_min_hold_bars", 0) or 0),
-        "churn_action_cooldown": int(payload.get("training_churn_action_cooldown", 0) or 0),
-        "entry_spread_z_limit": float(payload.get("training_entry_spread_z_limit", 1.5)),
-        "alpha_gate_enabled": bool(payload.get("training_alpha_gate_enabled", False)),
-        "alpha_gate_model": str(payload.get("training_alpha_gate_model", "auto") or "auto"),
-        "alpha_gate_probability_threshold": float(payload.get("training_alpha_gate_probability_threshold", 0.55)),
-        "alpha_gate_probability_margin": float(payload.get("training_alpha_gate_probability_margin", 0.05)),
-        "alpha_gate_min_edge_pips": float(payload.get("training_alpha_gate_min_edge_pips", 0.0)),
-        "baseline_target_horizon_bars": int(payload.get("baseline_target_horizon_bars", 10) or 10),
-    }
+    return runtime_options_from_training_payload(payload, default_window_size=1)
 
 
 def _frame_to_bars(frame: pd.DataFrame) -> list[VolumeBar]:
@@ -1020,6 +1057,10 @@ def main() -> None:
         replay_metrics=replay_metrics,
         training_diagnostics=training_diagnostics,
     )
+    decision_summary = _build_decision_summary(
+        reject_fast_diagnostics=reject_fast_diagnostics,
+        runtime_parity_verdict=runtime_parity_verdict,
+    )
     replay_metrics["runtime_parity_verdict"] = runtime_parity_verdict
 
     print("=" * 60)
@@ -1044,6 +1085,7 @@ def main() -> None:
     print(f"Best runtime baseline : {runtime_parity_verdict.get('best_runtime_baseline') or 'n/a'}")
     print(f"Base replay profitable: {bool(runtime_parity_verdict.get('base_replay_profitable', False))}")
     print(f"Fragile @ stress      : {bool(runtime_parity_verdict.get('fragile_under_cost_stress', False))}")
+    print(f"Decision summary      : {decision_summary.get('verdict')}")
     print("=" * 60)
 
     replay_report = {
@@ -1058,6 +1100,7 @@ def main() -> None:
         "trade_log_count": int(len(trade_log)),
         "reject_fast_diagnostics": reject_fast_diagnostics,
         "runtime_parity_verdict": runtime_parity_verdict,
+        "decision_summary": decision_summary,
         "reward_shaping_in_eval": False,
     }
     validate_evaluation_payload(replay_report)

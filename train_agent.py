@@ -1180,6 +1180,83 @@ class FullPathEvalCallback(BaseCallback):
         self._collapse_streak = 0
 
     @staticmethod
+    def _build_eval_risk_summary(metrics: dict[str, Any]) -> dict[str, Any]:
+        gross_pnl = float(metrics.get("gross_pnl_usd", 0.0) or 0.0)
+        net_pnl = float(metrics.get("net_pnl_usd", 0.0) or 0.0)
+        total_cost = float(metrics.get("total_transaction_cost_usd", 0.0) or 0.0)
+        expectancy_usd = float(metrics.get("expectancy_usd", metrics.get("expectancy", 0.0)) or 0.0)
+        trade_count = int(float(metrics.get("trade_count", 0.0) or 0.0))
+        execution_diagnostics = dict(metrics.get("execution_diagnostics") or {})
+        action_distribution = dict(
+            execution_diagnostics.get("action_distribution")
+            or metrics.get("action_distribution")
+            or {}
+        )
+        long_count = int(action_distribution.get("long", 0) or 0)
+        short_count = int(action_distribution.get("short", 0) or 0)
+        cost_share_of_abs_gross = (
+            float(total_cost / abs(gross_pnl))
+            if abs(gross_pnl) > 1e-9
+            else None
+        )
+
+        segment_metrics = dict(metrics.get("segment_metrics") or {})
+        weakest_segment: str | None = None
+        weakest_segment_sharpe: float | None = None
+        segment_sharpes: dict[str, float] = {}
+        for name in ("first", "middle", "last"):
+            segment = dict(segment_metrics.get(name) or {})
+            raw_sharpe = segment.get("timed_sharpe")
+            if raw_sharpe is None:
+                continue
+            sharpe = float(raw_sharpe)
+            if not np.isfinite(sharpe):
+                continue
+            segment_sharpes[name] = sharpe
+        if segment_sharpes:
+            weakest_segment, weakest_segment_sharpe = min(
+                segment_sharpes.items(),
+                key=lambda item: item[1],
+            )
+
+        flags: list[str] = []
+        if expectancy_usd <= 0.0:
+            flags.append("negative_expectancy")
+        if cost_share_of_abs_gross is not None and cost_share_of_abs_gross >= 1.0:
+            flags.append("cost_dominates_gross")
+        if (long_count == 0 and short_count > 0) or (short_count == 0 and long_count > 0):
+            flags.append("direction_concentration")
+        if (
+            weakest_segment == "middle"
+            and "first" in segment_sharpes
+            and "last" in segment_sharpes
+            and weakest_segment_sharpe is not None
+            and weakest_segment_sharpe <= min(segment_sharpes["first"], segment_sharpes["last"]) - 0.05
+        ):
+            flags.append("middle_segment_regime_fragility")
+        if trade_count >= max(int(MIN_EVAL_TRADE_COUNT), 1) and expectancy_usd <= 0.0:
+            flags.append("trade_frequency_without_edge")
+
+        verdict = "watch"
+        if {"negative_expectancy", "cost_dominates_gross"} & set(flags):
+            verdict = "reject_candidate"
+
+        return {
+            "verdict": verdict,
+            "flags": flags,
+            "trade_count": trade_count,
+            "expectancy_usd": expectancy_usd,
+            "gross_pnl_usd": gross_pnl,
+            "net_pnl_usd": net_pnl,
+            "total_transaction_cost_usd": total_cost,
+            "cost_share_of_abs_gross_pnl": cost_share_of_abs_gross,
+            "long_entry_count": long_count,
+            "short_entry_count": short_count,
+            "weakest_segment": weakest_segment,
+            "weakest_segment_timed_sharpe": weakest_segment_sharpe,
+        }
+
+    @staticmethod
     def _summarize_stochastic_metrics(metrics_list: list[dict[str, Any]]) -> dict[str, Any] | None:
         if not metrics_list:
             return None
@@ -1230,6 +1307,7 @@ class FullPathEvalCallback(BaseCallback):
                 "stochastic_runs": int(len(stochastic_metrics)),
                 "stochastic_summary": self._summarize_stochastic_metrics(stochastic_metrics),
             }
+            metrics["eval_risk_summary"] = self._build_eval_risk_summary(metrics)
             collapse_condition = (
                 self.num_timesteps >= self.collapse_warmup_steps
                 and float(metrics.get("trade_count", 0.0) or 0.0) <= 1.0
@@ -1297,11 +1375,26 @@ class FullPathEvalCallback(BaseCallback):
                     log.warning(f"FullPathEvalCallback: Failed to write best_training_diagnostics.json: {diag_exc}")
 
             if self.verbose:
+                risk_summary = dict(metrics.get("eval_risk_summary") or {})
+                cost_share = risk_summary.get("cost_share_of_abs_gross_pnl")
+                cost_share_text = f"{float(cost_share):.2f}x" if cost_share is not None else "n/a"
+                flags = ",".join(risk_summary.get("flags", [])) or "none"
                 print(
                     f"[Eval] Step {self.num_timesteps:,} | "
                     f"timed_sharpe={float(metrics.get('timed_sharpe', 0.0)):.3f} | "
                     f"final_equity={float(metrics.get('final_equity', 0.0)):.2f} | "
                     f"max_drawdown={float(metrics.get('max_drawdown', 0.0)):.1%}"
+                )
+                print(
+                    f"[EvalRisk] Step {self.num_timesteps:,} | "
+                    f"verdict={risk_summary.get('verdict', 'watch')} | "
+                    f"trades={int(risk_summary.get('trade_count', 0) or 0)} | "
+                    f"expectancy={float(risk_summary.get('expectancy_usd', 0.0) or 0.0):.2f} | "
+                    f"net={float(risk_summary.get('net_pnl_usd', 0.0) or 0.0):.2f} | "
+                    f"cost_share={cost_share_text} | "
+                    f"long={int(risk_summary.get('long_entry_count', 0) or 0)} short={int(risk_summary.get('short_entry_count', 0) or 0)} | "
+                    f"weakest_segment={risk_summary.get('weakest_segment') or 'n/a'} | "
+                    f"flags={flags}"
                 )
             if bool(metrics.get("collapse_detected", False)):
                 self._write_collapsed_state()
@@ -1420,19 +1513,19 @@ class EnhancedLoggingCallback(BaseCallback):
         for info in infos:
             if not info:
                 continue
-                # 1. Rewards: use simplified top-level keys now shared by both env types
-                self.pnl_buffer.append(float(info.get("reward_pnl", 0.0)))
-                self.bonus_buffer.append(float(info.get("reward_bonus", 0.0)))
-                self.penalty_buffer.append(float(info.get("reward_penalty", 0.0)))
+            # 1. Rewards: use simplified top-level keys now shared by both env types
+            self.pnl_buffer.append(float(info.get("reward_pnl", 0.0)))
+            self.bonus_buffer.append(float(info.get("reward_bonus", 0.0)))
+            self.penalty_buffer.append(float(info.get("reward_penalty", 0.0)))
 
-                # 2. Actions: Map "OPEN" + direction -> "LONG"/"SHORT"
-                act_type = info.get("action_type", info.get("selected_action_type", "HOLD"))
-                if act_type == "OPEN":
-                    direction = int(info.get("selected_action_direction", 0))
-                    act = "LONG" if direction > 0 else "SHORT"
-                else:
-                    act = act_type
-                self.action_type_buffer.append(str(act))
+            # 2. Actions: Map "OPEN" + direction -> "LONG"/"SHORT"
+            act_type = info.get("action_type", info.get("selected_action_type", "HOLD"))
+            if act_type == "OPEN":
+                direction = int(info.get("selected_action_direction", 0))
+                act = "LONG" if direction > 0 else "SHORT"
+            else:
+                act = act_type
+            self.action_type_buffer.append(str(act))
 
             # Capture system metrics at each step (sampled at monitor's interval)
             sys_metrics = resource_monitor.get_latest()

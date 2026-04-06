@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -12,6 +12,18 @@ from domain.models import ActionSpec, ConfirmedPosition
 from symbol_utils import price_to_pips
 
 STATE_FEATURE_COUNT = 4
+TRAINING_RUNTIME_OPTION_KEYS = (
+    "training_window_size",
+    "training_churn_min_hold_bars",
+    "training_churn_action_cooldown",
+    "training_entry_spread_z_limit",
+    "training_alpha_gate_enabled",
+    "training_alpha_gate_model",
+    "training_alpha_gate_probability_threshold",
+    "training_alpha_gate_probability_margin",
+    "training_alpha_gate_min_edge_pips",
+    "baseline_target_horizon_bars",
+)
 
 
 def build_action_map(sl_options: Sequence[float], tp_options: Sequence[float]) -> tuple[ActionSpec, ...]:
@@ -167,6 +179,26 @@ def apply_execution_action_guards(
             forced_hold[0] = True
             return forced_hold
     return guarded
+
+
+def runtime_options_from_training_payload(
+    payload: Mapping[str, Any] | None,
+    *,
+    default_window_size: int = 1,
+) -> dict[str, Any]:
+    source = dict(payload or {})
+    return {
+        "window_size": int(source.get("training_window_size", default_window_size) or default_window_size),
+        "churn_min_hold_bars": int(source.get("training_churn_min_hold_bars", 0) or 0),
+        "churn_action_cooldown": int(source.get("training_churn_action_cooldown", 0) or 0),
+        "entry_spread_z_limit": float(source.get("training_entry_spread_z_limit", 1.5)),
+        "alpha_gate_enabled": bool(source.get("training_alpha_gate_enabled", False)),
+        "alpha_gate_model": str(source.get("training_alpha_gate_model", "auto") or "auto"),
+        "alpha_gate_probability_threshold": float(source.get("training_alpha_gate_probability_threshold", 0.55)),
+        "alpha_gate_probability_margin": float(source.get("training_alpha_gate_probability_margin", 0.05)),
+        "alpha_gate_min_edge_pips": float(source.get("training_alpha_gate_min_edge_pips", 0.0)),
+        "baseline_target_horizon_bars": int(source.get("baseline_target_horizon_bars", 10) or 10),
+    }
 
 
 def action_label(action: ActionSpec) -> str:

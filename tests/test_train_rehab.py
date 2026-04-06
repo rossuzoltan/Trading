@@ -12,6 +12,8 @@ import pandas as pd
 
 from feature_engine import FEATURE_COLS
 from train_agent import (
+    EnhancedLoggingCallback,
+    FullPathEvalCallback,
     TrainingDiagnosticsCallback,
     TrainingHeartbeatCallback,
     _apply_profile_override,
@@ -432,6 +434,73 @@ class TrainRehabTests(unittest.TestCase):
             self.assertTrue(resume_vecnormalize_path.exists())
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_training_eval_risk_summary_flags_cost_and_direction_fragility(self):
+        summary = FullPathEvalCallback._build_eval_risk_summary(
+            {
+                "trade_count": 66.0,
+                "expectancy_usd": -2.18,
+                "gross_pnl_usd": -55.9,
+                "net_pnl_usd": -144.2,
+                "total_transaction_cost_usd": 88.3,
+                "execution_diagnostics": {
+                    "action_distribution": {
+                        "long": 0,
+                        "short": 66,
+                    }
+                },
+                "segment_metrics": {
+                    "first": {"timed_sharpe": -0.01},
+                    "middle": {"timed_sharpe": -0.09},
+                    "last": {"timed_sharpe": -0.002},
+                },
+            }
+        )
+
+        self.assertEqual("reject_candidate", summary["verdict"])
+        self.assertIn("negative_expectancy", summary["flags"])
+        self.assertIn("cost_dominates_gross", summary["flags"])
+        self.assertIn("direction_concentration", summary["flags"])
+        self.assertIn("middle_segment_regime_fragility", summary["flags"])
+        self.assertIn("trade_frequency_without_edge", summary["flags"])
+        self.assertEqual(0, summary["long_entry_count"])
+        self.assertEqual(66, summary["short_entry_count"])
+
+    def test_enhanced_logging_callback_collects_reward_and_action_buffers(self):
+        callback = EnhancedLoggingCallback(verbose=0)
+        callback.locals = {
+            "infos": [
+                {
+                    "reward_pnl": 1.25,
+                    "reward_bonus": 0.1,
+                    "reward_penalty": -0.2,
+                    "action_type": "OPEN",
+                    "selected_action_direction": -1,
+                },
+                {
+                    "reward_pnl": -0.5,
+                    "reward_bonus": 0.0,
+                    "reward_penalty": -0.1,
+                    "action_type": "CLOSE",
+                },
+            ]
+        }
+
+        class Snapshot:
+            cpu_pct = 12.5
+            gpu_pct = 55.0
+            ram_pct = 40.0
+
+        with patch("train_agent.resource_monitor.get_latest", return_value=Snapshot()):
+            self.assertTrue(callback._on_step())
+
+        self.assertEqual([1.25, -0.5], callback.pnl_buffer)
+        self.assertEqual([0.1, 0.0], callback.bonus_buffer)
+        self.assertEqual([-0.2, -0.1], callback.penalty_buffer)
+        self.assertEqual(["SHORT", "CLOSE"], callback.action_type_buffer)
+        self.assertEqual([12.5, 12.5], callback.cpu_usage_buffer)
+        self.assertEqual([55.0, 55.0], callback.gpu_usage_buffer)
+        self.assertEqual([40.0, 40.0], callback.ram_usage_buffer)
 
     def test_full_path_eval_reports_segment_metrics_without_fake_stddev(self):
         timestamps = list(pd.date_range("2024-01-01", periods=9, freq="h", tz="UTC"))
