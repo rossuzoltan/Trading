@@ -1,0 +1,11 @@
+{
+    "active_num_envs":  6,
+    "restart_count":  3,
+    "recent_failure_count":  0,
+    "last_seen_steps":  null,
+    "last_seen_hb_utc":  null,
+    "active_profile":  "default",
+    "bad_run_restart_count":  0,
+    "last_start_utc":  "2026-03-31T12:10:47.7792624Z",
+    "last_restart_reason":  "stale heartbeat (61 588,9s)"
+}
