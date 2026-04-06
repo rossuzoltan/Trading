@@ -1,0 +1,18 @@
+{
+  "experiment_name": "eurusd_reward_strip_window8",
+  "symbol": "EURUSD",
+  "timesteps": 300000,
+  "rationale": "Test a wider observation window with the existing safer reward-strip alpha-gate profile.",
+  "overrides": {
+    "TRAIN_EXPERIMENT_PROFILE": "reward_strip_hard_churn_alpha_gate",
+    "TRAIN_WINDOW_SIZE": 8,
+    "TRAIN_PPO_LEARNING_RATE": 0.0003,
+    "TRAIN_PPO_ENT_COEF": 0.03
+  },
+  "tags": [
+    "window",
+    "reward_strip",
+    "eurusd"
+  ],
+  "parent_experiment": "manual_baseline_20260406"
+}

@@ -1,0 +1,17 @@
+{
+  "experiment_name": "eurusd_fast_profit_rehab_v1",
+  "symbol": "EURUSD",
+  "timesteps": 120000,
+  "fast_mode": true,
+  "rationale": "Fast EURUSD profit rehab pass focused on fewer, higher-quality post-cost trades.",
+  "overrides": {
+    "TRAIN_EXPERIMENT_PROFILE": "reward_strip_profit_rehab_v1",
+    "TRAIN_WINDOW_SIZE": 8
+  },
+  "tags": [
+    "fast_mode",
+    "profit_rehab",
+    "eurusd"
+  ],
+  "parent_experiment": "eurusd_reward_strip_window8"
+}

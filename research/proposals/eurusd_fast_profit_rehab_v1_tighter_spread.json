@@ -1,0 +1,19 @@
+{
+  "experiment_name": "eurusd_fast_profit_rehab_v1_tighter_spread",
+  "symbol": "EURUSD",
+  "timesteps": 120000,
+  "fast_mode": true,
+  "rationale": "Fast EURUSD profit rehab pass with a tighter spread gate to further cut weak entries.",
+  "overrides": {
+    "TRAIN_EXPERIMENT_PROFILE": "reward_strip_profit_rehab_v1",
+    "TRAIN_WINDOW_SIZE": 8,
+    "TRAIN_ENTRY_SPREAD_Z_LIMIT": 0.4
+  },
+  "tags": [
+    "fast_mode",
+    "profit_rehab",
+    "tighter_spread",
+    "eurusd"
+  ],
+  "parent_experiment": "eurusd_reward_strip_window8"
+}

@@ -165,13 +165,57 @@ def _resolve_training_experiment_profile(profile_name: str) -> dict[str, Any]:
                 "entry_spread_z_limit": 0.75,
                 "alpha_gate_enabled": True,
                 "alpha_gate_model": "auto",
+                "alpha_gate_warmup_steps": 100_000,
+                "alpha_gate_warmup_threshold_delta": 0.10,
+                "alpha_gate_warmup_margin_scale": 0.0,
+                "ppo_learning_rate": 8e-4,
+                "ppo_target_kl": 0.02,
+                "adaptive_kl_lr": True,
+                "adaptive_kl_max_lr": 0.003,
+                "adaptive_kl_low": 0.002,
+                "adaptive_kl_up_mult": 2.5,
+                "recovery_entropy_mid": 0.01,
+                "recovery_entropy_final": 0.003,
+                "fail_fast_enabled": True,
+                "fail_fast_warmup_steps": 60_000,
+                "fail_fast_consecutive": 3,
+                "fail_fast_sparse_alpha_gate_block_rate": 0.94,
+                "fail_fast_approx_kl_max": 0.001,
+                "fail_fast_explained_variance_max": 0.20,
+                "fail_fast_max_trade_count": 12,
+            }
+        )
+        return profile
+    if normalized in {"reward_strip_profit_rehab_v1", "finalboss_reward_strip_profit_rehab_v1"}:
+        profile = _resolve_training_experiment_profile("reward_strip")
+        profile.update(
+            {
+                "alpha_gate_enabled": False,
+                "churn_min_hold_bars": 12,
+                "churn_action_cooldown": 8,
+                "entry_spread_z_limit": 0.50,
+                "churn_penalty_usd": 1.0,
+                "reward_downside_risk_coef": 0.25,
+                "reward_turnover_coef": 0.20,
+                "reward_net_return_coef": 1.0,
+                "reward_scale": 1000.0,
+                "reward_clip_low": -10.0,
+                "reward_clip_high": 10.0,
+                "ppo_learning_rate": 4e-4,
+                "ppo_target_kl": 0.015,
+                "fail_fast_enabled": True,
+                "fail_fast_warmup_steps": 40_000,
+                "fail_fast_consecutive": 2,
+                "fail_fast_overtrade_trade_count": 180,
+                "fail_fast_cost_share_min": 1.0,
             }
         )
         return profile
     raise ValueError(
         "Unsupported TRAIN_EXPERIMENT_PROFILE="
         f"{profile_name!r}. Expected one of: reward_strip, reward_strip_hard_churn, "
-        "reward_strip_hard_churn_alpha_gate, reward_strip_rehab_safer_alpha_gate."
+        "reward_strip_hard_churn_alpha_gate, reward_strip_rehab_safer_alpha_gate, "
+        "reward_strip_profit_rehab_v1."
     )
 
 
@@ -235,12 +279,15 @@ TRAIN_AMP_DTYPE = os.environ.get("TRAIN_AMP_DTYPE", "bf16").strip().lower()
 TRAIN_EXPORT_BEST_FOLD = os.environ.get("TRAIN_EXPORT_BEST_FOLD", "0") == "1"
 TRAIN_BENCH_SPS = os.environ.get("TRAIN_BENCH_SPS", "0") == "1"
 TRAIN_EVAL_STOCHASTIC_RUNS = max(int(os.environ.get("TRAIN_EVAL_STOCHASTIC_RUNS", "5")), 0)
+TRAIN_MINIMAL_POST_COST_REWARD = os.environ.get("TRAIN_MINIMAL_POST_COST_REWARD", "0") == "1"
+TRAIN_FORCE_FAST_WINDOW_BENCHMARK = os.environ.get("TRAIN_FORCE_FAST_WINDOW_BENCHMARK", "0") == "1"
 TRAIN_ADAPTIVE_KL_LR = os.environ.get("TRAIN_ADAPTIVE_KL_LR", "0") == "1"
 TRAIN_ADAPTIVE_KL_MAX_LR = float(os.environ.get("TRAIN_ADAPTIVE_KL_MAX_LR", "0.002"))
 TRAIN_ADAPTIVE_KL_LOW = float(os.environ.get("TRAIN_ADAPTIVE_KL_LOW", "0.005"))
 TRAIN_ADAPTIVE_KL_HIGH = float(os.environ.get("TRAIN_ADAPTIVE_KL_HIGH", "0.05"))
 TRAIN_ADAPTIVE_KL_UP_MULT = float(os.environ.get("TRAIN_ADAPTIVE_KL_UP_MULT", "1.5"))
 TRAIN_ADAPTIVE_KL_DOWN_MULT = float(os.environ.get("TRAIN_ADAPTIVE_KL_DOWN_MULT", "0.7"))
+TRAIN_SPARSE_ALPHA_GATE_WARN_RATE = float(os.environ.get("TRAIN_SPARSE_ALPHA_GATE_WARN_RATE", "0.90"))
 TRAIN_COLLAPSE_WARMUP_STEPS = max(int(os.environ.get("TRAIN_COLLAPSE_WARMUP_STEPS", "500000")), 0)
 TRAIN_COLLAPSE_CONSECUTIVE = max(int(os.environ.get("TRAIN_COLLAPSE_CONSECUTIVE", "2")), 1)
 
@@ -294,6 +341,21 @@ TRAIN_DRAWDOWN_PENALTY_RAMP_STEPS = max(int(os.environ.get("TRAIN_DRAWDOWN_PENAL
 TRAIN_WINDOW_SIZE = int(os.environ.get("TRAIN_WINDOW_SIZE", "1"))
 TRAIN_ALPHA_GATE_ENABLED = os.environ.get("TRAIN_ALPHA_GATE_ENABLED", "0") == "1"
 TRAIN_ALPHA_GATE_MODEL = os.environ.get("TRAIN_ALPHA_GATE_MODEL", "auto").strip().lower() or "auto"
+TRAIN_ALPHA_GATE_WARMUP_STEPS = max(int(os.environ.get("TRAIN_ALPHA_GATE_WARMUP_STEPS", "0")), 0)
+TRAIN_ALPHA_GATE_WARMUP_THRESHOLD_DELTA = max(float(os.environ.get("TRAIN_ALPHA_GATE_WARMUP_THRESHOLD_DELTA", "0.0")), 0.0)
+TRAIN_ALPHA_GATE_WARMUP_MARGIN_SCALE = min(max(float(os.environ.get("TRAIN_ALPHA_GATE_WARMUP_MARGIN_SCALE", "1.0")), 0.0), 1.0)
+TRAIN_FAIL_FAST_ENABLED = os.environ.get("TRAIN_FAIL_FAST_ENABLED", "0") == "1"
+TRAIN_FAIL_FAST_WARMUP_STEPS = max(int(os.environ.get("TRAIN_FAIL_FAST_WARMUP_STEPS", "0")), 0)
+TRAIN_FAIL_FAST_CONSECUTIVE = max(int(os.environ.get("TRAIN_FAIL_FAST_CONSECUTIVE", "2")), 1)
+TRAIN_FAIL_FAST_SPARSE_ALPHA_GATE_BLOCK_RATE = min(
+    max(float(os.environ.get("TRAIN_FAIL_FAST_SPARSE_ALPHA_GATE_BLOCK_RATE", "0.94")), 0.0),
+    1.0,
+)
+TRAIN_FAIL_FAST_APPROX_KL_MAX = max(float(os.environ.get("TRAIN_FAIL_FAST_APPROX_KL_MAX", "0.001")), 0.0)
+TRAIN_FAIL_FAST_EXPLAINED_VARIANCE_MAX = float(os.environ.get("TRAIN_FAIL_FAST_EXPLAINED_VARIANCE_MAX", "0.20"))
+TRAIN_FAIL_FAST_MAX_TRADE_COUNT = max(int(os.environ.get("TRAIN_FAIL_FAST_MAX_TRADE_COUNT", "12")), 0)
+TRAIN_FAIL_FAST_OVERTRADE_TRADE_COUNT = max(int(os.environ.get("TRAIN_FAIL_FAST_OVERTRADE_TRADE_COUNT", "0")), 0)
+TRAIN_FAIL_FAST_COST_SHARE_MIN = max(float(os.environ.get("TRAIN_FAIL_FAST_COST_SHARE_MIN", "0.0")), 0.0)
 HEARTBEAT_SCHEMA_VERSION = 2
 PROCESS_STARTED_UTC = datetime.now(timezone.utc).isoformat()
 TRAINING_STAGE = os.environ.get("TRAINING_STAGE", "stage_a_unlock").strip().lower() or "stage_a_unlock"
@@ -410,7 +472,7 @@ TRAINING_RECOVERY_CONFIG: dict[str, Any] = {
         "enabled": os.environ.get("TRAIN_RECOVERY_ENTROPY_SCHEDULE_ENABLED", "1") != "0",
         "initial_ent_coef": float(os.environ.get("TRAIN_RECOVERY_ENTROPY_INITIAL", "0.02")),
         "mid_ent_coef": float(os.environ.get("TRAIN_RECOVERY_ENTROPY_MID", "0.005")),
-        "final_ent_coef": float(os.environ.get("TRAIN_RECOVERY_ENTROPY_FINAL", "0.001")),
+        "final_ent_coef": float(os.environ.get("TRAIN_RECOVERY_ENTROPY_FINAL", str(_ENTROPY_MIN_FLOOR))),
         "phase_1_until": int(
             os.environ.get("TRAIN_RECOVERY_ENTROPY_PHASE_1_UNTIL", str(_ENTROPY_PHASE_1_UNTIL_DEFAULT))
         ),
@@ -504,6 +566,179 @@ if TRAIN_EXPERIMENT_PROFILE_SETTINGS:
         TRAIN_ALPHA_GATE_MODEL = str(
             TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("alpha_gate_model", TRAIN_ALPHA_GATE_MODEL)
         ).strip().lower() or TRAIN_ALPHA_GATE_MODEL
+    TRAIN_ALPHA_GATE_WARMUP_STEPS = int(
+        _apply_profile_override(
+            TRAIN_ALPHA_GATE_WARMUP_STEPS,
+            "TRAIN_ALPHA_GATE_WARMUP_STEPS",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("alpha_gate_warmup_steps", TRAIN_ALPHA_GATE_WARMUP_STEPS),
+        )
+    )
+    TRAIN_ALPHA_GATE_WARMUP_THRESHOLD_DELTA = float(
+        _apply_profile_override(
+            TRAIN_ALPHA_GATE_WARMUP_THRESHOLD_DELTA,
+            "TRAIN_ALPHA_GATE_WARMUP_THRESHOLD_DELTA",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get(
+                "alpha_gate_warmup_threshold_delta",
+                TRAIN_ALPHA_GATE_WARMUP_THRESHOLD_DELTA,
+            ),
+        )
+    )
+    TRAIN_ALPHA_GATE_WARMUP_MARGIN_SCALE = min(
+        max(
+            float(
+                _apply_profile_override(
+                    TRAIN_ALPHA_GATE_WARMUP_MARGIN_SCALE,
+                    "TRAIN_ALPHA_GATE_WARMUP_MARGIN_SCALE",
+                    TRAIN_EXPERIMENT_PROFILE_SETTINGS.get(
+                        "alpha_gate_warmup_margin_scale",
+                        TRAIN_ALPHA_GATE_WARMUP_MARGIN_SCALE,
+                    ),
+                )
+            ),
+            0.0,
+        ),
+        1.0,
+    )
+    PPO_LEARNING_RATE = float(
+        _apply_profile_override(
+            PPO_LEARNING_RATE,
+            "TRAIN_PPO_LEARNING_RATE",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("ppo_learning_rate", PPO_LEARNING_RATE),
+        )
+    )
+    PPO_TARGET_KL = float(
+        _apply_profile_override(
+            PPO_TARGET_KL,
+            "TRAIN_PPO_TARGET_KL",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("ppo_target_kl", PPO_TARGET_KL),
+        )
+    )
+    if "TRAIN_ADAPTIVE_KL_LR" not in os.environ:
+        TRAIN_ADAPTIVE_KL_LR = bool(
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("adaptive_kl_lr", TRAIN_ADAPTIVE_KL_LR)
+        )
+    TRAIN_ADAPTIVE_KL_MAX_LR = float(
+        _apply_profile_override(
+            TRAIN_ADAPTIVE_KL_MAX_LR,
+            "TRAIN_ADAPTIVE_KL_MAX_LR",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("adaptive_kl_max_lr", TRAIN_ADAPTIVE_KL_MAX_LR),
+        )
+    )
+    TRAIN_ADAPTIVE_KL_LOW = float(
+        _apply_profile_override(
+            TRAIN_ADAPTIVE_KL_LOW,
+            "TRAIN_ADAPTIVE_KL_LOW",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("adaptive_kl_low", TRAIN_ADAPTIVE_KL_LOW),
+        )
+    )
+    TRAIN_ADAPTIVE_KL_UP_MULT = float(
+        _apply_profile_override(
+            TRAIN_ADAPTIVE_KL_UP_MULT,
+            "TRAIN_ADAPTIVE_KL_UP_MULT",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("adaptive_kl_up_mult", TRAIN_ADAPTIVE_KL_UP_MULT),
+        )
+    )
+    if "TRAIN_FAIL_FAST_ENABLED" not in os.environ:
+        TRAIN_FAIL_FAST_ENABLED = bool(
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("fail_fast_enabled", TRAIN_FAIL_FAST_ENABLED)
+        )
+    TRAIN_FAIL_FAST_WARMUP_STEPS = int(
+        _apply_profile_override(
+            TRAIN_FAIL_FAST_WARMUP_STEPS,
+            "TRAIN_FAIL_FAST_WARMUP_STEPS",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("fail_fast_warmup_steps", TRAIN_FAIL_FAST_WARMUP_STEPS),
+        )
+    )
+    TRAIN_FAIL_FAST_CONSECUTIVE = int(
+        _apply_profile_override(
+            TRAIN_FAIL_FAST_CONSECUTIVE,
+            "TRAIN_FAIL_FAST_CONSECUTIVE",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("fail_fast_consecutive", TRAIN_FAIL_FAST_CONSECUTIVE),
+        )
+    )
+    TRAIN_FAIL_FAST_SPARSE_ALPHA_GATE_BLOCK_RATE = min(
+        max(
+            float(
+                _apply_profile_override(
+                    TRAIN_FAIL_FAST_SPARSE_ALPHA_GATE_BLOCK_RATE,
+                    "TRAIN_FAIL_FAST_SPARSE_ALPHA_GATE_BLOCK_RATE",
+                    TRAIN_EXPERIMENT_PROFILE_SETTINGS.get(
+                        "fail_fast_sparse_alpha_gate_block_rate",
+                        TRAIN_FAIL_FAST_SPARSE_ALPHA_GATE_BLOCK_RATE,
+                    ),
+                )
+            ),
+            0.0,
+        ),
+        1.0,
+    )
+    TRAIN_FAIL_FAST_APPROX_KL_MAX = float(
+        _apply_profile_override(
+            TRAIN_FAIL_FAST_APPROX_KL_MAX,
+            "TRAIN_FAIL_FAST_APPROX_KL_MAX",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("fail_fast_approx_kl_max", TRAIN_FAIL_FAST_APPROX_KL_MAX),
+        )
+    )
+    TRAIN_FAIL_FAST_EXPLAINED_VARIANCE_MAX = float(
+        _apply_profile_override(
+            TRAIN_FAIL_FAST_EXPLAINED_VARIANCE_MAX,
+            "TRAIN_FAIL_FAST_EXPLAINED_VARIANCE_MAX",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get(
+                "fail_fast_explained_variance_max",
+                TRAIN_FAIL_FAST_EXPLAINED_VARIANCE_MAX,
+            ),
+        )
+    )
+    TRAIN_FAIL_FAST_MAX_TRADE_COUNT = int(
+        _apply_profile_override(
+            TRAIN_FAIL_FAST_MAX_TRADE_COUNT,
+            "TRAIN_FAIL_FAST_MAX_TRADE_COUNT",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get("fail_fast_max_trade_count", TRAIN_FAIL_FAST_MAX_TRADE_COUNT),
+        )
+    )
+    TRAIN_FAIL_FAST_OVERTRADE_TRADE_COUNT = int(
+        _apply_profile_override(
+            TRAIN_FAIL_FAST_OVERTRADE_TRADE_COUNT,
+            "TRAIN_FAIL_FAST_OVERTRADE_TRADE_COUNT",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get(
+                "fail_fast_overtrade_trade_count",
+                TRAIN_FAIL_FAST_OVERTRADE_TRADE_COUNT,
+            ),
+        )
+    )
+    TRAIN_FAIL_FAST_COST_SHARE_MIN = float(
+        _apply_profile_override(
+            TRAIN_FAIL_FAST_COST_SHARE_MIN,
+            "TRAIN_FAIL_FAST_COST_SHARE_MIN",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get(
+                "fail_fast_cost_share_min",
+                TRAIN_FAIL_FAST_COST_SHARE_MIN,
+            ),
+        )
+    )
+    TRAINING_RECOVERY_CONFIG["entropy_schedule"]["mid_ent_coef"] = float(
+        _apply_profile_override(
+            TRAINING_RECOVERY_CONFIG["entropy_schedule"]["mid_ent_coef"],
+            "TRAIN_RECOVERY_ENTROPY_MID",
+            TRAIN_EXPERIMENT_PROFILE_SETTINGS.get(
+                "recovery_entropy_mid",
+                TRAINING_RECOVERY_CONFIG["entropy_schedule"]["mid_ent_coef"],
+            ),
+        )
+    )
+    TRAINING_RECOVERY_CONFIG["entropy_schedule"]["final_ent_coef"] = max(
+        float(
+            _apply_profile_override(
+                TRAINING_RECOVERY_CONFIG["entropy_schedule"]["final_ent_coef"],
+                "TRAIN_RECOVERY_ENTROPY_FINAL",
+                TRAIN_EXPERIMENT_PROFILE_SETTINGS.get(
+                    "recovery_entropy_final",
+                    TRAINING_RECOVERY_CONFIG["entropy_schedule"]["final_ent_coef"],
+                ),
+            )
+        ),
+        float(_ENTROPY_MIN_FLOOR),
+    )
     if "TRAIN_RECOVERY_PARTICIPATION_BONUS_ENABLED" not in os.environ:
         TRAINING_RECOVERY_CONFIG["participation_bonus"]["enabled"] = bool(
             TRAIN_EXPERIMENT_PROFILE_SETTINGS.get(
@@ -575,7 +810,51 @@ def build_reward_profile() -> dict[str, float]:
         "transaction_penalty": float(TRAIN_REWARD_TRANSACTION_PENALTY),
         "reward_clip_low": float(TRAIN_REWARD_CLIP_LOW),
         "reward_clip_high": float(TRAIN_REWARD_CLIP_HIGH),
+        "minimal_post_cost_reward": bool(TRAIN_MINIMAL_POST_COST_REWARD),
     }
+
+
+def attach_model_perf_wrappers(model: Any) -> Any:
+    perf = getattr(model, "_codex_perf_stats", None)
+    if isinstance(perf, dict) and perf.get("wrapped", False):
+        return model
+
+    perf = {
+        "wrapped": True,
+        "collect_rollouts_calls": 0,
+        "collect_rollouts_total_ns": 0,
+        "train_calls": 0,
+        "train_total_ns": 0,
+    }
+    original_collect_rollouts = model.collect_rollouts
+    original_train = model.train
+
+    def collect_rollouts_wrapper(*args, **kwargs):
+        start_ns = time.perf_counter_ns()
+        try:
+            return original_collect_rollouts(*args, **kwargs)
+        finally:
+            perf["collect_rollouts_calls"] += 1
+            perf["collect_rollouts_total_ns"] += max(time.perf_counter_ns() - start_ns, 0)
+
+    def train_wrapper(*args, **kwargs):
+        start_ns = time.perf_counter_ns()
+        try:
+            return original_train(*args, **kwargs)
+        finally:
+            perf["train_calls"] += 1
+            perf["train_total_ns"] += max(time.perf_counter_ns() - start_ns, 0)
+
+    model.collect_rollouts = collect_rollouts_wrapper
+    model.train = train_wrapper
+    model._codex_perf_stats = perf
+    return model
+
+
+EVALUATE_MODEL_PERF: dict[str, float] = {
+    "calls": 0,
+    "total_ns": 0,
+}
 
 
 def build_runtime_action_map(
@@ -637,7 +916,7 @@ def get_current_ent_coef(global_step: int, cfg: dict[str, Any]) -> float:
         return float(ecfg.get("initial_ent_coef", 0.02))
     if step <= phase_2_until:
         return float(ecfg.get("mid_ent_coef", 0.005))
-    return float(ecfg.get("final_ent_coef", 0.001))
+    return max(float(ecfg.get("final_ent_coef", _ENTROPY_MIN_FLOOR)), float(_ENTROPY_MIN_FLOOR))
 
 
 def get_current_participation_bonus(global_step: int, cfg: dict[str, Any]) -> float:
@@ -706,6 +985,14 @@ def aggregate_training_diagnostics(env_snapshots: list[dict[str, Any]] | None) -
         "position_duration_sum": 0.0,
         "position_duration_count": 0,
         "rapid_reversals": 0,
+        "mask_observation_count": 0,
+        "alpha_gate_observation_count": 0,
+        "alpha_gate_long_allowed_steps": 0,
+        "alpha_gate_short_allowed_steps": 0,
+        "alpha_gate_block_all_steps": 0,
+        "entry_spread_blocked_steps": 0,
+        "cooldown_blocked_steps": 0,
+        "min_hold_forced_hold_steps": 0,
     }
     economic_totals = {
         "gross_pnl_usd": 0.0,
@@ -735,6 +1022,12 @@ def aggregate_training_diagnostics(env_snapshots: list[dict[str, Any]] | None) -
     saw_trade_stats = False
     saw_economics = False
     saw_reward_components = False
+    alpha_gate_models: set[str] = set()
+    alpha_gate_fit_quality: list[bool] = []
+    alpha_gate_fit_trade_counts: list[float] = []
+    alpha_gate_fit_expectancies: list[float] = []
+    perf_totals: dict[str, float] = {}
+    perf_seen = False
 
     for snapshot in env_snapshots or []:
         if not isinstance(snapshot, dict):
@@ -758,12 +1051,30 @@ def aggregate_training_diagnostics(env_snapshots: list[dict[str, Any]] | None) -
             saw_reward_components = True
         for key in reward_totals:
             reward_totals[key] += float(reward_components.get(key, 0.0))
+        alpha_gate = snapshot.get("alpha_gate", {}) or {}
+        if bool(alpha_gate.get("enabled", False)):
+            alpha_gate_models.add(str(alpha_gate.get("model_kind", "unknown")))
+            alpha_gate_fit_quality.append(bool(alpha_gate.get("fit_quality_passed", False)))
+            alpha_gate_fit_trade_counts.append(float(alpha_gate.get("fit_trade_count", 0.0) or 0.0))
+            alpha_gate_fit_expectancies.append(float(alpha_gate.get("fit_expectancy_usd", 0.0) or 0.0))
+        perf_snapshot = snapshot.get("perf", {}) or {}
+        if perf_snapshot:
+            perf_seen = True
+            for key, value in perf_snapshot.items():
+                if isinstance(value, dict):
+                    continue
+                try:
+                    perf_totals[key] = perf_totals.get(key, 0.0) + float(value)
+                except (TypeError, ValueError):
+                    continue
 
     total_actions = max(sum(action_counts.values()), 1)
     occupancy_steps = max(
         int(trade_totals["flat_steps"]) + int(trade_totals["long_steps"]) + int(trade_totals["short_steps"]),
         1,
     )
+    mask_observation_count = max(int(trade_totals["mask_observation_count"]), 1)
+    alpha_gate_observation_count = max(int(trade_totals["alpha_gate_observation_count"]), 1)
     total_entries = int(trade_totals["entered_long_count"]) + int(trade_totals["entered_short_count"])
     closed_trade_count = int(trade_totals["closed_trade_count"])
     avg_position_duration = (
@@ -802,9 +1113,23 @@ def aggregate_training_diagnostics(env_snapshots: list[dict[str, Any]] | None) -
             "flat_fraction": float(trade_totals["flat_steps"]) / float(occupancy_steps),
             "long_fraction": float(trade_totals["long_steps"]) / float(occupancy_steps),
             "short_fraction": float(trade_totals["short_steps"]) / float(occupancy_steps),
+            "mask_observation_count": int(trade_totals["mask_observation_count"]),
+            "alpha_gate_observation_count": int(trade_totals["alpha_gate_observation_count"]),
+            "alpha_gate_long_allowed_steps": int(trade_totals["alpha_gate_long_allowed_steps"]),
+            "alpha_gate_short_allowed_steps": int(trade_totals["alpha_gate_short_allowed_steps"]),
+            "alpha_gate_block_all_steps": int(trade_totals["alpha_gate_block_all_steps"]),
+            "entry_spread_blocked_steps": int(trade_totals["entry_spread_blocked_steps"]),
+            "cooldown_blocked_steps": int(trade_totals["cooldown_blocked_steps"]),
+            "min_hold_forced_hold_steps": int(trade_totals["min_hold_forced_hold_steps"]),
+            "alpha_gate_long_allow_rate": float(trade_totals["alpha_gate_long_allowed_steps"]) / float(alpha_gate_observation_count),
+            "alpha_gate_short_allow_rate": float(trade_totals["alpha_gate_short_allowed_steps"]) / float(alpha_gate_observation_count),
+            "alpha_gate_block_all_rate": float(trade_totals["alpha_gate_block_all_steps"]) / float(alpha_gate_observation_count),
+            "entry_spread_block_rate": float(trade_totals["entry_spread_blocked_steps"]) / float(mask_observation_count),
+            "cooldown_block_rate": float(trade_totals["cooldown_blocked_steps"]) / float(mask_observation_count),
+            "min_hold_forced_hold_rate": float(trade_totals["min_hold_forced_hold_steps"]) / float(mask_observation_count),
         }
 
-    return {
+    result = {
         "total_steps": int(total_steps),
         "action_distribution": {
             "hold": int(action_counts["hold"]),
@@ -820,6 +1145,17 @@ def aggregate_training_diagnostics(env_snapshots: list[dict[str, Any]] | None) -
         "economics": {key: float(value) for key, value in economic_totals.items()} if saw_economics else {},
         "reward_components": {key: float(value) for key, value in reward_totals.items()} if saw_reward_components else {},
     }
+    if alpha_gate_models:
+        result["alpha_gate"] = {
+            "enabled": True,
+            "model_kinds": sorted(alpha_gate_models),
+            "fit_quality_passed_all_workers": bool(all(alpha_gate_fit_quality)) if alpha_gate_fit_quality else False,
+            "fit_trade_count_mean": float(np.mean(alpha_gate_fit_trade_counts)) if alpha_gate_fit_trade_counts else 0.0,
+            "fit_expectancy_usd_mean": float(np.mean(alpha_gate_fit_expectancies)) if alpha_gate_fit_expectancies else 0.0,
+        }
+    if perf_seen:
+        result["perf"] = {key: float(value) for key, value in perf_totals.items()}
+    return result
 
 
 def resolve_train_vec_env_type(
@@ -855,6 +1191,21 @@ def resolve_train_vec_env_type(
         warnings.append("Training is running with a single environment worker; expect lower throughput and noisier PPO updates.")
 
     return vec_env_type, warnings
+
+
+def resolve_shared_dataset_buffers(
+    *,
+    enabled: bool,
+    vec_env_type: str,
+    platform_name: str | None = None,
+) -> tuple[bool, str | None]:
+    platform_value = platform_name or sys.platform
+    if enabled and platform_value == "win32" and vec_env_type == "subproc":
+        return False, (
+            "Windows SubprocVecEnv detected: disabling shared memmap dataset handoff "
+            "for worker startup stability."
+        )
+    return bool(enabled), None
 
 
 def find_optimal_env_workers(
@@ -1130,9 +1481,61 @@ class SaveVecNormalizeCallback(BaseCallback):
         if vecnormalize is not None:
             Path(self.save_path).parent.mkdir(parents=True, exist_ok=True)
             vecnormalize.save(self.save_path)
-            if self.verbose:
-                print(f"[VecNormalize] Saved stats -> {self.save_path}")
+        if self.verbose:
+            print(f"[VecNormalize] Saved stats -> {self.save_path}")
         return True
+
+
+def _cost_share_of_abs_gross_pnl(metrics: dict[str, Any] | None) -> float | None:
+    if not isinstance(metrics, dict):
+        return None
+    gross_pnl = float(metrics.get("gross_pnl_usd", 0.0) or 0.0)
+    total_cost = float(metrics.get("total_transaction_cost_usd", 0.0) or 0.0)
+    if abs(gross_pnl) <= 1e-9:
+        return None
+    return float(total_cost / abs(gross_pnl))
+
+
+def _baseline_profit_rehab_summary(
+    metrics: dict[str, Any] | None,
+    *,
+    baseline_metrics: dict[str, Any] | None,
+) -> dict[str, Any]:
+    current = dict(metrics or {})
+    baseline = dict(baseline_metrics or {})
+    trade_count = int(float(current.get("trade_count", 0.0) or 0.0))
+    baseline_trade_count = int(float(baseline.get("trade_count", 0.0) or 0.0))
+    expectancy = float(current.get("expectancy_usd", current.get("expectancy", 0.0)) or 0.0)
+    baseline_expectancy = float(baseline.get("expectancy_usd", 0.0) or 0.0)
+    net_pnl = float(current.get("net_pnl_usd", 0.0) or 0.0)
+    baseline_net_pnl = float(baseline.get("net_pnl_usd", 0.0) or 0.0)
+    ratio: float | None = None
+    if baseline_trade_count > 0:
+        ratio = float(trade_count / baseline_trade_count)
+    return {
+        "trade_count_vs_baseline_ratio": ratio,
+        "net_pnl_delta_vs_baseline": float(net_pnl - baseline_net_pnl),
+        "expectancy_delta_vs_baseline": float(expectancy - baseline_expectancy),
+        "cost_share": _cost_share_of_abs_gross_pnl(current),
+    }
+
+
+def _baseline_reference_from_report(baseline_report: dict[str, Any] | None) -> tuple[str | None, dict[str, Any]]:
+    report = dict(baseline_report or {})
+    holdout_models = dict((report.get("holdout_metrics", {}) or {}).get("models", {}) or {})
+    if not holdout_models:
+        return None, {}
+    passing_models = list(report.get("passing_models", []) or [])
+    candidate_names = passing_models if passing_models else list(holdout_models)
+    best_name = max(
+        candidate_names,
+        key=lambda name: (
+            float(((holdout_models.get(name) or {}).get("metrics", {}) or {}).get("expectancy_usd", 0.0)),
+            float(((holdout_models.get(name) or {}).get("metrics", {}) or {}).get("profit_factor", 0.0)),
+            float(((holdout_models.get(name) or {}).get("metrics", {}) or {}).get("trade_count", 0.0)),
+        ),
+    )
+    return str(best_name), dict((holdout_models.get(best_name) or {}).get("metrics", {}) or {})
 
 
 class FullPathEvalCallback(BaseCallback):
@@ -1178,6 +1581,9 @@ class FullPathEvalCallback(BaseCallback):
         self.latest_metrics: dict[str, Any] | None = None
         self.history: list[dict[str, Any]] = []
         self._collapse_streak = 0
+        self._fail_fast_streak = 0
+        self._perf_calls = 0
+        self._perf_total_ns = 0
 
     @staticmethod
     def _build_eval_risk_summary(metrics: dict[str, Any]) -> dict[str, Any]:
@@ -1192,8 +1598,12 @@ class FullPathEvalCallback(BaseCallback):
             or metrics.get("action_distribution")
             or {}
         )
+        trade_diagnostics = dict(execution_diagnostics.get("trade_diagnostics") or {})
         long_count = int(action_distribution.get("long", 0) or 0)
         short_count = int(action_distribution.get("short", 0) or 0)
+        alpha_gate_block_all_rate = trade_diagnostics.get("alpha_gate_block_all_rate")
+        alpha_gate_long_allow_rate = trade_diagnostics.get("alpha_gate_long_allow_rate")
+        alpha_gate_short_allow_rate = trade_diagnostics.get("alpha_gate_short_allow_rate")
         cost_share_of_abs_gross = (
             float(total_cost / abs(gross_pnl))
             if abs(gross_pnl) > 1e-9
@@ -1236,6 +1646,11 @@ class FullPathEvalCallback(BaseCallback):
             flags.append("middle_segment_regime_fragility")
         if trade_count >= max(int(MIN_EVAL_TRADE_COUNT), 1) and expectancy_usd <= 0.0:
             flags.append("trade_frequency_without_edge")
+        if (
+            alpha_gate_block_all_rate is not None
+            and float(alpha_gate_block_all_rate) >= float(TRAIN_SPARSE_ALPHA_GATE_WARN_RATE)
+        ):
+            flags.append("sparse_alpha_gate")
 
         verdict = "watch"
         if {"negative_expectancy", "cost_dominates_gross"} & set(flags):
@@ -1252,9 +1667,36 @@ class FullPathEvalCallback(BaseCallback):
             "cost_share_of_abs_gross_pnl": cost_share_of_abs_gross,
             "long_entry_count": long_count,
             "short_entry_count": short_count,
+            "alpha_gate_block_all_rate": float(alpha_gate_block_all_rate) if alpha_gate_block_all_rate is not None else None,
+            "alpha_gate_long_allow_rate": float(alpha_gate_long_allow_rate) if alpha_gate_long_allow_rate is not None else None,
+            "alpha_gate_short_allow_rate": float(alpha_gate_short_allow_rate) if alpha_gate_short_allow_rate is not None else None,
             "weakest_segment": weakest_segment,
             "weakest_segment_timed_sharpe": weakest_segment_sharpe,
         }
+
+    @staticmethod
+    def _overtrade_negative_edge_condition(
+        risk_summary: dict[str, Any],
+    ) -> tuple[bool, list[str]]:
+        risk_flags = list(risk_summary.get("flags", []) or [])
+        trade_count = int(float(risk_summary.get("trade_count", 0) or 0))
+        cost_share = risk_summary.get("cost_share_of_abs_gross_pnl")
+        expectancy_usd = float(risk_summary.get("expectancy_usd", 0.0) or 0.0)
+        reasons: list[str] = []
+        if expectancy_usd < 0.0 or "negative_expectancy" in risk_flags:
+            if cost_share is not None and float(cost_share) >= float(TRAIN_FAIL_FAST_COST_SHARE_MIN):
+                reasons.append(f"cost_share={float(cost_share):.2f}x")
+            if trade_count >= int(TRAIN_FAIL_FAST_OVERTRADE_TRADE_COUNT):
+                reasons.append(f"overtrade_count={trade_count}")
+        triggered = (
+            bool(TRAIN_FAIL_FAST_ENABLED)
+            and int(TRAIN_FAIL_FAST_OVERTRADE_TRADE_COUNT) > 0
+            and (expectancy_usd < 0.0 or "negative_expectancy" in risk_flags)
+            and cost_share is not None
+            and float(cost_share) >= float(TRAIN_FAIL_FAST_COST_SHARE_MIN)
+            and trade_count >= int(TRAIN_FAIL_FAST_OVERTRADE_TRADE_COUNT)
+        )
+        return triggered, reasons
 
     @staticmethod
     def _summarize_stochastic_metrics(metrics_list: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -1291,115 +1733,200 @@ class FullPathEvalCallback(BaseCallback):
         )
 
     def _on_step(self) -> bool:
-        if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
-            sync_vecnormalize_stats(self._train_vecnormalize, self._eval_vecnormalize)
-            _, deterministic_metrics = evaluate_model(self.model, self.eval_env, deterministic=True)
-            stochastic_metrics = []
-            for _ in range(self.stochastic_runs):
-                _, sampled_metrics = evaluate_model(self.model, self.eval_env, deterministic=False)
-                stochastic_metrics.append(sampled_metrics)
-            metrics = {
-                **deterministic_metrics,
-                "num_timesteps": int(self.num_timesteps),
-                "path_runs": 1 + len(stochastic_metrics),
-                "deterministic": True,
-                "full_path_eval_used": True,
-                "stochastic_runs": int(len(stochastic_metrics)),
-                "stochastic_summary": self._summarize_stochastic_metrics(stochastic_metrics),
-            }
-            metrics["eval_risk_summary"] = self._build_eval_risk_summary(metrics)
-            collapse_condition = (
-                self.num_timesteps >= self.collapse_warmup_steps
-                and float(metrics.get("trade_count", 0.0) or 0.0) <= 1.0
-                and float(metrics.get("final_equity", 0.0) or 0.0) <= 1000.0
-            )
-            self._collapse_streak = (self._collapse_streak + 1) if collapse_condition else 0
-            metrics["collapse_streak"] = int(self._collapse_streak)
-            metrics["collapse_detected"] = bool(self._collapse_streak >= self.collapse_consecutive_limit)
-            self.latest_metrics = metrics
-
-            # Strategy: Only append/save if accounting reconciliation passed
-            try:
-                validate_evaluation_payload(metrics)
-                self.history.append(metrics)
-            except Exception as e:
-                self.latest_metrics = {
-                    **metrics,
-                    "serialization_skipped": True,
-                    "serialization_error": str(e),
+        perf_start_ns = time.perf_counter_ns()
+        try:
+            if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
+                sync_vecnormalize_stats(self._train_vecnormalize, self._eval_vecnormalize)
+                _, deterministic_metrics = evaluate_model(self.model, self.eval_env, deterministic=True)
+                stochastic_metrics = []
+                for _ in range(self.stochastic_runs):
+                    _, sampled_metrics = evaluate_model(self.model, self.eval_env, deterministic=False)
+                    stochastic_metrics.append(sampled_metrics)
+                metrics = {
+                    **deterministic_metrics,
+                    "num_timesteps": int(self.num_timesteps),
+                    "path_runs": 1 + len(stochastic_metrics),
+                    "deterministic": True,
+                    "full_path_eval_used": True,
+                    "stochastic_runs": int(len(stochastic_metrics)),
+                    "stochastic_summary": self._summarize_stochastic_metrics(stochastic_metrics),
                 }
-                log.warning(f"FullPathEvalCallback: Skipping serialization of failed evaluation at step {self.num_timesteps}: {e}")
+                metrics["eval_risk_summary"] = self._build_eval_risk_summary(metrics)
+                logger_values = getattr(self.model.logger, "name_to_value", {}) or {}
+                raw_approx_kl = logger_values.get("train/approx_kl")
+                raw_explained_variance = logger_values.get("train/explained_variance")
+                try:
+                    latest_approx_kl = float(raw_approx_kl)
+                except (TypeError, ValueError):
+                    latest_approx_kl = float("nan")
+                try:
+                    latest_explained_variance = float(raw_explained_variance)
+                except (TypeError, ValueError):
+                    latest_explained_variance = float("nan")
+                risk_summary = dict(metrics.get("eval_risk_summary") or {})
+                risk_flags = list(risk_summary.get("flags", []) or [])
+                if np.isfinite(latest_approx_kl) and latest_approx_kl <= float(TRAIN_FAIL_FAST_APPROX_KL_MAX):
+                    if "policy_update_stalled" not in risk_flags:
+                        risk_flags.append("policy_update_stalled")
+                risk_summary["flags"] = risk_flags
+                risk_summary["latest_approx_kl"] = float(latest_approx_kl) if np.isfinite(latest_approx_kl) else None
+                risk_summary["latest_explained_variance"] = (
+                    float(latest_explained_variance) if np.isfinite(latest_explained_variance) else None
+                )
+                metrics["eval_risk_summary"] = risk_summary
+
+                alpha_gate_block_rate = risk_summary.get("alpha_gate_block_all_rate")
+                fail_fast_reasons: list[str] = []
+                overtrade_negative_edge_triggered, overtrade_negative_edge_reasons = self._overtrade_negative_edge_condition(
+                    risk_summary
+                )
+                if self.num_timesteps < int(TRAIN_FAIL_FAST_WARMUP_STEPS):
+                    overtrade_negative_edge_triggered = False
+                    overtrade_negative_edge_reasons = []
+                if bool(TRAIN_FAIL_FAST_ENABLED) and self.num_timesteps >= int(TRAIN_FAIL_FAST_WARMUP_STEPS):
+                    if "negative_expectancy" in risk_flags:
+                        if (
+                            alpha_gate_block_rate is not None
+                            and float(alpha_gate_block_rate) >= float(TRAIN_FAIL_FAST_SPARSE_ALPHA_GATE_BLOCK_RATE)
+                        ):
+                            fail_fast_reasons.append(
+                                f"sparse alpha gate block_all_rate={float(alpha_gate_block_rate):.2%}"
+                            )
+                        trade_count = int(float(risk_summary.get("trade_count", 0) or 0))
+                        if trade_count <= int(TRAIN_FAIL_FAST_MAX_TRADE_COUNT):
+                            fail_fast_reasons.append(f"trade_count={trade_count}")
+                        if np.isfinite(latest_approx_kl) and latest_approx_kl <= float(TRAIN_FAIL_FAST_APPROX_KL_MAX):
+                            fail_fast_reasons.append(f"approx_kl={latest_approx_kl:.6f}")
+                        if (
+                            np.isfinite(latest_explained_variance)
+                            and latest_explained_variance <= float(TRAIN_FAIL_FAST_EXPLAINED_VARIANCE_MAX)
+                        ):
+                            fail_fast_reasons.append(f"explained_variance={latest_explained_variance:.3f}")
+                    if overtrade_negative_edge_reasons:
+                        fail_fast_reasons.extend(overtrade_negative_edge_reasons)
+                fail_fast_condition = (
+                    bool(TRAIN_FAIL_FAST_ENABLED)
+                    and self.num_timesteps >= int(TRAIN_FAIL_FAST_WARMUP_STEPS)
+                    and "negative_expectancy" in risk_flags
+                    and "sparse_alpha_gate" in risk_flags
+                    and int(float(risk_summary.get("trade_count", 0) or 0)) <= int(TRAIN_FAIL_FAST_MAX_TRADE_COUNT)
+                    and np.isfinite(latest_approx_kl)
+                    and latest_approx_kl <= float(TRAIN_FAIL_FAST_APPROX_KL_MAX)
+                    and np.isfinite(latest_explained_variance)
+                    and latest_explained_variance <= float(TRAIN_FAIL_FAST_EXPLAINED_VARIANCE_MAX)
+                )
+                fail_fast_condition = bool(fail_fast_condition or overtrade_negative_edge_triggered)
+                self._fail_fast_streak = (self._fail_fast_streak + 1) if fail_fast_condition else 0
+                metrics["overtrade_negative_edge_triggered"] = bool(overtrade_negative_edge_triggered)
+                metrics["fail_fast_reasons"] = list(fail_fast_reasons)
+                metrics["fail_fast_streak"] = int(self._fail_fast_streak)
+                metrics["fail_fast_triggered"] = bool(self._fail_fast_streak >= int(TRAIN_FAIL_FAST_CONSECUTIVE))
+                collapse_condition = (
+                    self.num_timesteps >= self.collapse_warmup_steps
+                    and float(metrics.get("trade_count", 0.0) or 0.0) <= 1.0
+                    and float(metrics.get("final_equity", 0.0) or 0.0) <= 1000.0
+                )
+                self._collapse_streak = (self._collapse_streak + 1) if collapse_condition else 0
+                metrics["collapse_streak"] = int(self._collapse_streak)
+                metrics["collapse_detected"] = bool(self._collapse_streak >= self.collapse_consecutive_limit)
+                self.latest_metrics = metrics
+
+                try:
+                    validate_evaluation_payload(metrics)
+                    self.history.append(metrics)
+                except Exception as e:
+                    self.latest_metrics = {
+                        **metrics,
+                        "serialization_skipped": True,
+                        "serialization_error": str(e),
+                    }
+                    log.warning(f"FullPathEvalCallback: Skipping serialization of failed evaluation at step {self.num_timesteps}: {e}")
+                    if bool(metrics.get("collapse_detected", False)):
+                        self._write_collapsed_state()
+                        return False
+                    return True
+
+                if self.history_path is not None:
+                    self.history_path.parent.mkdir(parents=True, exist_ok=True)
+                    self.history_path.write_text(
+                        json.dumps({"evaluations": self.history}, indent=2, default=_json_default),
+                        encoding="utf-8",
+                    )
+
+                current_metric = float(metrics.get(self.metric_key, -float("inf")))
+                if np.isfinite(current_metric) and current_metric > self.best_metric:
+                    self.best_metric = current_metric
+                    self.best_model_save_path.mkdir(parents=True, exist_ok=True)
+                    self.model.save(str((self.best_model_save_path / "best_model").with_suffix("")))
+                    if self.best_vecnormalize_path is not None:
+                        self.best_vecnormalize_path.parent.mkdir(parents=True, exist_ok=True)
+                        self._train_vecnormalize.save(str(self.best_vecnormalize_path))
+
+                    try:
+                        logger_values = getattr(self.model.logger, "name_to_value", {}) or {}
+                        ppo_diag_snapshot: dict[str, Any] = {
+                            "num_timesteps": int(self.num_timesteps),
+                            "metric_key": str(self.metric_key),
+                            "best_metric_value": float(current_metric),
+                            "ppo_diagnostics": {
+                                k: float(v)
+                                for k, v in logger_values.items()
+                                if k.startswith("train/") and isinstance(v, (int, float, np.floating, np.integer))
+                            },
+                        }
+                        diag_path = self.best_model_save_path / "best_training_diagnostics.json"
+                        diag_path.write_text(
+                            json.dumps(ppo_diag_snapshot, indent=2, default=_json_default),
+                            encoding="utf-8",
+                        )
+                    except Exception as diag_exc:
+                        log.warning(f"FullPathEvalCallback: Failed to write best_training_diagnostics.json: {diag_exc}")
+
+                if self.verbose:
+                    risk_summary = dict(metrics.get("eval_risk_summary") or {})
+                    cost_share = risk_summary.get("cost_share_of_abs_gross_pnl")
+                    cost_share_text = f"{float(cost_share):.2f}x" if cost_share is not None else "n/a"
+                    flags = ",".join(risk_summary.get("flags", [])) or "none"
+                    print(
+                        f"[Eval] Step {self.num_timesteps:,} | "
+                        f"timed_sharpe={float(metrics.get('timed_sharpe', 0.0)):.3f} | "
+                        f"final_equity={float(metrics.get('final_equity', 0.0)):.2f} | "
+                        f"max_drawdown={float(metrics.get('max_drawdown', 0.0)):.1%}"
+                    )
+                    print(
+                        f"[EvalRisk] Step {self.num_timesteps:,} | "
+                        f"verdict={risk_summary.get('verdict', 'watch')} | "
+                        f"trades={int(risk_summary.get('trade_count', 0) or 0)} | "
+                        f"expectancy={float(risk_summary.get('expectancy_usd', 0.0) or 0.0):.2f} | "
+                        f"net={float(risk_summary.get('net_pnl_usd', 0.0) or 0.0):.2f} | "
+                        f"cost_share={cost_share_text} | "
+                        f"long={int(risk_summary.get('long_entry_count', 0) or 0)} short={int(risk_summary.get('short_entry_count', 0) or 0)} | "
+                        f"weakest_segment={risk_summary.get('weakest_segment') or 'n/a'} | "
+                        f"flags={flags}"
+                    )
+                    if bool(metrics.get("fail_fast_reasons")):
+                        print(
+                            f"[FailFast] Step {self.num_timesteps:,} | "
+                            f"streak={int(metrics.get('fail_fast_streak', 0) or 0)} | "
+                            f"reasons={','.join(metrics.get('fail_fast_reasons', []) or [])}"
+                        )
                 if bool(metrics.get("collapse_detected", False)):
                     self._write_collapsed_state()
                     return False
-                return True
+                if bool(metrics.get("fail_fast_triggered", False)):
+                    self._write_collapsed_state()
+                    return False
+            return True
+        finally:
+            self._perf_calls += 1
+            self._perf_total_ns += max(time.perf_counter_ns() - perf_start_ns, 0)
 
-            if self.history_path is not None:
-                self.history_path.parent.mkdir(parents=True, exist_ok=True)
-                self.history_path.write_text(
-                    json.dumps({"evaluations": self.history}, indent=2, default=_json_default),
-                    encoding="utf-8",
-                )
-
-            current_metric = float(metrics.get(self.metric_key, -float("inf")))
-            if np.isfinite(current_metric) and current_metric > self.best_metric:
-                self.best_metric = current_metric
-                self.best_model_save_path.mkdir(parents=True, exist_ok=True)
-                self.model.save(str((self.best_model_save_path / "best_model").with_suffix("")))
-                if self.best_vecnormalize_path is not None:
-                    self.best_vecnormalize_path.parent.mkdir(parents=True, exist_ok=True)
-                    self._train_vecnormalize.save(str(self.best_vecnormalize_path))
-
-                # Snapshot the PPO training diagnostics at the exact moment of the new best.
-                # This resolves the fold-end reporting mismatch where eval metrics come from
-                # best_model.zip (e.g. step 40k) but PPO diag was logged from end-of-training
-                # (e.g. step 120k+), making approx_kl/EV appear unrelated to the best checkpoint.
-                try:
-                    logger_values = getattr(self.model.logger, "name_to_value", {}) or {}
-                    ppo_diag_snapshot: dict[str, Any] = {
-                        "num_timesteps": int(self.num_timesteps),
-                        "metric_key": str(self.metric_key),
-                        "best_metric_value": float(current_metric),
-                        "ppo_diagnostics": {
-                            k: float(v)
-                            for k, v in logger_values.items()
-                            if k.startswith("train/") and isinstance(v, (int, float, np.floating, np.integer))
-                        },
-                    }
-                    diag_path = self.best_model_save_path / "best_training_diagnostics.json"
-                    diag_path.write_text(
-                        json.dumps(ppo_diag_snapshot, indent=2, default=_json_default),
-                        encoding="utf-8",
-                    )
-                except Exception as diag_exc:
-                    log.warning(f"FullPathEvalCallback: Failed to write best_training_diagnostics.json: {diag_exc}")
-
-            if self.verbose:
-                risk_summary = dict(metrics.get("eval_risk_summary") or {})
-                cost_share = risk_summary.get("cost_share_of_abs_gross_pnl")
-                cost_share_text = f"{float(cost_share):.2f}x" if cost_share is not None else "n/a"
-                flags = ",".join(risk_summary.get("flags", [])) or "none"
-                print(
-                    f"[Eval] Step {self.num_timesteps:,} | "
-                    f"timed_sharpe={float(metrics.get('timed_sharpe', 0.0)):.3f} | "
-                    f"final_equity={float(metrics.get('final_equity', 0.0)):.2f} | "
-                    f"max_drawdown={float(metrics.get('max_drawdown', 0.0)):.1%}"
-                )
-                print(
-                    f"[EvalRisk] Step {self.num_timesteps:,} | "
-                    f"verdict={risk_summary.get('verdict', 'watch')} | "
-                    f"trades={int(risk_summary.get('trade_count', 0) or 0)} | "
-                    f"expectancy={float(risk_summary.get('expectancy_usd', 0.0) or 0.0):.2f} | "
-                    f"net={float(risk_summary.get('net_pnl_usd', 0.0) or 0.0):.2f} | "
-                    f"cost_share={cost_share_text} | "
-                    f"long={int(risk_summary.get('long_entry_count', 0) or 0)} short={int(risk_summary.get('short_entry_count', 0) or 0)} | "
-                    f"weakest_segment={risk_summary.get('weakest_segment') or 'n/a'} | "
-                    f"flags={flags}"
-                )
-            if bool(metrics.get("collapse_detected", False)):
-                self._write_collapsed_state()
-                return False
-        return True
+    def perf_snapshot(self) -> dict[str, float]:
+        return {
+            "calls": int(self._perf_calls),
+            "total_ns": int(self._perf_total_ns),
+            "mean_ns": float(self._perf_total_ns / self._perf_calls) if self._perf_calls else 0.0,
+        }
 
 
 class AdaptiveKLLearningRateCallback(BaseCallback):
@@ -1502,38 +2029,47 @@ class EnhancedLoggingCallback(BaseCallback):
         self.cpu_usage_buffer: list[float] = []
         self.gpu_usage_buffer: list[float] = []
         self.ram_usage_buffer: list[float] = []
+        self._perf_calls = 0
+        self._perf_total_ns = 0
 
     def _on_step(self) -> bool:
-        # Collect metrics from all vector environment workers
-        infos = self.locals.get("infos")
-        if not infos:
+        perf_start_ns = time.perf_counter_ns()
+        try:
+            infos = self.locals.get("infos")
+            if not infos:
+                return True
+
+            for info in infos:
+                if not info:
+                    continue
+                self.pnl_buffer.append(float(info.get("reward_pnl", 0.0)))
+                self.bonus_buffer.append(float(info.get("reward_bonus", 0.0)))
+                self.penalty_buffer.append(float(info.get("reward_penalty", 0.0)))
+
+                act_type = info.get("action_type", info.get("selected_action_type", "HOLD"))
+                if act_type == "OPEN":
+                    direction = int(info.get("selected_action_direction", 0))
+                    act = "LONG" if direction > 0 else "SHORT"
+                else:
+                    act = act_type
+                self.action_type_buffer.append(str(act))
+
+                sys_metrics = resource_monitor.get_latest()
+                self.cpu_usage_buffer.append(sys_metrics.cpu_pct)
+                if sys_metrics.gpu_pct is not None:
+                    self.gpu_usage_buffer.append(sys_metrics.gpu_pct)
+                self.ram_usage_buffer.append(sys_metrics.ram_pct)
             return True
-            
-        # Support both RuntimeGymEnv and ForexTradingEnv info dict formats
-        for info in infos:
-            if not info:
-                continue
-            # 1. Rewards: use simplified top-level keys now shared by both env types
-            self.pnl_buffer.append(float(info.get("reward_pnl", 0.0)))
-            self.bonus_buffer.append(float(info.get("reward_bonus", 0.0)))
-            self.penalty_buffer.append(float(info.get("reward_penalty", 0.0)))
+        finally:
+            self._perf_calls += 1
+            self._perf_total_ns += max(time.perf_counter_ns() - perf_start_ns, 0)
 
-            # 2. Actions: Map "OPEN" + direction -> "LONG"/"SHORT"
-            act_type = info.get("action_type", info.get("selected_action_type", "HOLD"))
-            if act_type == "OPEN":
-                direction = int(info.get("selected_action_direction", 0))
-                act = "LONG" if direction > 0 else "SHORT"
-            else:
-                act = act_type
-            self.action_type_buffer.append(str(act))
-
-            # Capture system metrics at each step (sampled at monitor's interval)
-            sys_metrics = resource_monitor.get_latest()
-            self.cpu_usage_buffer.append(sys_metrics.cpu_pct)
-            if sys_metrics.gpu_pct is not None:
-                self.gpu_usage_buffer.append(sys_metrics.gpu_pct)
-            self.ram_usage_buffer.append(sys_metrics.ram_pct)
-        return True
+    def perf_snapshot(self) -> dict[str, float]:
+        return {
+            "calls": int(self._perf_calls),
+            "total_ns": int(self._perf_total_ns),
+            "mean_ns": float(self._perf_total_ns / self._perf_calls) if self._perf_calls else 0.0,
+        }
 
     def _get_current_curriculum_stats(self) -> dict[str, float]:
         """Helper to extract current curriculum values from env/model."""
@@ -1866,6 +2402,8 @@ class TrainingHeartbeatCallback(BaseCallback):
                 )
         latest_eval_metrics = copy.deepcopy(self.eval_cb.latest_metrics) if self.eval_cb and self.eval_cb.latest_metrics else None
         env_diagnostics = self._collect_training_diagnostics()
+        model_perf = copy.deepcopy(getattr(self.model, "_codex_perf_stats", {}) or {})
+        eval_perf = self.eval_cb.perf_snapshot() if self.eval_cb and hasattr(self.eval_cb, "perf_snapshot") else {}
         payload = {
             "schema_version": HEARTBEAT_SCHEMA_VERSION,
             "run_id": self.run_id,
@@ -1899,6 +2437,10 @@ class TrainingHeartbeatCallback(BaseCallback):
             "action_distribution": env_diagnostics["action_distribution"],
             "trade_diagnostics": env_diagnostics["trade_diagnostics"],
             "reward_components": env_diagnostics["reward_components"],
+            "alpha_gate": env_diagnostics.get("alpha_gate"),
+            "env_perf": env_diagnostics.get("perf"),
+            "model_perf": model_perf,
+            "callback_perf": {"full_path_eval": eval_perf},
             "recovery_targets": STAGE_A_RECOVERY_TARGETS,
         }
         if self.dataset_integrity_report_path is not None:
@@ -1970,12 +2512,12 @@ def purged_walk_forward_splits(
     min_val_size = int(minimums["min_val_bars"])
     val_size = max(min_val_size, int(n * test_frac))
 
-    # In TRAIN_ENV_MODE=runtime, features are recomputed online via FeatureEngine, so a large
-    # "purge gap" is usually unnecessary. Default to 0 unless explicitly overridden.
     effective_purge_gap_default = int(purge_gap)
     if TRAIN_ENV_MODE == "runtime":
         runtime_override = os.environ.get("TRAIN_PURGE_GAP_RUNTIME_BARS", "").strip()
-        effective_purge_gap_default = int(runtime_override) if runtime_override else 0
+        effective_purge_gap_default = int(runtime_override) if runtime_override else max(int(WARMUP_BARS), 1)
+        if effective_purge_gap_default <= 0:
+            raise RuntimeError("TRAIN_PURGE_GAP_RUNTIME_BARS must be > 0 in runtime mode.")
 
     adaptive_gap = os.environ.get("TRAIN_ADAPTIVE_PURGE_GAP", "1") != "0"
     min_train_bars = int(max(minimums["min_train_bars"], int(WARMUP_BARS) + 20))
@@ -2070,7 +2612,12 @@ def make_env(
                     turnover_penalty=float(TRAIN_REWARD_TURNOVER_COEF),
                     net_return_coef=float(TRAIN_REWARD_NET_RETURN_COEF),
                     entry_spread_z_limit=float(TRAIN_ENTRY_SPREAD_Z_LIMIT),
+                    alpha_gate_warmup_steps=int(TRAIN_ALPHA_GATE_WARMUP_STEPS),
+                    alpha_gate_warmup_threshold_delta=float(TRAIN_ALPHA_GATE_WARMUP_THRESHOLD_DELTA),
+                    alpha_gate_warmup_margin_scale=float(TRAIN_ALPHA_GATE_WARMUP_MARGIN_SCALE),
                     window_size=int(TRAIN_WINDOW_SIZE),
+                    minimal_post_cost_reward=bool(TRAIN_MINIMAL_POST_COST_REWARD),
+                    force_fast_window_benchmark=bool(TRAIN_FORCE_FAST_WINDOW_BENCHMARK),
                     random_start=bool(random_start),
                     slim_info=slim_info,
                 ),
@@ -2310,6 +2857,7 @@ def _extract_eval_execution_log(eval_env) -> list[dict[str, Any]]:
 
 
 def evaluate_model(model, eval_env, *, deterministic: bool = True) -> tuple[list[float], dict[str, Any]]:
+    eval_start_ns = time.perf_counter_ns()
     obs = eval_env.reset()
     equity_curve: list[float] = []
     timestamps: list[pd.Timestamp] = []
@@ -2391,6 +2939,13 @@ def evaluate_model(model, eval_env, *, deterministic: bool = True) -> tuple[list
         "validation_status": val_status,
         "accounting_gap_detected": not val_status["passed"],
         "deterministic": bool(deterministic),
+    }
+    EVALUATE_MODEL_PERF["calls"] += 1
+    EVALUATE_MODEL_PERF["total_ns"] += max(time.perf_counter_ns() - eval_start_ns, 0)
+    metrics["evaluate_model_perf"] = {
+        "calls": int(EVALUATE_MODEL_PERF["calls"]),
+        "total_ns": int(EVALUATE_MODEL_PERF["total_ns"]),
+        "mean_ns": float(EVALUATE_MODEL_PERF["total_ns"] / EVALUATE_MODEL_PERF["calls"]) if EVALUATE_MODEL_PERF["calls"] else 0.0,
     }
     metrics["metric_reconciliation"] = metrics["metrics_reconciliation"]
     return equity_curve, metrics
@@ -3299,11 +3854,7 @@ def main() -> None:
     # ── Global Scaler fitting ─────────────────────────────────────────────────
     # We fit a single scaler on the combined trainable data of all symbols
     # to ensure consistency across the entire 3M step training run.
-    print(f"\n[INFO] Fitting Global Scaler across {len(sym_trainable_frames)} symbols...")
-    global_scaler = StandardScaler()
-    all_trainable_data = pd.concat(list(sym_trainable_frames.values()))
-    global_scaler.fit(all_trainable_data.loc[:, FEATURE_COLS])
-    print(f"[INFO] Global Scaler fitted on {len(all_trainable_data)} rows.")
+    print("\n[INFO] Skipping global scaler fit; fold-local scalers are used for runtime training.")
 
     # ── Training across folds ─────────────────────────────────────────────────
     resume_fold_index = int(resume_state["fold_index"]) if resume_state is not None else 0
@@ -3358,12 +3909,12 @@ def main() -> None:
                 raw_fold_train = folds[fold_idx][0]
                 raw_fold_val = folds[fold_idx][1]
                 
-                # Use pre-fitted global_scaler for consistency across all folds/symbols
                 fold_train = raw_fold_train.copy()
                 fold_val = raw_fold_val.copy()
-                fold_train.loc[:, FEATURE_COLS] = global_scaler.transform(fold_train.loc[:, FEATURE_COLS]).astype(np.float32)
-                fold_val.loc[:, FEATURE_COLS] = global_scaler.transform(fold_val.loc[:, FEATURE_COLS]).astype(np.float32)
-                fold_scaler = global_scaler
+                fold_scaler = StandardScaler()
+                fold_scaler.fit(raw_fold_train.loc[:, FEATURE_COLS])
+                fold_train.loc[:, FEATURE_COLS] = fold_scaler.transform(fold_train.loc[:, FEATURE_COLS]).astype(np.float32)
+                fold_val.loc[:, FEATURE_COLS] = fold_scaler.transform(fold_val.loc[:, FEATURE_COLS]).astype(np.float32)
                 
                 fold_trains.append(fold_train)
                 fold_vals.append(fold_val)
@@ -3380,6 +3931,9 @@ def main() -> None:
                         probability_threshold=float(BASELINE_PROB_THRESHOLD),
                         probability_margin=float(BASELINE_PROB_MARGIN),
                         model_preference=TRAIN_ALPHA_GATE_MODEL,
+                        min_trade_count=max(int(MIN_EVAL_TRADE_COUNT), 10),
+                        min_directional_trade_count=max(int(MIN_EVAL_TRADE_COUNT) // 5, 3),
+                        max_single_direction_fraction=0.90,
                     )
 
         if not fold_trains:
@@ -3390,7 +3944,18 @@ def main() -> None:
         print(f"  Train: {len(train_df):,} bars  |  Val (purged): {len(val_df):,} bars")
         if TRAIN_ALPHA_GATE_ENABLED:
             alpha_gate_summary = {
-                sym: (gate.model_kind if gate is not None else "disabled")
+                sym: (
+                    {
+                        "model": gate.model_kind,
+                        "threshold": round(float(gate.probability_threshold), 2),
+                        "fit_trades": int(gate.fit_trade_count),
+                        "fit_long": int(gate.fit_long_trade_count),
+                        "fit_short": int(gate.fit_short_trade_count),
+                        "fit_ok": bool(gate.fit_quality_passed),
+                    }
+                    if gate is not None
+                    else "disabled"
+                )
                 for sym, gate in fold_alpha_gates.items()
             }
             print(f"  Alpha gate: {alpha_gate_summary}")
@@ -3400,6 +3965,12 @@ def main() -> None:
         initial_curriculum_slippage = get_current_slippage_pips(0, TRAINING_RECOVERY_CONFIG)
         final_curriculum_slippage = get_final_slippage_pips(TRAINING_RECOVERY_CONFIG)
         sym_list = list(sym_folds.keys())
+        use_shared_dataset_buffers, shared_dataset_note = resolve_shared_dataset_buffers(
+            enabled=bool(TRAIN_SHARED_DATASET),
+            vec_env_type=vec_env_type,
+        )
+        if shared_dataset_note:
+            print(f"[INFO] {shared_dataset_note}")
         # Pre-convert bars for all symbols in this fold to avoid O(N) conversion in every worker
         sym_bars_fold: dict[str, Any] = {}
         if TRAIN_ENV_MODE == "runtime":
@@ -3408,7 +3979,7 @@ def main() -> None:
             for sym in sym_list:
                 sdf = sym_folds[sym][fold_idx][0]
                 bars_arr = RuntimeGymEnv._frame_to_bars(sdf)
-                if TRAIN_SHARED_DATASET:
+                if use_shared_dataset_buffers:
                     # Unique path to avoid Errno 22 / Access Denied on Windows re-runs
                     mmap_name = f"bars_{sym}_{fold_idx}_{os.getpid()}_{int(time.time())}.dat"
                     mmap_path = os.path.join(tempfile.gettempdir(), mmap_name)
@@ -3640,6 +4211,7 @@ def main() -> None:
                 **ppo_kwargs
             )
             remaining_timesteps = TOTAL_TIMESTEPS
+        model = attach_model_perf_wrappers(model)
 
         diagnostics_cb = TrainingDiagnosticsCallback(verbose=int(os.environ.get("TRAIN_PROGRESS_VERBOSE", "1")))
 
@@ -3659,25 +4231,27 @@ def main() -> None:
         if TRAIN_BENCH_SPS:
             eval_freq = 0
 
-        eval_cb = FullPathEvalCallback(
-            val_vec,
-            train_vecnormalize=train_vec,
-            eval_vecnormalize=val_vec,
-            best_model_save_path=ckpt_dir,
-            best_vecnormalize_path=best_vecnormalize_path,
-            history_path=Path(ckpt_dir) / "full_path_evaluations.json",
-            eval_freq=eval_freq,
-            stochastic_runs=TRAIN_EVAL_STOCHASTIC_RUNS,
-            collapse_warmup_steps=TRAIN_COLLAPSE_WARMUP_STEPS,
-            collapse_consecutive_limit=TRAIN_COLLAPSE_CONSECUTIVE,
-            run_id=run_id,
-            symbol=primary_symbol,
-            checkpoints_root=run_checkpoints_root,
-            fold_index=fold_idx,
-            verbose=1,
-        )
-        if resume_current_fold:
-            _prime_eval_callback_from_history(eval_cb)
+        eval_cb = None
+        if not TRAIN_BENCH_SPS:
+            eval_cb = FullPathEvalCallback(
+                val_vec,
+                train_vecnormalize=train_vec,
+                eval_vecnormalize=val_vec,
+                best_model_save_path=ckpt_dir,
+                best_vecnormalize_path=best_vecnormalize_path,
+                history_path=Path(ckpt_dir) / "full_path_evaluations.json",
+                eval_freq=eval_freq,
+                stochastic_runs=TRAIN_EVAL_STOCHASTIC_RUNS,
+                collapse_warmup_steps=TRAIN_COLLAPSE_WARMUP_STEPS,
+                collapse_consecutive_limit=TRAIN_COLLAPSE_CONSECUTIVE,
+                run_id=run_id,
+                symbol=primary_symbol,
+                checkpoints_root=run_checkpoints_root,
+                fold_index=fold_idx,
+                verbose=1,
+            )
+            if resume_current_fold:
+                _prime_eval_callback_from_history(eval_cb)
         adaptive_kl_cb = AdaptiveKLLearningRateCallback(
             min_lr=PPO_MIN_LEARNING_RATE,
             max_lr=TRAIN_ADAPTIVE_KL_MAX_LR,
@@ -3711,11 +4285,15 @@ def main() -> None:
             verbose=0,
         )
 
-        enhanced_logging_cb = EnhancedLoggingCallback(verbose=1)
         active_callbacks = [curriculum_cb, diagnostics_cb]
         if adaptive_kl_cb is not None:
             active_callbacks.append(adaptive_kl_cb)
-        active_callbacks.extend([eval_cb, heartbeat_cb, enhanced_logging_cb])
+        if eval_cb is not None:
+            active_callbacks.append(eval_cb)
+        active_callbacks.append(heartbeat_cb)
+        if not TRAIN_BENCH_SPS:
+            enhanced_logging_cb = EnhancedLoggingCallback(verbose=1)
+            active_callbacks.append(enhanced_logging_cb)
 
         if remaining_timesteps > 0:
             if TRAIN_TORCH_COMPILE and hasattr(model, "policy"):
@@ -3789,6 +4367,15 @@ def main() -> None:
         holdout_profit_factor = float(holdout_metrics.get("profit_factor", 0.0))
         holdout_expectancy = float(holdout_metrics.get("expectancy", 0.0))
         holdout_trade_count = int(holdout_metrics.get("trade_count", 0) or 0)
+        baseline_reference_name, baseline_reference_metrics = _baseline_reference_from_report(baseline_report)
+        holdout_profit_rehab = _baseline_profit_rehab_summary(
+            holdout_metrics,
+            baseline_metrics=baseline_reference_metrics,
+        )
+        any_overtrade_negative_edge = any(
+            bool((entry or {}).get("overtrade_negative_edge_triggered", False))
+            for entry in list((eval_cb.history if eval_cb is not None else []) or [])
+        )
         callback_summary = diagnostics_cb.summary()
         diagnostics = summarize_training_diagnostics(
             [
@@ -3833,15 +4420,36 @@ def main() -> None:
         diagnostics["training_churn_action_cooldown"] = int(TRAIN_CHURN_ACTION_COOLDOWN)
         diagnostics["training_entry_spread_z_limit"] = float(TRAIN_ENTRY_SPREAD_Z_LIMIT)
         diagnostics["training_window_size"] = int(TRAIN_WINDOW_SIZE)
+        diagnostics["training_minimal_post_cost_reward"] = bool(TRAIN_MINIMAL_POST_COST_REWARD)
+        diagnostics["training_force_fast_window_benchmark"] = bool(TRAIN_FORCE_FAST_WINDOW_BENCHMARK)
         diagnostics["training_alpha_gate_enabled"] = bool(TRAIN_ALPHA_GATE_ENABLED)
         diagnostics["training_alpha_gate_model"] = str(TRAIN_ALPHA_GATE_MODEL)
         diagnostics["training_alpha_gate_probability_threshold"] = float(BASELINE_PROB_THRESHOLD)
         diagnostics["training_alpha_gate_probability_margin"] = float(BASELINE_PROB_MARGIN)
         diagnostics["training_alpha_gate_min_edge_pips"] = float(BASELINE_MIN_EDGE_PIPS)
+        diagnostics["training_alpha_gate_warmup_steps"] = int(TRAIN_ALPHA_GATE_WARMUP_STEPS)
+        diagnostics["training_alpha_gate_warmup_threshold_delta"] = float(TRAIN_ALPHA_GATE_WARMUP_THRESHOLD_DELTA)
+        diagnostics["training_alpha_gate_warmup_margin_scale"] = float(TRAIN_ALPHA_GATE_WARMUP_MARGIN_SCALE)
+        diagnostics["training_fail_fast_enabled"] = bool(TRAIN_FAIL_FAST_ENABLED)
+        diagnostics["training_fail_fast_warmup_steps"] = int(TRAIN_FAIL_FAST_WARMUP_STEPS)
+        diagnostics["training_fail_fast_consecutive"] = int(TRAIN_FAIL_FAST_CONSECUTIVE)
+        diagnostics["training_fail_fast_sparse_alpha_gate_block_rate"] = float(TRAIN_FAIL_FAST_SPARSE_ALPHA_GATE_BLOCK_RATE)
+        diagnostics["training_fail_fast_approx_kl_max"] = float(TRAIN_FAIL_FAST_APPROX_KL_MAX)
+        diagnostics["training_fail_fast_explained_variance_max"] = float(TRAIN_FAIL_FAST_EXPLAINED_VARIANCE_MAX)
+        diagnostics["training_fail_fast_max_trade_count"] = int(TRAIN_FAIL_FAST_MAX_TRADE_COUNT)
+        diagnostics["training_fail_fast_overtrade_trade_count"] = int(TRAIN_FAIL_FAST_OVERTRADE_TRADE_COUNT)
+        diagnostics["training_fail_fast_cost_share_min"] = float(TRAIN_FAIL_FAST_COST_SHARE_MIN)
         diagnostics["eval_protocol_valid"] = True
         diagnostics["full_path_eval_used"] = True
         diagnostics["full_path_validation_metrics"] = evaluation_metrics
         diagnostics["holdout_metrics"] = holdout_metrics
+        diagnostics["baseline_reference"] = baseline_reference_name
+        diagnostics["baseline_reference_metrics"] = baseline_reference_metrics
+        diagnostics["trade_count_vs_baseline_ratio"] = holdout_profit_rehab["trade_count_vs_baseline_ratio"]
+        diagnostics["net_pnl_delta_vs_baseline"] = holdout_profit_rehab["net_pnl_delta_vs_baseline"]
+        diagnostics["expectancy_delta_vs_baseline"] = holdout_profit_rehab["expectancy_delta_vs_baseline"]
+        diagnostics["cost_share"] = holdout_profit_rehab["cost_share"]
+        diagnostics["overtrade_negative_edge_triggered"] = bool(any_overtrade_negative_edge)
         diagnostics["segment_metrics"] = {
             "validation": evaluation_metrics.get("segment_metrics", {}),
             "holdout": holdout_metrics.get("segment_metrics", {}),

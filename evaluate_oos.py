@@ -48,7 +48,7 @@ from runtime_common import (
     validate_evaluation_accounting,
     validate_evaluation_payload,
 )
-from runtime_gym_env import TrainingDiagnostics
+from runtime_gym_env import BarView, RuntimeGymEnv, TrainingDiagnostics
 from trading_config import deployment_paths
 from train_agent import (
     FOLD_TEST_FRAC,
@@ -199,6 +199,16 @@ def _mean_reversion_provider(*, feature_row, position_direction: int, action_map
         position_direction=int(position_direction or 0),
         target_direction=target_direction,
     )
+
+
+RUNTIME_BASELINE_PROVIDERS: dict[str, Callable[..., int]] = {
+    "flat": _flat_provider,
+    "mean_reversion": _mean_reversion_provider,
+    "trend_rule": _trend_provider,
+    "runtime_flat": _flat_provider,
+    "runtime_mean_reversion": _mean_reversion_provider,
+    "runtime_trend": _trend_provider,
+}
 
 
 def _metrics_profitable(metrics: dict[str, Any] | None) -> bool:
@@ -382,7 +392,7 @@ def _resolve_execution_cost_profile(manifest) -> dict[str, float]:
     }
 
 
-def _resolve_reward_profile(manifest) -> dict[str, float]:
+def _resolve_reward_profile(manifest) -> dict[str, Any]:
     profile = dict(getattr(manifest, "reward_profile", None) or {})
     return {
         "reward_scale": float(profile.get("reward_scale", 10_000.0)),
@@ -390,6 +400,7 @@ def _resolve_reward_profile(manifest) -> dict[str, float]:
         "transaction_penalty": float(profile.get("transaction_penalty", 1.0)),
         "reward_clip_low": float(profile.get("reward_clip_low", -5.0)),
         "reward_clip_high": float(profile.get("reward_clip_high", 5.0)),
+        "minimal_post_cost_reward": bool(profile.get("minimal_post_cost_reward", False)),
     }
 
 
@@ -398,26 +409,9 @@ def _load_training_runtime_options(diagnostics_path: Path | None) -> dict[str, A
     return runtime_options_from_training_payload(payload, default_window_size=1)
 
 
-def _frame_to_bars(frame: pd.DataFrame) -> list[VolumeBar]:
-    bars: list[VolumeBar] = []
-    for timestamp, row in frame.iterrows():
-        time_delta_s = float(row.get("time_delta_s", 0.0))
-        end_time_msc = int(pd.Timestamp(timestamp).timestamp() * 1000)
-        bars.append(
-            VolumeBar(
-                timestamp=pd.Timestamp(timestamp).to_pydatetime(),
-                open=float(row["Open"]),
-                high=float(row["High"]),
-                low=float(row["Low"]),
-                close=float(row["Close"]),
-                volume=float(row["Volume"]),
-                avg_spread=float(row.get("avg_spread", 0.0)),
-                time_delta_s=time_delta_s,
-                start_time_msc=end_time_msc,
-                end_time_msc=end_time_msc + int(max(time_delta_s, 0.0) * 1000),
-            )
-        )
-    return bars
+def _frame_to_bars(frame: pd.DataFrame) -> list[BarView]:
+    raw_bars = RuntimeGymEnv._frame_to_bars(frame)
+    return [BarView(row) for row in raw_bars]
 
 
 def _load_json(path: Path) -> dict[str, Any] | None:
@@ -674,9 +668,12 @@ def _load_checkpoint_replay_context(symbol: str) -> ReplayContext:
     expected_obs_shape = [int(runtime_options["window_size"]), len(FEATURE_COLS) + STATE_FEATURE_COUNT]
     model_obs_shape = [int(value) for value in model.observation_space.shape]
     if model_obs_shape != expected_obs_shape:
-        raise RuntimeError(
-            f"Checkpoint model observation shape mismatch: expected {expected_obs_shape}, got {model_obs_shape}."
-        )
+        if len(model_obs_shape) == 2 and int(model_obs_shape[1]) == int(expected_obs_shape[1]):
+            runtime_options["window_size"] = int(model_obs_shape[0])
+        else:
+            raise RuntimeError(
+                f"Checkpoint model observation shape mismatch: expected {expected_obs_shape}, got {model_obs_shape}."
+            )
     with Path(artifact["vecnormalize_path"]).open("rb") as handle:
         obs_normalizer = pickle.load(handle)
     if hasattr(obs_normalizer, "training"):
@@ -745,6 +742,7 @@ def _build_runtime(
     *,
     context: ReplayContext,
     use_policy: bool,
+    disable_alpha_gate: bool = False,
 ) -> tuple[RuntimeEngine, ReplayBroker]:
     feature_engine = FeatureEngine.from_scaler(context.scaler)
     feature_engine.warm_up(context.warmup_frame)
@@ -752,8 +750,10 @@ def _build_runtime(
     snapshot = RuntimeSnapshot(last_equity=1_000.0, high_water_mark=1_000.0, day_start_equity=1_000.0)
     risk_engine = RiskEngine(RiskLimits(), snapshot=snapshot, initial_equity=1_000.0)
     runtime_options = dict(context.runtime_options or {})
+    reward_profile = dict(context.reward_profile or {})
+    reward_profile.pop("minimal_post_cost_reward", None)
     alpha_gate = None
-    if bool(runtime_options.get("alpha_gate_enabled", False)):
+    if bool(runtime_options.get("alpha_gate_enabled", False)) and not disable_alpha_gate:
         alpha_gate = fit_baseline_alpha_gate(
             symbol=context.symbol,
             train_frame=context.trainable_feature_frame,
@@ -778,11 +778,13 @@ def _build_runtime(
         snapshot=snapshot,
         state_store=None,
         window_size=int(runtime_options.get("window_size", 1)),
+        minimal_post_cost_reward=bool(runtime_options.get("minimal_post_cost_reward", False)),
+        force_fast_window_benchmark=bool(runtime_options.get("force_fast_window_benchmark", False)),
         alpha_gate=alpha_gate,
         churn_min_hold_bars=int(runtime_options.get("churn_min_hold_bars", 0)),
         churn_action_cooldown=int(runtime_options.get("churn_action_cooldown", 0)),
         entry_spread_z_limit=float(runtime_options.get("entry_spread_z_limit", 1.5)),
-        **context.reward_profile,
+        **reward_profile,
     )
     runtime.startup_reconcile()
     return runtime, broker
@@ -793,9 +795,14 @@ def run_replay(
     symbol: str | None = None,
     replay_context: ReplayContext | None = None,
     action_index_provider: Callable[..., int] | None = None,
+    disable_alpha_gate: bool = False,
 ) -> tuple[list[float], list[pd.Timestamp], list[dict[str, Any]], list[dict[str, Any]], dict[str, object]]:
     context = replay_context or load_replay_context(symbol)
-    runtime, broker = _build_runtime(context=context, use_policy=action_index_provider is None)
+    runtime, broker = _build_runtime(
+        context=context,
+        use_policy=action_index_provider is None,
+        disable_alpha_gate=disable_alpha_gate,
+    )
 
     equity_curve: list[float] = []
     timestamps: list[pd.Timestamp] = []
@@ -892,10 +899,12 @@ def _evaluate_policy(
     *,
     replay_context: ReplayContext,
     action_index_provider: Callable[..., int] | None,
+    disable_alpha_gate: bool = False,
 ) -> dict[str, Any]:
     equity_curve, timestamps, trade_log, execution_log, diagnostics = run_replay(
         replay_context=replay_context,
         action_index_provider=action_index_provider,
+        disable_alpha_gate=disable_alpha_gate,
     )
     execution_diagnostics = aggregate_training_diagnostics([diagnostics])
     accounting = build_evaluation_accounting(
@@ -926,19 +935,45 @@ def _evaluate_policy(
 
 
 def _evaluate_runtime_baselines(*, replay_context: ReplayContext) -> dict[str, dict[str, Any]]:
-    providers = {
-        "runtime_flat": _flat_provider,
-        "runtime_mean_reversion": _mean_reversion_provider,
-        "runtime_trend": _trend_provider,
-    }
     results: dict[str, dict[str, Any]] = {}
-    for name, provider in providers.items():
+    for name in ("runtime_flat", "runtime_mean_reversion", "runtime_trend"):
+        provider = RUNTIME_BASELINE_PROVIDERS[name]
         payload = _evaluate_policy(
             replay_context=replay_context,
             action_index_provider=provider,
+            disable_alpha_gate=True,
         )
         results[name] = {"metrics": payload["metrics"]}
     return results
+
+
+def _evaluate_research_best_runtime_baseline(
+    *,
+    replay_context: ReplayContext,
+    research_summary: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not research_summary:
+        return None
+    best_baseline = str(research_summary.get("best_baseline") or "").strip()
+    if not best_baseline:
+        return None
+    provider = RUNTIME_BASELINE_PROVIDERS.get(best_baseline)
+    if provider is None:
+        return {
+            "best_baseline": best_baseline,
+            "supported": False,
+            "metrics": None,
+        }
+    payload = _evaluate_policy(
+        replay_context=replay_context,
+        action_index_provider=provider,
+        disable_alpha_gate=True,
+    )
+    return {
+        "best_baseline": best_baseline,
+        "supported": True,
+        "metrics": payload["metrics"],
+    }
 
 
 def _build_runtime_parity_verdict(
@@ -955,6 +990,15 @@ def _build_runtime_parity_verdict(
         else {}
     )
     research_summary = _load_research_baseline_summary(training_diagnostics)
+    research_best_runtime_replay = _evaluate_research_best_runtime_baseline(
+        replay_context=context,
+        research_summary=research_summary,
+    )
+    gate_off_payload = _evaluate_policy(
+        replay_context=context,
+        action_index_provider=None,
+        disable_alpha_gate=True,
+    )
     stress_results: dict[str, Any] = {}
     for multiplier in (1.5, 2.0):
         stressed_context = _with_cost_stress(context, slippage_multiplier=multiplier)
@@ -982,6 +1026,8 @@ def _build_runtime_parity_verdict(
         "best_runtime_baseline_metrics": best_runtime_metrics or None,
         "runtime_baseline_viable": runtime_baseline_viable,
         "research_baseline_summary": research_summary,
+        "research_best_exact_runtime_replay": research_best_runtime_replay,
+        "gate_off_replay_metrics": gate_off_payload["metrics"],
         "research_vs_runtime_parity_aligned": bool(not research_baseline_viable or runtime_baseline_viable),
         "runtime_holdout_models": runtime_baselines,
         "slippage_stress": stress_results,

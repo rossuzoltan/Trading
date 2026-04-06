@@ -15,6 +15,7 @@ handover notes were removed because they no longer matched the codebase.
 
 - [`CURRENT_USAGE_GUIDE.md`](CURRENT_USAGE_GUIDE.md): practical day-to-day usage, current training/eval flow, and experiment profiles.
 - [`evaluation_accounting.md`](evaluation_accounting.md): what the evaluation metrics mean and which accounting source is authoritative.
+- [`research_runner.md`](research_runner.md): safe proposal-driven experimentation, research ledgering, scoring, and result storage.
 - [`operating_checklist.md`](operating_checklist.md): live-readiness evidence order and operator gate.
 - [`h1_data.md`](h1_data.md): optional H1 dataset builder for side research. This is separate from the default volume-bar training path.
 

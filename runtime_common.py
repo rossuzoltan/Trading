@@ -192,6 +192,8 @@ def runtime_options_from_training_payload(
         "churn_min_hold_bars": int(source.get("training_churn_min_hold_bars", 0) or 0),
         "churn_action_cooldown": int(source.get("training_churn_action_cooldown", 0) or 0),
         "entry_spread_z_limit": float(source.get("training_entry_spread_z_limit", 1.5)),
+        "minimal_post_cost_reward": bool(source.get("training_minimal_post_cost_reward", False)),
+        "force_fast_window_benchmark": bool(source.get("training_force_fast_window_benchmark", False)),
         "alpha_gate_enabled": bool(source.get("training_alpha_gate_enabled", False)),
         "alpha_gate_model": str(source.get("training_alpha_gate_model", "auto") or "auto"),
         "alpha_gate_probability_threshold": float(source.get("training_alpha_gate_probability_threshold", 0.55)),

@@ -10,6 +10,7 @@ from uuid import uuid4
 import numpy as np
 import pandas as pd
 
+import train_agent
 from feature_engine import FEATURE_COLS
 from train_agent import (
     EnhancedLoggingCallback,
@@ -173,6 +174,43 @@ class TrainRehabTests(unittest.TestCase):
         self.assertAlmostEqual(0.75, rehab_safer["entry_spread_z_limit"])
         self.assertTrue(rehab_safer["alpha_gate_enabled"])
         self.assertEqual("auto", rehab_safer["alpha_gate_model"])
+        self.assertEqual(100000, rehab_safer["alpha_gate_warmup_steps"])
+        self.assertAlmostEqual(0.10, rehab_safer["alpha_gate_warmup_threshold_delta"])
+        self.assertAlmostEqual(0.0, rehab_safer["alpha_gate_warmup_margin_scale"])
+        self.assertAlmostEqual(8e-4, rehab_safer["ppo_learning_rate"])
+        self.assertAlmostEqual(0.02, rehab_safer["ppo_target_kl"])
+        self.assertTrue(rehab_safer["adaptive_kl_lr"])
+        self.assertAlmostEqual(0.003, rehab_safer["adaptive_kl_max_lr"])
+        self.assertAlmostEqual(0.002, rehab_safer["adaptive_kl_low"])
+        self.assertAlmostEqual(2.5, rehab_safer["adaptive_kl_up_mult"])
+        self.assertAlmostEqual(0.01, rehab_safer["recovery_entropy_mid"])
+        self.assertAlmostEqual(0.003, rehab_safer["recovery_entropy_final"])
+        self.assertTrue(rehab_safer["fail_fast_enabled"])
+        self.assertEqual(60000, rehab_safer["fail_fast_warmup_steps"])
+        self.assertEqual(3, rehab_safer["fail_fast_consecutive"])
+        self.assertAlmostEqual(0.94, rehab_safer["fail_fast_sparse_alpha_gate_block_rate"])
+        self.assertAlmostEqual(0.001, rehab_safer["fail_fast_approx_kl_max"])
+        self.assertAlmostEqual(0.20, rehab_safer["fail_fast_explained_variance_max"])
+        self.assertEqual(12, rehab_safer["fail_fast_max_trade_count"])
+        profit_rehab = _resolve_training_experiment_profile("reward_strip_profit_rehab_v1")
+        self.assertFalse(profit_rehab["alpha_gate_enabled"])
+        self.assertEqual(12, profit_rehab["churn_min_hold_bars"])
+        self.assertEqual(8, profit_rehab["churn_action_cooldown"])
+        self.assertAlmostEqual(0.50, profit_rehab["entry_spread_z_limit"])
+        self.assertAlmostEqual(1.0, profit_rehab["churn_penalty_usd"])
+        self.assertAlmostEqual(0.25, profit_rehab["reward_downside_risk_coef"])
+        self.assertAlmostEqual(0.20, profit_rehab["reward_turnover_coef"])
+        self.assertAlmostEqual(1.0, profit_rehab["reward_net_return_coef"])
+        self.assertAlmostEqual(1000.0, profit_rehab["reward_scale"])
+        self.assertAlmostEqual(-10.0, profit_rehab["reward_clip_low"])
+        self.assertAlmostEqual(10.0, profit_rehab["reward_clip_high"])
+        self.assertAlmostEqual(4e-4, profit_rehab["ppo_learning_rate"])
+        self.assertAlmostEqual(0.015, profit_rehab["ppo_target_kl"])
+        self.assertTrue(profit_rehab["fail_fast_enabled"])
+        self.assertEqual(40000, profit_rehab["fail_fast_warmup_steps"])
+        self.assertEqual(2, profit_rehab["fail_fast_consecutive"])
+        self.assertEqual(180, profit_rehab["fail_fast_overtrade_trade_count"])
+        self.assertAlmostEqual(1.0, profit_rehab["fail_fast_cost_share_min"])
 
     def test_explicit_env_var_values_beat_profile_defaults(self):
         with patch.dict("os.environ", {"TRAIN_REWARD_SCALE": "2500"}, clear=False):
@@ -252,7 +290,7 @@ class TrainRehabTests(unittest.TestCase):
         self.assertEqual(3, get_current_phase(2_000_000, cfg))
         self.assertEqual(0.02, get_current_ent_coef(100_000, cfg))
         self.assertEqual(0.01, get_current_ent_coef(900_000, cfg))
-        self.assertEqual(0.001, get_current_ent_coef(2_000_000, cfg))
+        self.assertEqual(0.002, get_current_ent_coef(2_000_000, cfg))
 
     def test_baseline_gate_passes_on_predictive_synthetic_data(self):
         tmpdir = make_test_dir("baseline_pass")
@@ -380,6 +418,7 @@ class TrainRehabTests(unittest.TestCase):
             self.assertEqual("staircase", payload["curriculum_state"]["slippage_mode"])
             self.assertEqual(7, payload["action_distribution"]["hold"])
             self.assertEqual(1, payload["trade_diagnostics"]["entered_long_count"])
+            self.assertEqual(0, payload["trade_diagnostics"]["alpha_gate_block_all_steps"])
             self.assertAlmostEqual(1.25, payload["reward_components"]["net_reward_sum"])
             run_context = json.loads(run_context_path.read_text(encoding="utf-8"))
             self.assertEqual("run-123", run_context["run_id"])
@@ -465,6 +504,155 @@ class TrainRehabTests(unittest.TestCase):
         self.assertIn("trade_frequency_without_edge", summary["flags"])
         self.assertEqual(0, summary["long_entry_count"])
         self.assertEqual(66, summary["short_entry_count"])
+
+    def test_training_eval_risk_summary_flags_sparse_alpha_gate(self):
+        summary = FullPathEvalCallback._build_eval_risk_summary(
+            {
+                "trade_count": 8.0,
+                "expectancy_usd": -1.0,
+                "gross_pnl_usd": -4.0,
+                "net_pnl_usd": -8.0,
+                "total_transaction_cost_usd": 2.0,
+                "execution_diagnostics": {
+                    "action_distribution": {
+                        "long": 7,
+                        "short": 1,
+                    },
+                    "trade_diagnostics": {
+                        "alpha_gate_block_all_rate": 0.95,
+                        "alpha_gate_long_allow_rate": 0.03,
+                        "alpha_gate_short_allow_rate": 0.01,
+                    },
+                },
+                "segment_metrics": {
+                    "first": {"timed_sharpe": 0.01},
+                    "middle": {"timed_sharpe": -0.06},
+                    "last": {"timed_sharpe": 0.0},
+                },
+            }
+        )
+
+        self.assertIn("sparse_alpha_gate", summary["flags"])
+        self.assertAlmostEqual(0.95, summary["alpha_gate_block_all_rate"])
+
+    def test_overtrade_negative_edge_condition_requires_negative_expectancy_cost_and_trade_count(self):
+        with patch.object(train_agent, "TRAIN_FAIL_FAST_ENABLED", True), patch.object(
+            train_agent, "TRAIN_FAIL_FAST_OVERTRADE_TRADE_COUNT", 180
+        ), patch.object(train_agent, "TRAIN_FAIL_FAST_COST_SHARE_MIN", 1.0):
+            triggered, reasons = FullPathEvalCallback._overtrade_negative_edge_condition(
+                {
+                    "flags": ["negative_expectancy", "cost_dominates_gross"],
+                    "trade_count": 220,
+                    "expectancy_usd": -0.5,
+                    "cost_share_of_abs_gross_pnl": 1.4,
+                }
+            )
+
+        self.assertTrue(triggered)
+        self.assertIn("cost_share=1.40x", reasons)
+        self.assertIn("overtrade_count=220", reasons)
+
+    def test_overtrade_negative_edge_condition_skips_positive_expectancy(self):
+        with patch.object(train_agent, "TRAIN_FAIL_FAST_ENABLED", True), patch.object(
+            train_agent, "TRAIN_FAIL_FAST_OVERTRADE_TRADE_COUNT", 180
+        ), patch.object(train_agent, "TRAIN_FAIL_FAST_COST_SHARE_MIN", 1.0):
+            triggered, reasons = FullPathEvalCallback._overtrade_negative_edge_condition(
+                {
+                    "flags": ["cost_dominates_gross"],
+                    "trade_count": 220,
+                    "expectancy_usd": 0.2,
+                    "cost_share_of_abs_gross_pnl": 1.4,
+                }
+            )
+
+        self.assertFalse(triggered)
+        self.assertEqual([], reasons)
+
+    def test_overtrade_negative_edge_condition_skips_high_trade_count_without_cost_dominance(self):
+        with patch.object(train_agent, "TRAIN_FAIL_FAST_ENABLED", True), patch.object(
+            train_agent, "TRAIN_FAIL_FAST_OVERTRADE_TRADE_COUNT", 180
+        ), patch.object(train_agent, "TRAIN_FAIL_FAST_COST_SHARE_MIN", 1.0):
+            triggered, reasons = FullPathEvalCallback._overtrade_negative_edge_condition(
+                {
+                    "flags": ["negative_expectancy"],
+                    "trade_count": 220,
+                    "expectancy_usd": -0.4,
+                    "cost_share_of_abs_gross_pnl": 0.8,
+                }
+            )
+
+        self.assertFalse(triggered)
+        self.assertEqual(["overtrade_count=220"], reasons)
+
+    def test_fail_fast_triggers_after_two_consecutive_overtrade_negative_edge_checkpoints(self):
+        tmpdir = make_test_dir("profit_rehab_fail_fast")
+
+        class DummyLogger:
+            def __init__(self) -> None:
+                self.name_to_value = {"train/approx_kl": 0.01, "train/explained_variance": 0.35}
+
+        class DummyCallbackModel:
+            def __init__(self) -> None:
+                self.logger = DummyLogger()
+
+            def save(self, path: str) -> None:
+                Path(f"{path}.zip").write_bytes(b"model")
+
+            def get_vec_normalize_env(self):
+                return None
+
+        metrics = {
+            "timed_sharpe": -0.2,
+            "trade_count": 220.0,
+            "expectancy_usd": -0.5,
+            "gross_pnl_usd": -50.0,
+            "net_pnl_usd": -120.0,
+            "total_transaction_cost_usd": 75.0,
+            "max_drawdown": 0.12,
+            "metric_reconciliation": {"passed": True},
+            "execution_diagnostics": {"action_distribution": {"long": 140, "short": 80}},
+            "segment_metrics": {
+                "first": {"timed_sharpe": -0.01},
+                "middle": {"timed_sharpe": -0.03},
+                "last": {"timed_sharpe": -0.02},
+            },
+        }
+
+        callback = FullPathEvalCallback(
+            object(),
+            train_vecnormalize=object(),
+            eval_vecnormalize=object(),
+            best_model_save_path=tmpdir,
+            eval_freq=1,
+            history_path=tmpdir / "history.json",
+            stochastic_runs=0,
+            verbose=0,
+        )
+        callback.model = DummyCallbackModel()
+
+        try:
+            with patch.object(train_agent, "TRAIN_FAIL_FAST_ENABLED", True), patch.object(
+                train_agent, "TRAIN_FAIL_FAST_WARMUP_STEPS", 40000
+            ), patch.object(train_agent, "TRAIN_FAIL_FAST_CONSECUTIVE", 2), patch.object(
+                train_agent, "TRAIN_FAIL_FAST_OVERTRADE_TRADE_COUNT", 180
+            ), patch.object(
+                train_agent, "TRAIN_FAIL_FAST_COST_SHARE_MIN", 1.0
+            ), patch("train_agent.sync_vecnormalize_stats"), patch(
+                "train_agent.evaluate_model", return_value=([], metrics)
+            ), patch("train_agent.validate_evaluation_payload"):
+                callback.n_calls = 1
+                callback.num_timesteps = 40000
+                self.assertTrue(callback._on_step())
+                self.assertFalse(callback.latest_metrics["fail_fast_triggered"])
+                self.assertTrue(callback.latest_metrics["overtrade_negative_edge_triggered"])
+
+                callback.n_calls = 2
+                callback.num_timesteps = 50000
+                self.assertFalse(callback._on_step())
+                self.assertTrue(callback.latest_metrics["fail_fast_triggered"])
+                self.assertEqual(2, callback.latest_metrics["fail_fast_streak"])
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
     def test_enhanced_logging_callback_collects_reward_and_action_buffers(self):
         callback = EnhancedLoggingCallback(verbose=0)

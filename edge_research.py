@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,12 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from symbol_utils import pip_value_for_volume, price_to_pips
+
+
+EDGE_RESEARCH_PERF: dict[str, float] = {
+    "prepare_targets_calls": 0,
+    "prepare_targets_total_ns": 0,
+}
 
 
 @dataclass
@@ -50,16 +57,28 @@ class BaselineAlphaGate:
             scores["signed_score"] = float(self.signed_model.predict(features)[0])
         return scores
 
-    def allowed_directions(self, row: pd.Series | dict[str, Any]) -> tuple[bool, bool, dict[str, float]]:
+    def allowed_directions(
+        self,
+        row: pd.Series | dict[str, Any],
+        *,
+        threshold_override: float | None = None,
+        margin_override: float | None = None,
+    ) -> tuple[bool, bool, dict[str, float]]:
         scores = self.score_row(row)
         if self.model_kind == "logistic_pair":
             long_score = float(scores["long_score"])
             short_score = float(scores["short_score"])
-            allow_long = long_score >= float(self.probability_threshold) and (
-                (long_score - short_score) >= float(self.probability_margin)
+            effective_threshold = float(
+                self.probability_threshold if threshold_override is None else threshold_override
             )
-            allow_short = short_score >= float(self.probability_threshold) and (
-                (short_score - long_score) >= float(self.probability_margin)
+            effective_margin = float(
+                self.probability_margin if margin_override is None else margin_override
+            )
+            allow_long = long_score >= effective_threshold and (
+                (long_score - short_score) >= effective_margin
+            )
+            allow_short = short_score >= effective_threshold and (
+                (short_score - long_score) >= effective_margin
             )
             return bool(allow_long), bool(allow_short), scores
         if self.model_kind == "ridge_signed_target":
@@ -96,6 +115,7 @@ def _prepare_targets(
     slippage_pips: float,
     min_edge_pips: float,
 ) -> pd.DataFrame:
+    start_ns = time.perf_counter_ns()
     dataset = _ensure_cost_columns(frame)
     required = [*feature_cols, "Close", "Open", "avg_spread"]
     missing = [column for column in required if column not in dataset.columns]
@@ -109,6 +129,8 @@ def _prepare_targets(
     prepared["exit_spread"] = prepared["avg_spread"].shift(-horizon_bars).fillna(prepared["avg_spread"])
     prepared = prepared.replace([np.inf, -np.inf], np.nan).dropna()
     if prepared.empty:
+        EDGE_RESEARCH_PERF["prepare_targets_calls"] += 1
+        EDGE_RESEARCH_PERF["prepare_targets_total_ns"] += max(time.perf_counter_ns() - start_ns, 0)
         return prepared
 
     raw_move_pips = prepared.apply(
@@ -138,6 +160,8 @@ def _prepare_targets(
         prepared["long_net_pips"],
         -prepared["short_net_pips"],
     )
+    EDGE_RESEARCH_PERF["prepare_targets_calls"] += 1
+    EDGE_RESEARCH_PERF["prepare_targets_total_ns"] += max(time.perf_counter_ns() - start_ns, 0)
     return prepared
 
 
@@ -252,6 +276,8 @@ def _alpha_gate_quality_report(
     trade_count = int(float(metrics.get("trade_count", 0.0) or 0.0))
     long_trade_count = int(float(metrics.get("long_trade_count", 0.0) or 0.0))
     short_trade_count = int(float(metrics.get("short_trade_count", 0.0) or 0.0))
+    expectancy_usd = float(metrics.get("expectancy_usd", 0.0) or 0.0)
+    profit_factor = float(metrics.get("profit_factor", 0.0) or 0.0)
     dominant_direction = max(long_trade_count, short_trade_count)
     dominant_fraction = (
         float(dominant_direction) / float(trade_count)
@@ -262,17 +288,22 @@ def _alpha_gate_quality_report(
         long_trade_count >= int(min_directional_trade_count)
         and short_trade_count >= int(min_directional_trade_count)
     )
+    economically_viable = expectancy_usd > 0.0 and profit_factor > 1.0
     quality_passed = (
         trade_count >= int(min_trade_count)
         and dominant_fraction <= float(max_single_direction_fraction)
         and directionally_balanced
+        and economically_viable
     )
     return {
         "trade_count": trade_count,
         "long_trade_count": long_trade_count,
         "short_trade_count": short_trade_count,
+        "expectancy_usd": expectancy_usd,
+        "profit_factor": profit_factor,
         "dominant_direction_fraction": float(dominant_fraction),
         "directionally_balanced": bool(directionally_balanced),
+        "economically_viable": bool(economically_viable),
         "quality_passed": bool(quality_passed),
     }
 
