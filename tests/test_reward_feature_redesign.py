@@ -436,12 +436,38 @@ class RewardFeatureRedesignTests(unittest.TestCase):
         )
 
         env.reset(seed=7)
-        env._runtime.feature_engine._buffer.iloc[-1, env._runtime.feature_engine._buffer.columns.get_loc("spread_z")] = 0.5
+        spread_idx = FEATURE_COLS.index("spread_z")
+        env._runtime.feature_engine._last_features_raw[spread_idx] = 0.5
         mask = env.action_masks()
 
         self.assertTrue(mask[0])
         self.assertFalse(mask[2])
         self.assertFalse(mask[3])
+
+    def test_runtime_env_action_masks_ignore_stale_buffer_when_raw_features_are_current(self) -> None:
+        history = _make_history(rows=320)
+        raw = _compute_raw(history).dropna(subset=FEATURE_COLS)
+        scaler = StandardScaler().fit(raw.loc[:, FEATURE_COLS])
+        action_map = build_action_map([0.5], [0.5])
+        env = RuntimeGymEnv(
+            symbol="EURUSD",
+            bars_frame=history,
+            scaler=scaler,
+            action_map=action_map,
+            config=RuntimeGymConfig(random_start=False, slippage_pips=0.1, entry_spread_z_limit=0.25),
+        )
+
+        env.reset(seed=7)
+        feature_engine = env._runtime.feature_engine
+        spread_idx = FEATURE_COLS.index("spread_z")
+        feature_engine._last_features_raw[spread_idx] = 0.0
+        feature_engine._buffer.iloc[-1, feature_engine._buffer.columns.get_loc("spread_z")] = 0.5
+
+        mask = env.action_masks()
+
+        self.assertTrue(mask[0])
+        self.assertTrue(mask[2])
+        self.assertTrue(mask[3])
 
     def test_runtime_env_alpha_gate_blocks_disallowed_direction(self) -> None:
         history = _make_history(rows=320)

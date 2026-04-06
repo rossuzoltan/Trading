@@ -69,6 +69,33 @@ def _latest_heartbeat(checkpoints_dir: Path, *, current_run: dict[str, Any] | No
     return candidates[0]
 
 
+def _diagnostics_from_current_run(current_run: dict[str, Any] | None) -> Path | None:
+    if not current_run:
+        return None
+    checkpoints_root = current_run.get("checkpoints_root")
+    if not checkpoints_root:
+        return None
+    root = Path(str(checkpoints_root))
+    if not root.exists():
+        return None
+    candidates = list(root.glob("fold_*/training_diagnostics.json"))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return candidates[0]
+
+
+def _latest_training_diagnostics(checkpoints_dir: Path, *, current_run: dict[str, Any] | None = None) -> Path | None:
+    if current_run is not None:
+        return _diagnostics_from_current_run(current_run)
+    candidates = list(checkpoints_dir.glob("fold_*/training_diagnostics.json"))
+    candidates.extend(checkpoints_dir.glob("run_*/fold_*/training_diagnostics.json"))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return candidates[0]
+
+
 def resolve_current_run_heartbeat(checkpoints_dir: Path) -> tuple[Path | None, dict[str, Any] | None]:
     context = _load_current_run_context(checkpoints_dir)
     if context:
@@ -146,12 +173,66 @@ def summarize_heartbeat_schema(heartbeat: dict[str, Any] | None) -> dict[str, An
     }
 
 
+def _best_baseline_entry(baseline_report: dict[str, Any] | None) -> tuple[str | None, dict[str, Any] | None]:
+    baseline_models = dict(((baseline_report or {}).get("holdout_metrics", {}) or {}).get("models", {}) or {})
+    if not baseline_models:
+        return None, None
+    best_name = max(
+        baseline_models.items(),
+        key=lambda item: (
+            float(((item[1] or {}).get("metrics", {}) or {}).get("expectancy_usd", 0.0)),
+            float(((item[1] or {}).get("metrics", {}) or {}).get("profit_factor", 0.0)),
+            float(((item[1] or {}).get("metrics", {}) or {}).get("trade_count", 0.0)),
+        ),
+    )[0]
+    return best_name, dict((baseline_models.get(best_name, {}) or {}).get("metrics", {}) or {})
+
+
+def build_profitability_summary(
+    heartbeat: dict[str, Any] | None,
+    baseline_report: dict[str, Any] | None,
+) -> dict[str, Any]:
+    latest_eval = dict((heartbeat or {}).get("latest_eval", {}) or {})
+    latest_eval_execution = dict((latest_eval.get("execution_diagnostics", {}) or {}).get("reward_components", {}) or {})
+    best_baseline_name, best_baseline_metrics = _best_baseline_entry(baseline_report)
+    latest_eval_net = float(latest_eval.get("net_pnl_usd", 0.0) or 0.0)
+    latest_eval_gross = float(latest_eval.get("gross_pnl_usd", 0.0) or 0.0)
+    latest_eval_cost = float(latest_eval.get("total_transaction_cost_usd", 0.0) or 0.0)
+    best_baseline_net = float((best_baseline_metrics or {}).get("net_pnl_usd", 0.0) or 0.0)
+    return {
+        "latest_eval_trade_count": int(latest_eval.get("trade_count", 0.0) or 0),
+        "latest_eval_net_pnl_usd": latest_eval_net,
+        "latest_eval_gross_pnl_usd": latest_eval_gross,
+        "latest_eval_transaction_cost_usd": latest_eval_cost,
+        "latest_eval_cost_exceeds_gross_profit": bool(latest_eval_cost > max(latest_eval_gross, 0.0)),
+        "latest_eval_reward_penalty_sum": float(latest_eval_execution.get("net_reward_sum", 0.0) or 0.0),
+        "latest_eval_downside_risk_penalty_sum": float(latest_eval_execution.get("downside_risk_penalty_sum", 0.0) or 0.0),
+        "best_holdout_baseline": best_baseline_name,
+        "best_holdout_baseline_net_pnl_usd": best_baseline_net if best_baseline_name else None,
+        "best_holdout_baseline_profit_factor": (
+            float((best_baseline_metrics or {}).get("profit_factor", 0.0) or 0.0)
+            if best_baseline_name
+            else None
+        ),
+        "latest_eval_vs_best_holdout_baseline_net_pnl_gap_usd": (
+            latest_eval_net - best_baseline_net if best_baseline_name else None
+        ),
+    }
+
+
 def build_status_summary(symbol: str, checkpoints_dir: Path) -> dict[str, Any]:
     paths = deployment_paths(symbol)
     heartbeat_path, run_context = resolve_current_run_heartbeat(checkpoints_dir)
     heartbeat = _maybe_load(heartbeat_path) if heartbeat_path is not None else None
     gate = _maybe_load(paths.gate_path)
-    diagnostics = _maybe_load(paths.diagnostics_path)
+    diagnostics_path = paths.diagnostics_path
+    diagnostics = _maybe_load(diagnostics_path)
+    if diagnostics is None:
+        fallback_diagnostics_path = _latest_training_diagnostics(checkpoints_dir, current_run=run_context)
+        if fallback_diagnostics_path is not None:
+            diagnostics = _maybe_load(fallback_diagnostics_path)
+            if diagnostics is not None:
+                diagnostics_path = fallback_diagnostics_path
     ops_attestation = _maybe_load(paths.ops_attestation_path)
     replay_report_path = Path("models") / f"replay_report_{symbol.lower()}.json"
     replay_report = _maybe_load(replay_report_path)
@@ -181,24 +262,14 @@ def build_status_summary(symbol: str, checkpoints_dir: Path) -> dict[str, Any]:
 
     replay_metrics = dict((replay_report or {}).get("replay_metrics", {}) or {})
     replay_reconciliation = dict(replay_metrics.get("metric_reconciliation", {}) or {})
-    baseline_models = dict(((baseline_report or {}).get("holdout_metrics", {}) or {}).get("models", {}) or {})
-    best_holdout_baseline = None
-    if baseline_models:
-        best_holdout_baseline = max(
-            baseline_models.items(),
-            key=lambda item: (
-                float(((item[1] or {}).get("metrics", {}) or {}).get("expectancy_usd", 0.0)),
-                float(((item[1] or {}).get("metrics", {}) or {}).get("profit_factor", 0.0)),
-                float(((item[1] or {}).get("metrics", {}) or {}).get("trade_count", 0.0)),
-            ),
-        )[0]
+    best_holdout_baseline, _best_holdout_baseline_metrics = _best_baseline_entry(baseline_report)
 
     return {
         "symbol": symbol.upper(),
         "current_run": run_context,
         "heartbeat_path": str(heartbeat_path) if heartbeat_path is not None else None,
         "heartbeat_schema": summarize_heartbeat_schema(heartbeat),
-        "training_diagnostics_path": str(paths.diagnostics_path),
+        "training_diagnostics_path": str(diagnostics_path),
         "training_diagnostics": diagnostics,
         "deployment_gate_path": str(paths.gate_path),
         "deployment_gate": gate,
@@ -210,6 +281,7 @@ def build_status_summary(symbol: str, checkpoints_dir: Path) -> dict[str, Any]:
         "baseline_report_path": str(baseline_report_path) if baseline_report_path is not None else None,
         "baseline_report": baseline_report,
         "best_holdout_baseline": best_holdout_baseline,
+        "profitability_summary": build_profitability_summary(heartbeat, baseline_report),
         "failures": {
             "current_run_state": (run_context or {}).get("state"),
             "training_blockers": list((diagnostics or {}).get("blockers", []) or []),
@@ -326,9 +398,23 @@ def main() -> int:
         print(f"  best_holdout_baseline: {summary.get('best_holdout_baseline')}")
         print(f"  baseline_blockers    : {summary.get('failures', {}).get('baseline_blockers')}")
 
+    profitability = summary.get("profitability_summary") or {}
+    if profitability:
+        print("Profitability snapshot:")
+        print(f"  latest_eval_trade_count     : {profitability.get('latest_eval_trade_count')}")
+        print(f"  latest_eval_net_pnl_usd     : {profitability.get('latest_eval_net_pnl_usd')}")
+        print(f"  latest_eval_gross_pnl_usd   : {profitability.get('latest_eval_gross_pnl_usd')}")
+        print(f"  latest_eval_txn_cost_usd    : {profitability.get('latest_eval_transaction_cost_usd')}")
+        print(f"  cost_exceeds_gross_profit   : {profitability.get('latest_eval_cost_exceeds_gross_profit')}")
+        print(f"  latest_eval_reward_penalty  : {profitability.get('latest_eval_reward_penalty_sum')}")
+        print(f"  downside_risk_penalty_sum   : {profitability.get('latest_eval_downside_risk_penalty_sum')}")
+        print(f"  best_holdout_baseline       : {profitability.get('best_holdout_baseline')}")
+        print(f"  best_holdout_baseline_pnl   : {profitability.get('best_holdout_baseline_net_pnl_usd')}")
+        print(f"  rl_vs_baseline_pnl_gap_usd  : {profitability.get('latest_eval_vs_best_holdout_baseline_net_pnl_gap_usd')}")
+
     # Decision-oriented verdict (conservative)
     verdict = "Research more"
-    if gate is not None and not bool(gate.get("approved_for_live", False)):
+    if gate is None or not bool(gate.get("approved_for_live", False)):
         verdict = "Do not deploy"
     print("-" * 80)
     print(f"Verdict: {verdict}")

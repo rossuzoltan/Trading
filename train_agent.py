@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 # [NEW] Import system monitor for resource tracking
 from resource_monitor import monitor as resource_monitor
@@ -224,6 +224,11 @@ TRAIN_EXPORT_BEST_FOLD = os.environ.get("TRAIN_EXPORT_BEST_FOLD", "0") == "1"
 TRAIN_BENCH_SPS = os.environ.get("TRAIN_BENCH_SPS", "0") == "1"
 TRAIN_EVAL_STOCHASTIC_RUNS = max(int(os.environ.get("TRAIN_EVAL_STOCHASTIC_RUNS", "5")), 0)
 TRAIN_ADAPTIVE_KL_LR = os.environ.get("TRAIN_ADAPTIVE_KL_LR", "0") == "1"
+TRAIN_ADAPTIVE_KL_MAX_LR = float(os.environ.get("TRAIN_ADAPTIVE_KL_MAX_LR", "0.002"))
+TRAIN_ADAPTIVE_KL_LOW = float(os.environ.get("TRAIN_ADAPTIVE_KL_LOW", "0.005"))
+TRAIN_ADAPTIVE_KL_HIGH = float(os.environ.get("TRAIN_ADAPTIVE_KL_HIGH", "0.05"))
+TRAIN_ADAPTIVE_KL_UP_MULT = float(os.environ.get("TRAIN_ADAPTIVE_KL_UP_MULT", "1.5"))
+TRAIN_ADAPTIVE_KL_DOWN_MULT = float(os.environ.get("TRAIN_ADAPTIVE_KL_DOWN_MULT", "0.7"))
 TRAIN_COLLAPSE_WARMUP_STEPS = max(int(os.environ.get("TRAIN_COLLAPSE_WARMUP_STEPS", "500000")), 0)
 TRAIN_COLLAPSE_CONSECUTIVE = max(int(os.environ.get("TRAIN_COLLAPSE_CONSECUTIVE", "2")), 1)
 
@@ -844,13 +849,13 @@ def find_optimal_env_workers(
     Benchmarks environment throughput (SPS) and system load to find the optimal worker count.
     Targets ~90% CPU usage as requested by the user.
     """
-    import torch
     from sb3_contrib import MaskablePPO
     
     print(f"\n[Adaptive Tuner] Starting hardware-aware benchmark (Target CPU: {target_cpu_pct}%)...")
     resource_monitor.start()
     
     best_n = starting_n
+    best_sps: float | None = None
     candidates = range(starting_n, max_n + 1, step_size)
     
     for n in candidates:
@@ -885,11 +890,11 @@ def find_optimal_env_workers(
             
             # [OPTIMIZATION] Prioritize SPS (throughput) over raw CPU saturation.
             # If SPS drops significantly even if CPU is below target, stop and use the previous speed winner.
-            if n > starting_n and sps < best_sps * 0.95:
+            if best_sps is not None and sps < best_sps * 0.95:
                  print(f"    [!] SPS dropped from {best_sps:.1f} to {sps:.1f} due to sync overhead. Stopping.")
                  break
             
-            best_sps = sps # track for comparison
+            best_sps = float(sps)
 
             if cpu > target_cpu_pct:
                 print(f"    [!] CPU load ({cpu:.1f}%) exceeds target ({target_cpu_pct}%). Stopping.")
@@ -1293,6 +1298,8 @@ class AdaptiveKLLearningRateCallback(BaseCallback):
         max_lr: float = 2e-3,
         low_kl: float = 0.005,
         high_kl: float = 0.05,
+        up_multiplier: float = 1.5,
+        down_multiplier: float = 0.7,
         verbose: int = 0,
     ) -> None:
         super().__init__(verbose=verbose)
@@ -1300,6 +1307,8 @@ class AdaptiveKLLearningRateCallback(BaseCallback):
         self.max_lr = float(max_lr)
         self.low_kl = float(low_kl)
         self.high_kl = float(high_kl)
+        self.up_multiplier = float(up_multiplier)
+        self.down_multiplier = float(down_multiplier)
         self.current_base_lr = float(PPO_LEARNING_RATE)
         self._last_n_updates: int | None = None
 
@@ -1336,9 +1345,9 @@ class AdaptiveKLLearningRateCallback(BaseCallback):
 
         target_base_lr = self.current_base_lr
         if approx_kl < self.low_kl:
-            target_base_lr = min(self.current_base_lr * 1.5, self.max_lr)
+            target_base_lr = min(self.current_base_lr * self.up_multiplier, self.max_lr)
         elif approx_kl > self.high_kl:
-            target_base_lr = max(self.current_base_lr * 0.7, self.min_lr)
+            target_base_lr = max(self.current_base_lr * self.down_multiplier, self.min_lr)
 
         if abs(target_base_lr - self.current_base_lr) > 1e-12:
             self.current_base_lr = float(target_base_lr)
@@ -2484,6 +2493,10 @@ def _deployment_candidate_rank(diagnostics: dict[str, Any]) -> tuple[float, floa
     )
 
 
+def _write_fold_training_diagnostics(ckpt_dir: str | Path, diagnostics: dict[str, Any]) -> Path:
+    return save_json_report(diagnostics, Path(ckpt_dir) / "training_diagnostics.json")
+
+
 def _archive_paths(paths: list[Path], *, archive_root: Path) -> list[str]:
     archived: list[str] = []
     seen: set[str] = set()
@@ -3555,6 +3568,11 @@ def main() -> None:
             _prime_eval_callback_from_history(eval_cb)
         adaptive_kl_cb = AdaptiveKLLearningRateCallback(
             min_lr=PPO_MIN_LEARNING_RATE,
+            max_lr=TRAIN_ADAPTIVE_KL_MAX_LR,
+            low_kl=TRAIN_ADAPTIVE_KL_LOW,
+            high_kl=TRAIN_ADAPTIVE_KL_HIGH,
+            up_multiplier=TRAIN_ADAPTIVE_KL_UP_MULT,
+            down_multiplier=TRAIN_ADAPTIVE_KL_DOWN_MULT,
             verbose=1,
         ) if TRAIN_ADAPTIVE_KL_LR else None
         heartbeat_cb = TrainingHeartbeatCallback(
@@ -3674,6 +3692,7 @@ def main() -> None:
                 )
             ]
         )
+        diagnostics["symbol"] = str(primary_symbol).upper()
         diagnostics["fold"] = fold_idx
         diagnostics["approx_kl"] = float(callback_summary["approx_kl"])
         diagnostics["explained_variance"] = float(callback_summary["explained_variance"])
@@ -3804,6 +3823,7 @@ def main() -> None:
         else:
             print("  Fold rejected for deployment: diagnostics, validation drawdown, or holdout gate failed.")
 
+        _write_fold_training_diagnostics(ckpt_dir, diagnostics)
         train_vec.close()
         val_vec.close()
         holdout_vec.close()

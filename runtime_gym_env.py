@@ -906,14 +906,17 @@ class RuntimeGymEnv(gym.Env):
 
         feature_engine = self._runtime.feature_engine
         latest_raw = getattr(feature_engine, "latest_features_raw", np.zeros(len(FEATURE_COLS), dtype=np.float32))
-        use_hot_path = bool(getattr(feature_engine, "_feature_fast", False)) or feature_engine._buffer is None
-        if use_hot_path:
-            spread_z = float(latest_raw[FEATURE_COLS.index("spread_z")]) if len(latest_raw) == len(FEATURE_COLS) else 0.0
-            latest_row = {col: float(latest_raw[idx]) for idx, col in enumerate(FEATURE_COLS)} if len(latest_raw) == len(FEATURE_COLS) else {}
-        else:
+        has_current_raw_features = len(latest_raw) == len(FEATURE_COLS)
+        if has_current_raw_features:
+            spread_z = float(latest_raw[FEATURE_COLS.index("spread_z")])
+            latest_row = {col: float(latest_raw[idx]) for idx, col in enumerate(FEATURE_COLS)}
+        elif feature_engine._buffer is not None:
             latest_buffer_row = feature_engine._buffer.iloc[-1]
             spread_z = float(latest_buffer_row.get("spread_z", 0.0))
             latest_row = latest_buffer_row
+        else:
+            spread_z = 0.0
+            latest_row = {}
 
         # Base mask (spread filter and flat vs open logic)
         mask = build_action_mask(

@@ -146,6 +146,15 @@ Current behavior:
 - replay uses the current runtime path
 - if training used a non-default window size, OOS replay honors it
 - if training diagnostics recorded alpha gate usage, OOS replay rebuilds and applies the same gate
+- use `.\.venv\Scripts\python.exe .\compare_oos_baselines.py --symbol EURUSD` to compare the RL replay against simple baselines; it now falls back to checkpoint artifacts and can recompute the RL replay when no saved replay report exists
+
+If you need a quick postmortem after a losing replay or a closed-trade audit:
+
+```powershell
+.\.venv\Scripts\python.exe .\tools\diagnose_losses.py --symbol EURUSD
+```
+
+The helper now tolerates summary-only replay reports when a closed-trade log is not available.
 
 ## 8. Deployment And Live Readiness
 
@@ -161,6 +170,7 @@ Commands:
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover tests
 $env:EVAL_SYMBOL='EURUSD'; .\.venv\Scripts\python.exe .\evaluate_oos.py
+.\.venv\Scripts\python.exe .\compare_oos_baselines.py --symbol EURUSD
 .\.venv\Scripts\python.exe .\mt5_live_preflight.py --symbol EURUSD --ticks-per-bar 5000
 ```
 

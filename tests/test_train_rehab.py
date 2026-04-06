@@ -19,6 +19,7 @@ from train_agent import (
     _holdout_deployment_blockers,
     _resolve_training_experiment_profile,
     evaluate_model,
+    find_optimal_env_workers,
     get_current_ent_coef,
     get_current_phase,
     get_current_slippage_pips,
@@ -169,6 +170,47 @@ class TrainRehabTests(unittest.TestCase):
         with patch.dict("os.environ", {"TRAIN_REWARD_SCALE": "2500"}, clear=False):
             self.assertEqual(5, _apply_profile_override(5, "TRAIN_REWARD_SCALE", 1000.0))
         self.assertEqual(1000.0, _apply_profile_override(5, "TRAIN_EXPERIMENT_PROFILE_FAKE", 1000.0))
+
+    def test_find_optimal_env_workers_stops_on_sps_regression_without_crashing(self):
+        class FakeVecEnv:
+            def __init__(self, env_fns):
+                self.worker_count = len(env_fns)
+
+            def close(self):
+                return None
+
+        class FakeModel:
+            def __init__(self, *args, **kwargs):
+                return None
+
+            def learn(self, total_timesteps: int):
+                return self
+
+        class FakeMonitor:
+            def start(self):
+                return None
+
+            def get_latest(self):
+                class Snapshot:
+                    cpu_pct = 50.0
+
+                return Snapshot()
+
+        with patch("train_agent.SubprocVecEnv", FakeVecEnv), patch(
+            "sb3_contrib.MaskablePPO", FakeModel
+        ), patch("train_agent.resource_monitor", FakeMonitor()), patch(
+            "train_agent.time.time",
+            side_effect=[0.0, 2.0, 10.0, 14.0],
+        ):
+            best_n = find_optimal_env_workers(
+                lambda: object(),
+                starting_n=8,
+                max_n=12,
+                step_size=4,
+                target_cpu_pct=95.0,
+            )
+
+        self.assertEqual(8, best_n)
 
     def test_recovery_helpers_follow_staircase_and_entropy_schedule(self):
         cfg = {

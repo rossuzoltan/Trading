@@ -18,6 +18,38 @@ def _safe_div(num: float, den: float) -> float:
     return float(num / den) if den != 0 else 0.0
 
 
+def _load_jsonl_records(path: Path) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for line_number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Invalid JSONL in {path} line {line_number}: {exc}") from exc
+        if isinstance(payload, dict):
+            records.append(payload)
+    return records
+
+
+def _trade_from_record(record: dict[str, Any]) -> dict[str, Any] | None:
+    if "net_pnl_usd" in record and "holding_bars" in record:
+        return dict(record)
+    event_name = str(record.get("event") or record.get("type") or "").strip().lower()
+    if event_name in {"position_closed", "trade_closed"} and "net_pnl_usd" in record:
+        return dict(record)
+    return None
+
+
+def _metrics_summary_from_report(payload: dict[str, Any]) -> dict[str, Any] | None:
+    for key in ("trade_metrics", "replay_metrics"):
+        metrics = payload.get(key)
+        if isinstance(metrics, dict) and metrics:
+            return dict(metrics)
+    return None
+
+
 def analyze_trade_log(trade_log: list[dict[str, Any]]) -> dict[str, Any]:
     if not trade_log:
         return {"error": "Trade log is empty."}
@@ -91,7 +123,64 @@ def analyze_trade_log(trade_log: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def load_loss_context(*, symbol: str, report_path: Path, audit_path: Path) -> dict[str, Any]:
+    trade_log: list[dict[str, Any]] = []
+    trade_metrics: dict[str, Any] | None = None
+
+    if report_path.exists():
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+        raw_trade_log = payload.get("trade_log")
+        if isinstance(raw_trade_log, list):
+            trade_log.extend([dict(item) for item in raw_trade_log if isinstance(item, dict)])
+        trade_metrics = _metrics_summary_from_report(payload)
+
+    if audit_path.exists():
+        for record in _load_jsonl_records(audit_path):
+            trade = _trade_from_record(record)
+            if trade is not None:
+                trade_log.append(trade)
+
+    if trade_log:
+        return {
+            "symbol": symbol,
+            "source": "trade_log",
+            "trade_log": trade_log,
+            "trade_metrics": trade_metrics,
+        }
+
+    if trade_metrics:
+        return {
+            "symbol": symbol,
+            "source": "summary_only",
+            "trade_metrics": trade_metrics,
+        }
+
+    return {
+        "symbol": symbol,
+        "source": "empty",
+        "error": f"No closed-trade records found in {audit_path}",
+    }
+
+
 def format_markdown_report(symbol: str, analysis: dict[str, Any]) -> str:
+    if analysis.get("source") == "summary_only":
+        metrics = dict(analysis.get("trade_metrics", {}) or {})
+        return "\n".join(
+            [
+                f"# Loss Diagnostics: {symbol}",
+                "",
+                "## Summary-Only View",
+                "Closed-trade details were not available, so this report falls back to replay summary metrics.",
+                f"- **Trade Count:** {int(metrics.get('trade_count', 0))}",
+                f"- **Net PnL:** ${float(metrics.get('net_pnl_usd', 0.0)):.2f}",
+                f"- **Profit Factor:** {float(metrics.get('profit_factor', 0.0)):.2f}",
+                f"- **Expectancy:** ${float(metrics.get('expectancy_usd', 0.0)):.2f}",
+                f"- **Win Rate:** {float(metrics.get('win_rate', 0.0)):.1%}",
+                f"- **Average Hold Bars:** {float(metrics.get('avg_holding_bars', 0.0)):.2f}",
+                "",
+                "Per-trade loss decomposition requires a trade log or closed-trade audit records.",
+            ]
+        )
     if "error" in analysis:
         return f"# Loss Diagnostics: {symbol}\n\n**Error:** {analysis['error']}"
         
@@ -136,27 +225,13 @@ def main() -> int:
     report_path = Path("models") / f"replay_report_{str(args.symbol).lower()}.json"
     audit_path = Path("models") / f"execution_audit_{str(args.symbol).lower()}.jsonl"
     
-    trade_log = []
-    
-    if report_path.exists():
-        payload = json.loads(report_path.read_text(encoding="utf-8"))
-        # we can't get the raw trade log from the replay report easily if not saved.
-        print(f"Loaded replay report details, but full execution logs needed.")
-        
-    if audit_path.exists():
-        lines = audit_path.read_text(encoding="utf-8").strip().split()
-        for line in lines:
-            if not line.strip():
-                continue
-            event = json.loads(line)
-            if event.get("event") == "position_closed" or event.get("type") == "position_closed":
-                # transform to trade
-                trade_log.append(event)
-                
-    if not trade_log:
-        analysis = {"error": f"No valid closed trades found in {audit_path}"}
+    context = load_loss_context(symbol=str(args.symbol).upper(), report_path=report_path, audit_path=audit_path)
+    if context.get("source") == "trade_log":
+        analysis = analyze_trade_log(list(context.get("trade_log", [])))
+    elif context.get("source") == "summary_only":
+        analysis = context
     else:
-        analysis = analyze_trade_log(trade_log)
+        analysis = {"error": context["error"]}
         
     md_content = format_markdown_report(args.symbol, analysis)
     

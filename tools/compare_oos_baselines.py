@@ -12,47 +12,130 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from artifact_manifest import load_manifest
-from dataset_validation import validate_symbol_bar_spec
 from edge_research import run_edge_baseline_research
-from evaluate_oos import _resolve_execution_cost_profile
-from feature_engine import FEATURE_COLS, WARMUP_BARS, _compute_raw
-from project_paths import resolve_dataset_path, resolve_manifest_path, validate_dataset_bar_spec
+from evaluate_oos import load_replay_context, run_replay
+from feature_engine import FEATURE_COLS
+from runtime_common import ActionType, build_evaluation_accounting, compute_max_drawdown, compute_timed_sharpe, validate_evaluation_accounting
+from train_agent import aggregate_training_diagnostics
 from validation_metrics import load_json_report, save_json_report
 
 
-def _load_symbol_frame(*, symbol: str, manifest: Any) -> pd.DataFrame:
-    dataset_path = resolve_dataset_path()
-    manifest_ticks = manifest.bar_construction_ticks_per_bar or manifest.ticks_per_bar
-    if manifest_ticks is not None:
-        validate_dataset_bar_spec(
-            dataset_path=dataset_path,
-            expected_ticks_per_bar=int(manifest_ticks),
-            metadata_required=True,
+def _flat_provider(**_: object) -> int:
+    return 0
+
+
+def _resolve_action_indexes(action_map) -> dict[str, int]:
+    indexes = {"hold": 0, "close": 0, "long": 0, "short": 0}
+    for idx, action in enumerate(action_map):
+        if action.action_type == ActionType.HOLD:
+            indexes["hold"] = int(idx)
+        elif action.action_type == ActionType.CLOSE:
+            indexes["close"] = int(idx)
+        elif action.action_type == ActionType.OPEN and int(action.direction or 0) > 0:
+            indexes["long"] = int(idx)
+        elif action.action_type == ActionType.OPEN and int(action.direction or 0) < 0:
+            indexes["short"] = int(idx)
+    return indexes
+
+
+def _target_direction_to_action_index(*, action_map, position_direction: int, target_direction: int) -> int:
+    indexes = _resolve_action_indexes(action_map)
+    current_direction = int(position_direction or 0)
+    desired_direction = int(target_direction or 0)
+    if current_direction == desired_direction:
+        return indexes["hold"]
+    if desired_direction == 0:
+        return indexes["close"] if current_direction != 0 else indexes["hold"]
+    if current_direction == 0:
+        return indexes["long"] if desired_direction > 0 else indexes["short"]
+    return indexes["close"]
+
+
+def _trend_provider(
+    *,
+    feature_row,
+    position_direction: int,
+    action_map,
+    **_: object,
+) -> int:
+    ma20_slope = float(feature_row.get("ma20_slope", 0.0) or 0.0)
+    ma50_slope = float(feature_row.get("ma50_slope", 0.0) or 0.0)
+    target_direction = 0
+    if ma20_slope > 0.0 and ma50_slope > 0.0:
+        target_direction = 1
+    elif ma20_slope < 0.0 and ma50_slope < 0.0:
+        target_direction = -1
+    return _target_direction_to_action_index(
+        action_map=action_map,
+        position_direction=int(position_direction or 0),
+        target_direction=target_direction,
+    )
+
+
+def _mean_reversion_provider(
+    *,
+    feature_row,
+    position_direction: int,
+    action_map,
+    **_: object,
+) -> int:
+    spread_z = float(feature_row.get("spread_z", 0.0) or 0.0)
+    target_direction = 0
+    if spread_z <= -1.0:
+        target_direction = 1
+    elif spread_z >= 1.0:
+        target_direction = -1
+    return _target_direction_to_action_index(
+        action_map=action_map,
+        position_direction=int(position_direction or 0),
+        target_direction=target_direction,
+    )
+
+
+def _evaluate_policy(*, replay_context, action_index_provider):
+    equity_curve, timestamps, trade_log, execution_log, diagnostics = run_replay(
+        replay_context=replay_context,
+        action_index_provider=action_index_provider,
+    )
+    accounting = build_evaluation_accounting(
+        trade_log=trade_log,
+        execution_diagnostics=aggregate_training_diagnostics([diagnostics]),
+        execution_log_count=len(execution_log),
+        initial_equity=1000.0,
+    )
+    validation_status = validate_evaluation_accounting(accounting)
+    metrics = {
+        "final_equity": float(equity_curve[-1]) if equity_curve else 1000.0,
+        "total_return": float(((equity_curve[-1] if equity_curve else 1000.0) - 1000.0) / 1000.0),
+        "timed_sharpe": float(compute_timed_sharpe(equity_curve, timestamps)),
+        "max_drawdown": float(compute_max_drawdown(equity_curve)),
+        "steps": int(len(equity_curve)),
+        **accounting,
+        "validation_status": validation_status,
+        "accounting_gap_detected": not bool(validation_status.get("passed", False)),
+    }
+    return {
+        "metrics": metrics,
+        "trade_log": trade_log,
+        "execution_log": execution_log,
+        "timestamps": timestamps,
+    }
+
+
+def _evaluate_runtime_baselines(*, replay_context) -> dict[str, dict[str, Any]]:
+    providers = {
+        "runtime_flat": _flat_provider,
+        "runtime_mean_reversion": _mean_reversion_provider,
+        "runtime_trend": _trend_provider,
+    }
+    results: dict[str, dict[str, Any]] = {}
+    for name, provider in providers.items():
+        payload = _evaluate_policy(
+            replay_context=replay_context,
+            action_index_provider=provider,
         )
-    raw = pd.read_csv(dataset_path, low_memory=False, parse_dates=["Gmt time"])
-    raw = raw.loc[raw["Symbol"].astype(str).str.upper() == symbol.upper()].copy()
-    raw["Gmt time"] = pd.to_datetime(raw["Gmt time"], utc=True, errors="coerce")
-    raw = raw.dropna(subset=["Gmt time"]).set_index("Gmt time").sort_index()
-    if manifest_ticks is not None:
-        validate_symbol_bar_spec(raw.reset_index(), expected_ticks_per_bar=int(manifest_ticks), symbol=symbol.upper())
-    if len(raw) <= WARMUP_BARS + 10:
-        raise RuntimeError(f"Not enough bars for {symbol.upper()}: {len(raw)}")
-    return raw
-
-
-def _split_trainable_holdout(frame: pd.DataFrame, manifest: Any) -> tuple[pd.DataFrame, pd.DataFrame]:
-    if manifest.holdout_start_utc:
-        holdout_start = pd.Timestamp(manifest.holdout_start_utc)
-        trainable = frame.loc[frame.index < holdout_start].copy()
-        holdout = frame.loc[holdout_start:].copy()
-    else:
-        split_idx = int(len(frame) * 0.85)
-        trainable = frame.iloc[:split_idx].copy()
-        holdout = frame.iloc[split_idx:].copy()
-    if trainable.empty or holdout.empty:
-        raise RuntimeError("Holdout split produced an empty trainable or holdout frame.")
-    return trainable, holdout
+        results[name] = {"metrics": payload["metrics"]}
+    return results
 
 
 def _build_folds(trainable_frame: pd.DataFrame, *, validation_frac: float) -> list[tuple[pd.DataFrame, pd.DataFrame]]:
@@ -86,12 +169,12 @@ def build_baseline_comparison(
     validation_frac: float = 0.15,
     min_edge_pips: float = 0.0,
 ) -> dict[str, Any]:
-    manifest = load_manifest(resolve_manifest_path(symbol=symbol))
-    cost_profile = _resolve_execution_cost_profile(manifest)
-    raw_frame = _load_symbol_frame(symbol=symbol, manifest=manifest)
-    featured = _compute_raw(raw_frame)
-    featured = featured.dropna(subset=list(FEATURE_COLS))
-    trainable_frame, holdout_frame = _split_trainable_holdout(featured, manifest)
+    replay_context = load_replay_context(symbol)
+    cost_profile = dict(replay_context.execution_cost_profile)
+    trainable_frame = replay_context.trainable_feature_frame.copy()
+    holdout_frame = replay_context.holdout_feature_frame.copy()
+    if trainable_frame.empty or holdout_frame.empty:
+        raise RuntimeError("Replay context did not provide a usable trainable/holdout split.")
     folds = _build_folds(trainable_frame, validation_frac=validation_frac)
     out_path = report_path or Path("models") / f"baseline_comparison_{symbol.lower()}.json"
     baseline_out_path = out_path.with_name(f"baseline_holdout_{symbol.lower()}.json")
@@ -110,13 +193,27 @@ def build_baseline_comparison(
         probability_margin=0.05,
         min_trade_count=20,
     )
+    runtime_holdout_models = _evaluate_runtime_baselines(replay_context=replay_context)
 
     replay_report_path = Path("models") / f"replay_report_{symbol.lower()}.json"
     replay_report = load_json_report(replay_report_path) if replay_report_path.exists() else None
+    if replay_report is None:
+        replay_report = {
+            "replay_metrics": _evaluate_policy(
+                replay_context=replay_context,
+                action_index_provider=None,
+            )["metrics"]
+        }
     replay_metrics = dict((replay_report or {}).get("replay_metrics", {}) or {})
     holdout_models = dict((baseline_report.get("holdout_metrics", {}) or {}).get("models", {}) or {})
     best_baseline = _best_model_name(holdout_models)
     best_baseline_metrics = dict((holdout_models.get(best_baseline, {}) or {}).get("metrics", {}) or {}) if best_baseline else {}
+    best_runtime_baseline = _best_model_name(runtime_holdout_models)
+    best_runtime_baseline_metrics = (
+        dict((runtime_holdout_models.get(best_runtime_baseline, {}) or {}).get("metrics", {}) or {})
+        if best_runtime_baseline
+        else {}
+    )
 
     comparison = {
         "symbol": symbol.upper(),
@@ -125,6 +222,9 @@ def build_baseline_comparison(
         "replay_report_path": str(replay_report_path) if replay_report_path.exists() else None,
         "baseline_report_path": str(baseline_out_path),
         "rl_replay_metrics": replay_metrics or None,
+        "runtime_holdout_models": runtime_holdout_models,
+        "best_runtime_baseline": best_runtime_baseline,
+        "best_runtime_baseline_metrics": best_runtime_baseline_metrics or None,
         "baseline_holdout_models": holdout_models,
         "best_baseline": best_baseline,
         "best_baseline_metrics": best_baseline_metrics or None,
@@ -132,6 +232,9 @@ def build_baseline_comparison(
             "rl_trade_count": replay_metrics.get("trade_count"),
             "rl_net_pnl_usd": replay_metrics.get("net_pnl_usd"),
             "rl_profit_factor": replay_metrics.get("profit_factor"),
+            "runtime_baseline_trade_count": best_runtime_baseline_metrics.get("trade_count") if best_runtime_baseline_metrics else None,
+            "runtime_baseline_net_pnl_usd": best_runtime_baseline_metrics.get("net_pnl_usd") if best_runtime_baseline_metrics else None,
+            "runtime_baseline_profit_factor": best_runtime_baseline_metrics.get("profit_factor") if best_runtime_baseline_metrics else None,
             "baseline_trade_count": best_baseline_metrics.get("trade_count") if best_baseline_metrics else None,
             "baseline_net_pnl_usd": best_baseline_metrics.get("net_pnl_usd") if best_baseline_metrics else None,
             "baseline_profit_factor": best_baseline_metrics.get("profit_factor") if best_baseline_metrics else None,
@@ -177,6 +280,10 @@ def main() -> int:
     rl_metrics = report.get("rl_replay_metrics")
     out.append(_row("RL Agent (OOS Replay)", rl_metrics))
 
+    runtime_models = report.get("runtime_holdout_models", {})
+    for name, data in runtime_models.items():
+        out.append(_row(f"Runtime baseline: {name}", data.get("metrics")))
+
     models = report.get("baseline_holdout_models", {})
     for name, data in models.items():
         out.append(_row(f"Baseline: {name}", data.get("metrics")))
@@ -186,15 +293,23 @@ def main() -> int:
     out.append("")
     
     rl_pnl = float(rl_metrics.get("net_pnl_usd", 0.0)) if rl_metrics else 0.0
+    best_runtime_baseline_pnl = float((report.get("best_runtime_baseline_metrics") or {}).get("net_pnl_usd", 0.0))
     best_baseline_pnl = float((report.get("best_baseline_metrics") or {}).get("net_pnl_usd", 0.0))
+    best_runtime_name = report.get("best_runtime_baseline", "None")
     best_name = report.get("best_baseline", "None")
     
     if not rl_metrics:
         out.append("RL Replay metrics missing. Verdict: CANNOT COMPARE.")
-    elif rl_pnl > best_baseline_pnl:
-        out.append(f"**RL Agent BEATS the best simple baseline ({best_name})** on net_pnl_usd (${rl_pnl:.2f} vs ${best_baseline_pnl:.2f}).")
     else:
-        out.append(f"**RL Agent DOES NOT BEAT the best simple baseline ({best_name})** on net_pnl_usd (${rl_pnl:.2f} vs ${best_baseline_pnl:.2f}).")
+        if report.get("best_runtime_baseline_metrics") is not None:
+            if rl_pnl > best_runtime_baseline_pnl:
+                out.append(f"**RL Agent BEATS the best runtime baseline ({best_runtime_name})** on net_pnl_usd (${rl_pnl:.2f} vs ${best_runtime_baseline_pnl:.2f}).")
+            else:
+                out.append(f"**RL Agent DOES NOT BEAT the best runtime baseline ({best_runtime_name})** on net_pnl_usd (${rl_pnl:.2f} vs ${best_runtime_baseline_pnl:.2f}).")
+        if rl_pnl > best_baseline_pnl:
+            out.append(f"**RL Agent BEATS the best research baseline ({best_name})** on net_pnl_usd (${rl_pnl:.2f} vs ${best_baseline_pnl:.2f}).")
+        else:
+            out.append(f"**RL Agent DOES NOT BEAT the best research baseline ({best_name})** on net_pnl_usd (${rl_pnl:.2f} vs ${best_baseline_pnl:.2f}).")
 
     print("\n".join(out))
     

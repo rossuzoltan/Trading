@@ -23,6 +23,7 @@ from train_agent import (
     _recover_completed_fold_state,
     _resume_model_checkpoint_path,
     _resume_vecnormalize_checkpoint_path,
+    _write_fold_training_diagnostics,
 )
 
 
@@ -36,6 +37,17 @@ def make_test_dir(name: str) -> Path:
 
 
 class TrainingArtifactTests(unittest.TestCase):
+    def test_write_fold_training_diagnostics_persists_expected_path(self):
+        tmpdir = make_test_dir("fold_diagnostics")
+        try:
+            payload = {"deploy_ready": False, "val_sharpe": -0.1}
+            out_path = _write_fold_training_diagnostics(tmpdir / "fold_0", payload)
+
+            self.assertEqual(tmpdir / "fold_0" / "training_diagnostics.json", out_path)
+            self.assertEqual(payload, json.loads(out_path.read_text(encoding="utf-8")))
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
     def test_promoted_diagnostics_always_include_run_metadata(self):
         diagnostics = {
             "train_bars": 5000,
@@ -145,14 +157,22 @@ class TrainingArtifactTests(unittest.TestCase):
                 for param_group in optimizer_obj.param_groups:
                     param_group["lr"] = lr
 
-        callback = AdaptiveKLLearningRateCallback(min_lr=1e-5, verbose=0)
+        callback = AdaptiveKLLearningRateCallback(
+            min_lr=1e-5,
+            max_lr=1e-3,
+            low_kl=0.005,
+            high_kl=0.05,
+            up_multiplier=2.0,
+            down_multiplier=0.5,
+            verbose=0,
+        )
         callback.model = _DummyModel()
         callback.num_timesteps = 4096
 
         callback._on_training_start()
         callback._on_step()
 
-        expected_lr = min(4e-4 * 1.5, 2e-3)
+        expected_lr = min(4e-4 * 2.0, 1e-3)
         self.assertAlmostEqual(expected_lr, callback.current_base_lr)
         self.assertAlmostEqual(expected_lr, callback.model.learning_rate)
         self.assertAlmostEqual(expected_lr, callback.model.lr_schedule(0.9))

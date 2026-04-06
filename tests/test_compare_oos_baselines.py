@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+import tempfile
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -117,6 +119,77 @@ class CompareOosBaselinesTests(unittest.TestCase):
             float(context.execution_cost_profile["slippage_pips"]) * 2.0,
             float(stressed.execution_cost_profile["slippage_pips"]),
         )
+
+    def test_mean_reversion_provider_handles_entry_and_exit(self) -> None:
+        action_map = build_action_map([1.0], [1.0])
+
+        open_short = baseline_tool._mean_reversion_provider(
+            feature_row=pd.Series({"spread_z": 1.2}),
+            position_direction=0,
+            action_map=action_map,
+        )
+        hold_flat = baseline_tool._mean_reversion_provider(
+            feature_row=pd.Series({"spread_z": 0.0}),
+            position_direction=0,
+            action_map=action_map,
+        )
+        close_short = baseline_tool._mean_reversion_provider(
+            feature_row=pd.Series({"spread_z": 0.0}),
+            position_direction=-1,
+            action_map=action_map,
+        )
+
+        self.assertEqual(3, open_short)
+        self.assertEqual(0, hold_flat)
+        self.assertEqual(1, close_short)
+
+    def test_runtime_baselines_include_flat_zero_trade_floor(self) -> None:
+        context = self._build_context()
+
+        results = baseline_tool._evaluate_runtime_baselines(replay_context=context)
+
+        self.assertIn("runtime_flat", results)
+        self.assertIn("runtime_mean_reversion", results)
+        self.assertIn("runtime_trend", results)
+        self.assertEqual(0, int(results["runtime_flat"]["metrics"]["trade_count"]))
+
+    def test_build_baseline_comparison_uses_replay_context_fallback(self) -> None:
+        context = self._build_context()
+        baseline_report = {
+            "target_definition": {"type": "unit_test"},
+            "holdout_metrics": {
+                "models": {
+                    "mean_reversion": {
+                        "metrics": {
+                            "trade_count": 12.0,
+                            "net_pnl_usd": 45.0,
+                            "profit_factor": 1.2,
+                            "expectancy_usd": 3.75,
+                        }
+                    }
+                }
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = Path(tmp) / "baseline_comparison.json"
+            with (
+                patch.object(baseline_tool, "load_replay_context", return_value=context),
+                patch.object(baseline_tool, "run_edge_baseline_research", return_value=baseline_report),
+                patch.object(
+                    baseline_tool,
+                    "_evaluate_policy",
+                    return_value={"metrics": {"trade_count": 9.0, "net_pnl_usd": 12.5, "profit_factor": 1.3}},
+                ),
+            ):
+                report = baseline_tool.build_baseline_comparison(symbol="EURUSD", report_path=report_path)
+            self.assertTrue(report_path.exists())
+
+        self.assertEqual("mean_reversion", report["best_baseline"])
+        self.assertIn(report["best_runtime_baseline"], {"runtime_flat", "runtime_mean_reversion", "runtime_trend"})
+        self.assertIn("runtime_holdout_models", report)
+        self.assertAlmostEqual(7.0, float(report["cost_profile"]["commission_per_lot"]))
+        self.assertEqual(9.0, float(report["rl_replay_metrics"]["trade_count"]))
 
 
 if __name__ == "__main__":

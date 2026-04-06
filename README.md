@@ -11,6 +11,7 @@ This repo is a Python-based Forex reinforcement-learning pipeline with four main
 
 - [docs/README.md](docs/README.md) is the current documentation index.
 - [docs/CURRENT_USAGE_GUIDE.md](docs/CURRENT_USAGE_GUIDE.md) is the practical how-to guide for the current workflow.
+- [docs/evaluation_accounting.md](docs/evaluation_accounting.md) explains which evaluation/accounting metrics are authoritative and how baselines are compared.
 - [docs/NEXT_AGENT_CONTEXT.md](docs/NEXT_AGENT_CONTEXT.md) captures the current repo and data state.
 - [docs/NEXT_AGENT_FILE_MAP.md](docs/NEXT_AGENT_FILE_MAP.md) points to the files that matter for each task.
 - [docs/NEXT_AGENT_RUNBOOK.md](docs/NEXT_AGENT_RUNBOOK.md) keeps the verified commands in one place.
@@ -34,6 +35,7 @@ This repo is a Python-based Forex reinforcement-learning pipeline with four main
 6. Build the combined dataset with `.\.venv\Scripts\python.exe .\build_volume_bars.py`
 7. Train with `.\.venv\Scripts\python.exe .\train_agent.py`
 8. Evaluate with `.\.venv\Scripts\python.exe .\evaluate_oos.py`
+9. Compare the RL replay against simpler baselines with `.\.venv\Scripts\python.exe .\compare_oos_baselines.py --symbol EURUSD`
 
 Core entrypoints (`train_agent.py`, `evaluate_oos.py`, `live_bridge.py`) now re-exec into the
 project `.venv` automatically when launched from the wrong interpreter, but explicit `.venv`
@@ -68,6 +70,7 @@ usage is still the least ambiguous path.
 
 - `train_agent.py` writes a lightweight progress heartbeat to `checkpoints/fold_*/training_heartbeat.json`.
 - Use `.\.venv\Scripts\python.exe .\training_status.py --symbol EURUSD` to see the latest PPO diagnostics + deployment gate blockers.
+- Use `.\.venv\Scripts\python.exe .\compare_oos_baselines.py --symbol EURUSD` to compare RL replay against simple baselines under the same replay cost model.
 
 ## MT5 Live Readiness
 
@@ -75,6 +78,11 @@ usage is still the least ambiguous path.
 - The preflight writes `models/live_preflight_eurusd.json` and fails closed when gate approval, MT5 connectivity, bar-spec parity, or ops evidence is missing.
 - Live orders now append a structured execution audit to `models/execution_audit_eurusd.jsonl`.
 - Summarize real fill drift with `.\.venv\Scripts\python.exe .\summarize_execution_audit.py --symbol EURUSD`.
+
+## Baseline Comparison
+
+- Use `.\.venv\Scripts\python.exe .\compare_oos_baselines.py --symbol EURUSD` to compare the latest RL replay against runtime-rule and research baselines under the same replay context.
+- The comparison now falls back to checkpoint artifacts when no promoted manifest is available, so it remains usable during failed or in-progress training runs.
 
 ## Important Notes
 
