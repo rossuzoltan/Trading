@@ -686,9 +686,79 @@ class TrainRehabTests(unittest.TestCase):
         self.assertEqual([0.1, 0.0], callback.bonus_buffer)
         self.assertEqual([-0.2, -0.1], callback.penalty_buffer)
         self.assertEqual(["SHORT", "CLOSE"], callback.action_type_buffer)
-        self.assertEqual([12.5, 12.5], callback.cpu_usage_buffer)
-        self.assertEqual([55.0, 55.0], callback.gpu_usage_buffer)
-        self.assertEqual([40.0, 40.0], callback.ram_usage_buffer)
+        self.assertEqual([12.5], callback.cpu_usage_buffer)
+        self.assertEqual([55.0], callback.gpu_usage_buffer)
+        self.assertEqual([40.0], callback.ram_usage_buffer)
+
+    def test_full_path_eval_perf_snapshot_separates_callback_ticks_from_real_eval_runs(self) -> None:
+        tmpdir = make_test_dir("full_path_eval_perf")
+
+        class DummyLogger:
+            name_to_value = {
+                "train/approx_kl": 0.002,
+                "train/explained_variance": 0.05,
+            }
+
+        class DummyCallbackModel:
+            def __init__(self) -> None:
+                self.logger = DummyLogger()
+
+            def save(self, path: str) -> None:
+                Path(f"{path}.zip").write_bytes(b"model")
+
+            def get_vec_normalize_env(self):
+                return None
+
+        metrics = {
+            "timed_sharpe": -0.1,
+            "trade_count": 12.0,
+            "expectancy_usd": -1.0,
+            "gross_pnl_usd": -5.0,
+            "net_pnl_usd": -12.0,
+            "total_transaction_cost_usd": 7.0,
+            "max_drawdown": 0.08,
+            "metric_reconciliation": {"passed": True},
+            "execution_diagnostics": {"action_distribution": {"long": 7, "short": 5}},
+            "segment_metrics": {
+                "first": {"timed_sharpe": -0.01},
+                "middle": {"timed_sharpe": -0.02},
+                "last": {"timed_sharpe": -0.03},
+            },
+        }
+
+        callback = FullPathEvalCallback(
+            object(),
+            train_vecnormalize=object(),
+            eval_vecnormalize=object(),
+            best_model_save_path=tmpdir,
+            eval_freq=2,
+            history_path=tmpdir / "history.json",
+            stochastic_runs=0,
+            verbose=0,
+        )
+        callback.model = DummyCallbackModel()
+
+        try:
+            with patch("train_agent.sync_vecnormalize_stats"), patch(
+                "train_agent.evaluate_model", return_value=([], metrics)
+            ), patch("train_agent.validate_evaluation_payload"):
+                callback.n_calls = 1
+                callback.num_timesteps = 1000
+                self.assertTrue(callback._on_step())
+                snap = callback.perf_snapshot()
+                self.assertEqual(1, snap["callback_calls"])
+                self.assertEqual(0, snap["eval_runs"])
+
+                callback.n_calls = 2
+                callback.num_timesteps = 2000
+                self.assertTrue(callback._on_step())
+                snap = callback.perf_snapshot()
+                self.assertEqual(2, snap["callback_calls"])
+                self.assertEqual(1, snap["eval_runs"])
+                self.assertGreaterEqual(snap["eval_total_ns"], snap["eval_mean_ns"])
+                self.assertGreaterEqual(snap["callback_total_ns"], snap["callback_mean_ns"])
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
     def test_full_path_eval_reports_segment_metrics_without_fake_stddev(self):
         timestamps = list(pd.date_range("2024-01-01", periods=9, freq="h", tz="UTC"))

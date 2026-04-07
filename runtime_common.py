@@ -33,7 +33,20 @@ def build_action_map(sl_options: Sequence[float], tp_options: Sequence[float]) -
         raise ValueError("sl_options must contain at least one value.")
     if not tp_options:
         raise ValueError("tp_options must contain at least one value.")
-    return build_simple_action_map(sl_value=float(sl_options[0]), tp_value=float(tp_options[0]))
+    actions: list[ActionSpec] = [
+        ActionSpec(ActionType.HOLD),
+        ActionSpec(ActionType.CLOSE),
+    ]
+    seen_pairs: set[tuple[float, float]] = set()
+    for sl_value in sl_options:
+        for tp_value in tp_options:
+            pair = (float(sl_value), float(tp_value))
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            actions.append(ActionSpec(ActionType.OPEN, direction=1, sl_value=pair[0], tp_value=pair[1]))
+            actions.append(ActionSpec(ActionType.OPEN, direction=-1, sl_value=pair[0], tp_value=pair[1]))
+    return tuple(actions)
 
 
 def build_simple_action_map(
@@ -146,8 +159,9 @@ def build_action_mask(
         return mask
     mask[0] = True
     if position.is_flat:
-        if float(spread_z) < 1.5:
-            mask[2:] = True
+        # Keep the base mask direction-symmetric and delegate spread gating to
+        # apply_execution_action_guards(), which uses the configured limit.
+        mask[2:] = True
     else:
         mask[1] = True
     return mask
@@ -194,7 +208,7 @@ def runtime_options_from_training_payload(
         "churn_min_hold_bars": int(source.get("training_churn_min_hold_bars", 0) or 0),
         "churn_action_cooldown": int(source.get("training_churn_action_cooldown", 0) or 0),
         "entry_spread_z_limit": float(source.get("training_entry_spread_z_limit", 1.5)),
-        "minimal_post_cost_reward": bool(source.get("training_minimal_post_cost_reward", False)),
+        "minimal_post_cost_reward": bool(source.get("training_minimal_post_cost_reward", True)),
         "force_fast_window_benchmark": bool(source.get("training_force_fast_window_benchmark", False)),
         "alpha_gate_enabled": bool(source.get("training_alpha_gate_enabled", False)),
         "alpha_gate_model": str(source.get("training_alpha_gate_model", "auto") or "auto"),

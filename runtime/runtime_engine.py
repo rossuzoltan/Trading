@@ -761,9 +761,17 @@ class RuntimeEngine:
         )
         reward = float(equity - self.last_equity) if self.minimal_post_cost_reward else float(reward_components["reward_clipped"])
         if self.minimal_post_cost_reward:
+            reward_components["drawdown_penalty_applied"] = 0.0
+            reward_components["transaction_penalty_applied"] = 0.0
+            reward_components["pre_bonus_reward"] = float(reward)
+            reward_components["final_reward_unclipped"] = float(reward)
             reward_components["reward_raw_unclipped"] = float(reward)
             reward_components["reward_unclipped"] = float(reward)
             reward_components["reward_clipped"] = float(reward)
+            reward_components["final_reward_clipped_low"] = 0.0
+            reward_components["final_reward_clipped_high"] = 0.0
+            reward_components["clip_hit_high"] = 0.0
+            reward_components["clip_hit_low"] = 0.0
         self._refresh_confirmed_position(last_reward=reward)
         if not was_flat_before and self.confirmed_position.is_flat:
             self.last_close_bar_index = self.processed_bars_count

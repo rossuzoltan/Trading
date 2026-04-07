@@ -149,6 +149,8 @@ class CompareOosBaselinesTests(unittest.TestCase):
         results = baseline_tool._evaluate_runtime_baselines(replay_context=context)
 
         self.assertIn("runtime_flat", results)
+        self.assertIn("runtime_always_long", results)
+        self.assertIn("runtime_always_short", results)
         self.assertIn("runtime_mean_reversion", results)
         self.assertIn("runtime_trend", results)
         self.assertEqual(0, int(results["runtime_flat"]["metrics"]["trade_count"]))
@@ -161,6 +163,8 @@ class CompareOosBaselinesTests(unittest.TestCase):
             "validation_status": {"passed": True},
         }
         stress_side_effects = [
+            {"metrics": {"trade_count": 12, "net_pnl_usd": 7.5, "validation_status": {"passed": True}}},
+            {"metrics": {"trade_count": 10, "net_pnl_usd": 25.0, "validation_status": {"passed": True}}},
             {"metrics": {"trade_count": 10, "net_pnl_usd": 5.0, "validation_status": {"passed": True}}},
             {"metrics": {"trade_count": 10, "net_pnl_usd": -1.0, "validation_status": {"passed": True}}},
         ]
@@ -252,7 +256,16 @@ class CompareOosBaselinesTests(unittest.TestCase):
             self.assertTrue(report_path.exists())
 
         self.assertEqual("mean_reversion", report["best_baseline"])
-        self.assertIn(report["best_runtime_baseline"], {"runtime_flat", "runtime_mean_reversion", "runtime_trend"})
+        self.assertIn(
+            report["best_runtime_baseline"],
+            {
+                "runtime_flat",
+                "runtime_always_long",
+                "runtime_always_short",
+                "runtime_mean_reversion",
+                "runtime_trend",
+            },
+        )
         self.assertIn("runtime_holdout_models", report)
         self.assertIn("runtime_parity_verdict", report)
         self.assertAlmostEqual(7.0, float(report["cost_profile"]["commission_per_lot"]))

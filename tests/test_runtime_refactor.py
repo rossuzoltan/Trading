@@ -519,6 +519,40 @@ class RuntimeRefactorTests(unittest.TestCase):
         self.assertFalse(mask[2])
         self.assertFalse(mask[3])
 
+    def test_action_mask_does_not_hardcode_spread_entry_block(self):
+        action_map = build_action_map([0.5], [1.0])
+        position = ConfirmedPosition()
+
+        mask = build_action_mask(action_map, position=position, spread_z=3.0)
+
+        self.assertTrue(mask[0])
+        self.assertFalse(mask[1])
+        self.assertTrue(mask[2])
+        self.assertTrue(mask[3])
+
+    def test_build_action_map_expands_full_sl_tp_grid(self):
+        action_map = build_action_map([0.5, 1.0], [1.0, 2.0])
+
+        self.assertEqual(10, len(action_map))
+        open_pairs = {
+            (float(action.sl_value), float(action.tp_value), int(action.direction or 0))
+            for action in action_map
+            if action.action_type == ActionType.OPEN
+        }
+        self.assertEqual(
+            {
+                (0.5, 1.0, 1),
+                (0.5, 1.0, -1),
+                (0.5, 2.0, 1),
+                (0.5, 2.0, -1),
+                (1.0, 1.0, 1),
+                (1.0, 1.0, -1),
+                (1.0, 2.0, 1),
+                (1.0, 2.0, -1),
+            },
+            open_pairs,
+        )
+
     def test_configure_loaded_amp_model_uses_torch_symbols(self):
         model = SimpleNamespace()
 
@@ -800,6 +834,24 @@ class RuntimeRefactorTests(unittest.TestCase):
         self.assertEqual(broker.close_requests, 1)
         self.assertTrue(runtime.snapshot.kill_switch_active)
         self.assertTrue(runtime.snapshot.safe_mode_active)
+
+    def test_minimal_post_cost_reward_clears_runtime_penalty_fields(self):
+        broker = ReplayBroker(symbol="EURUSD", commission_per_lot=7.0, slippage_pips=1.0)
+        runtime = make_runtime(
+            broker,
+            SequencePolicy([2]),
+            minimal_post_cost_reward=True,
+        )
+        runtime.startup_reconcile()
+
+        result = runtime.process_bar(make_bar(0, 1.1000))
+
+        self.assertAlmostEqual(result.reward, result.equity - 1000.0, places=6)
+        self.assertEqual(0.0, float(result.reward_components.get("drawdown_penalty_applied", -1.0)))
+        self.assertEqual(0.0, float(result.reward_components.get("transaction_penalty_applied", -1.0)))
+        self.assertEqual(0.0, float(result.reward_components.get("final_reward_clipped_low", -1.0)))
+        self.assertEqual(0.0, float(result.reward_components.get("final_reward_clipped_high", -1.0)))
+        self.assertAlmostEqual(result.reward, float(result.reward_components.get("reward_clipped", 0.0)), places=6)
 
     def test_backtest_live_replay_parity_holds_for_shared_pipeline(self):
         ticks = [

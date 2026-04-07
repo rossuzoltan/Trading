@@ -566,9 +566,9 @@ class RuntimeGymEnv(gym.Env):
     Gym wrapper around the shared replay/live execution stack:
     FeatureEngine + RuntimeEngine + ReplayBroker.
 
-    Reward semantics are taken from RuntimeEngine. The optimized reward is the
-    clipped net log-equity delta after drawdown and transaction penalties,
-    while the raw components remain available via reward_components.
+    Reward semantics are taken from RuntimeEngine. By default the environment
+    now uses minimal post-cost equity delta; legacy clipped/shaped reward is
+    still available when `minimal_post_cost_reward=False`.
     """
 
     metadata = {"render_modes": ["human"]}
@@ -649,6 +649,7 @@ class RuntimeGymEnv(gym.Env):
             "action_masks_total_ns": 0,
             "step_calls": 0,
             "step_total_ns": 0,
+            "step_info_build_calls": 0,
             "step_info_build_ns": 0,
         }
 
@@ -1228,6 +1229,9 @@ class RuntimeGymEnv(gym.Env):
         if self.config.minimal_post_cost_reward:
             final_reward = float(result.equity) - float(prev_equity)
             reward_components["participation_bonus_applied"] = 0.0
+            reward_components["slippage_penalty_applied"] = 0.0
+            reward_components["drawdown_penalty_applied"] = 0.0
+            reward_components["transaction_penalty_applied"] = 0.0
             reward_components["turnover_penalty_applied"] = 0.0
             reward_components["downside_risk_penalty_applied"] = 0.0
             reward_components["rapid_reversal_penalty_applied"] = 0.0
@@ -1360,6 +1364,7 @@ class RuntimeGymEnv(gym.Env):
         }
         if terminated:
             info["episode_diagnostics"] = self._training_diagnostics.snapshot_delta(self._episode_diagnostics_baseline)
+        self._perf["step_info_build_calls"] += 1
         self._perf["step_info_build_ns"] += max(time.perf_counter_ns() - info_start_ns, 0)
         if _GYM:
             self._perf["step_calls"] += 1

@@ -144,6 +144,22 @@ def _flat_provider(**_: object) -> int:
     return 0
 
 
+def _always_long_provider(*, position_direction: int, action_map, **_: object) -> int:
+    return _target_direction_to_action_index(
+        action_map=action_map,
+        position_direction=int(position_direction or 0),
+        target_direction=1,
+    )
+
+
+def _always_short_provider(*, position_direction: int, action_map, **_: object) -> int:
+    return _target_direction_to_action_index(
+        action_map=action_map,
+        position_direction=int(position_direction or 0),
+        target_direction=-1,
+    )
+
+
 def _resolve_action_indexes(action_map) -> dict[str, int]:
     indexes = {"hold": 0, "close": 0, "long": 0, "short": 0}
     for idx, action in enumerate(action_map):
@@ -202,9 +218,13 @@ def _mean_reversion_provider(*, feature_row, position_direction: int, action_map
 
 RUNTIME_BASELINE_PROVIDERS: dict[str, Callable[..., int]] = {
     "flat": _flat_provider,
+    "always_long": _always_long_provider,
+    "always_short": _always_short_provider,
     "mean_reversion": _mean_reversion_provider,
     "trend_rule": _trend_provider,
     "runtime_flat": _flat_provider,
+    "runtime_always_long": _always_long_provider,
+    "runtime_always_short": _always_short_provider,
     "runtime_mean_reversion": _mean_reversion_provider,
     "runtime_trend": _trend_provider,
 }
@@ -399,13 +419,25 @@ def _resolve_reward_profile(manifest) -> dict[str, Any]:
         "transaction_penalty": float(profile.get("transaction_penalty", 1.0)),
         "reward_clip_low": float(profile.get("reward_clip_low", -5.0)),
         "reward_clip_high": float(profile.get("reward_clip_high", 5.0)),
-        "minimal_post_cost_reward": bool(profile.get("minimal_post_cost_reward", False)),
+        "minimal_post_cost_reward": bool(profile.get("minimal_post_cost_reward", True)),
     }
 
 
 def _load_training_runtime_options(diagnostics_path: Path | None) -> dict[str, Any]:
     payload = load_json_report(diagnostics_path) if diagnostics_path is not None and diagnostics_path.exists() else {}
     return runtime_options_from_training_payload(payload, default_window_size=1)
+
+
+def _resolve_checkpoint_diagnostics_path(fold_dir: Path) -> Path | None:
+    for candidate in (
+        fold_dir / "training_diagnostics.json",
+        fold_dir / "training_diagnostics_EURUSD.json",
+        fold_dir / "best_training_diagnostics.json",
+        fold_dir / "training_heartbeat.json",
+    ):
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def _frame_to_bars(frame: pd.DataFrame) -> list[BarView]:
@@ -572,7 +604,7 @@ def _select_checkpoint_artifacts(symbol: str) -> dict[str, Any]:
                     "fold_dir": current_fold_dir,
                     "model_path": model_path,
                     "vecnormalize_path": vecnormalize_path,
-                    "diagnostics_path": current_fold_dir / "training_diagnostics.json",
+                    "diagnostics_path": _resolve_checkpoint_diagnostics_path(current_fold_dir),
                     "current_run": current_run,
                 }
             )
@@ -585,13 +617,13 @@ def _select_checkpoint_artifacts(symbol: str) -> dict[str, Any]:
             model_path, vecnormalize_path = best_paths
             candidates.append(
                 {
-                    "score": 80 if (fold_dir / "training_diagnostics.json").exists() else 60,
+                    "score": 80 if _resolve_checkpoint_diagnostics_path(fold_dir) is not None else 60,
                     "checkpoints_root": checkpoints_root,
                     "fold_index": int(fold_dir.name.replace("fold_", "", 1)),
                     "fold_dir": fold_dir,
                     "model_path": model_path,
                     "vecnormalize_path": vecnormalize_path,
-                    "diagnostics_path": fold_dir / "training_diagnostics.json",
+                    "diagnostics_path": _resolve_checkpoint_diagnostics_path(fold_dir),
                     "current_run": current_run,
                 }
             )
@@ -602,10 +634,10 @@ def _select_checkpoint_artifacts(symbol: str) -> dict[str, Any]:
                 if best_paths is None:
                     continue
                 model_path, vecnormalize_path = best_paths
-                diagnostics_path = fold_dir / "training_diagnostics.json"
+                diagnostics_path = _resolve_checkpoint_diagnostics_path(fold_dir)
                 candidates.append(
                     {
-                        "score": 40 if diagnostics_path.exists() else 20,
+                        "score": 40 if diagnostics_path is not None else 20,
                         "checkpoints_root": run_dir,
                         "fold_index": int(fold_dir.name.replace("fold_", "", 1)),
                         "fold_dir": fold_dir,
@@ -662,7 +694,8 @@ def _load_checkpoint_replay_context(symbol: str) -> ReplayContext:
         raise RuntimeError("Checkpoint replay context produced an empty warmup or replay frame.")
 
     model = MaskablePPO.load(str(artifact["model_path"]), device="cpu")
-    diagnostics_path = Path(artifact["diagnostics_path"]) if Path(artifact["diagnostics_path"]).exists() else None
+    diagnostics_raw = artifact.get("diagnostics_path")
+    diagnostics_path = Path(diagnostics_raw) if diagnostics_raw and Path(diagnostics_raw).exists() else None
     runtime_options = _load_training_runtime_options(diagnostics_path)
     expected_obs_shape = [int(runtime_options["window_size"]), len(FEATURE_COLS) + STATE_FEATURE_COUNT]
     model_obs_shape = [int(value) for value in model.observation_space.shape]
@@ -777,7 +810,7 @@ def _build_runtime(
         snapshot=snapshot,
         state_store=None,
         window_size=int(runtime_options.get("window_size", 1)),
-        minimal_post_cost_reward=bool(runtime_options.get("minimal_post_cost_reward", False)),
+        minimal_post_cost_reward=bool(runtime_options.get("minimal_post_cost_reward", True)),
         force_fast_window_benchmark=bool(runtime_options.get("force_fast_window_benchmark", False)),
         alpha_gate=alpha_gate,
         churn_min_hold_bars=int(runtime_options.get("churn_min_hold_bars", 0)),
@@ -787,6 +820,39 @@ def _build_runtime(
     )
     runtime.startup_reconcile()
     return runtime, broker
+
+
+def _align_reward_components_for_mode(
+    reward_components: dict[str, Any],
+    *,
+    reward_value: float,
+    minimal_post_cost_reward: bool,
+) -> dict[str, Any]:
+    aligned = dict(reward_components)
+    if not minimal_post_cost_reward:
+        return aligned
+    aligned["pnl_reward"] = float(reward_value)
+    aligned["holding_penalty_applied"] = 0.0
+    aligned["participation_bonus_applied"] = 0.0
+    aligned["slippage_penalty_applied"] = 0.0
+    aligned["drawdown_penalty_applied"] = 0.0
+    aligned["transaction_penalty_applied"] = 0.0
+    aligned["turnover_penalty_applied"] = 0.0
+    aligned["downside_risk_penalty_applied"] = 0.0
+    aligned["rapid_reversal_penalty_applied"] = 0.0
+    aligned["net_return_adjustment_applied"] = 0.0
+    aligned["pre_bonus_reward"] = float(reward_value)
+    aligned["final_reward_unclipped"] = float(reward_value)
+    aligned["reward_raw_unclipped"] = float(reward_value)
+    aligned["reward_unclipped"] = float(reward_value)
+    aligned["reward_clipped"] = float(reward_value)
+    aligned["net_reward_with_bonus"] = float(reward_value)
+    aligned["reward_unclipped_net"] = float(reward_value)
+    aligned["final_reward_clipped_low"] = 0.0
+    aligned["final_reward_clipped_high"] = 0.0
+    aligned["clip_hit_high"] = 0.0
+    aligned["clip_hit_low"] = 0.0
+    return aligned
 
 
 def run_replay(
@@ -802,6 +868,7 @@ def run_replay(
         use_policy=action_index_provider is None,
         disable_alpha_gate=disable_alpha_gate,
     )
+    minimal_post_cost_reward = bool(getattr(runtime, "minimal_post_cost_reward", False))
 
     equity_curve: list[float] = []
     timestamps: list[pd.Timestamp] = []
@@ -827,12 +894,13 @@ def run_replay(
                 )
             )
         result = runtime.process_bar(bar, action_index_override=action_index_override)
-        reward_components = dict(result.reward_components)
+        reward_components = _align_reward_components_for_mode(
+            dict(result.reward_components),
+            reward_value=float(result.reward),
+            minimal_post_cost_reward=minimal_post_cost_reward,
+        )
         reward_components.setdefault("holding_penalty_applied", 0.0)
         reward_components.setdefault("participation_bonus_applied", 0.0)
-        reward_components["pnl_reward"] = float(
-            reward_components.get("reward_raw_unclipped", reward_components.get("pnl_reward", 0.0))
-        )
         reward_components["forced_close_applied"] = 0.0
         turnover_lots = float(reward_components.get("turnover_lots", 0.0))
         entry_signal_direction = 0
@@ -857,13 +925,19 @@ def run_replay(
                         avg_spread=float(bar.avg_spread),
                     )
                 )
-                reward_components["pnl_reward"] = float(
-                    reward_components.get("reward_raw_unclipped", reward_components.get("pnl_reward", 0.0))
+                forced_reward_value = (
+                    float(flatten_result.get("equity", result.equity)) - float(runtime.last_equity)
+                    if minimal_post_cost_reward
+                    else float(reward_components.get("reward_clipped", result.reward))
                 )
-                reward_components["holding_penalty_applied"] = 0.0
-                reward_components["participation_bonus_applied"] = 0.0
+                reward_components = _align_reward_components_for_mode(
+                    reward_components,
+                    reward_value=float(forced_reward_value),
+                    minimal_post_cost_reward=minimal_post_cost_reward,
+                )
                 reward_components["forced_close_applied"] = 1.0
                 result.equity = float(flatten_result.get("equity", result.equity))
+                result.reward = float(forced_reward_value)
                 result.position_direction = 0
 
         trade_log_slice = [dict(item) for item in broker.trade_log[trade_log_before:] if isinstance(item, dict)]
@@ -935,7 +1009,13 @@ def _evaluate_policy(
 
 def _evaluate_runtime_baselines(*, replay_context: ReplayContext) -> dict[str, dict[str, Any]]:
     results: dict[str, dict[str, Any]] = {}
-    for name in ("runtime_flat", "runtime_mean_reversion", "runtime_trend"):
+    for name in (
+        "runtime_flat",
+        "runtime_always_long",
+        "runtime_always_short",
+        "runtime_mean_reversion",
+        "runtime_trend",
+    ):
         provider = RUNTIME_BASELINE_PROVIDERS[name]
         payload = _evaluate_policy(
             replay_context=replay_context,

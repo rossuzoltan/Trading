@@ -8,14 +8,18 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
 
+import train_agent
 from artifact_manifest import create_manifest, load_manifest, save_manifest
-from evaluate_oos import _resolve_execution_cost_profile, _resolve_reward_profile
+from evaluate_oos import _resolve_checkpoint_diagnostics_path, _resolve_execution_cost_profile, _resolve_reward_profile
 from runtime_common import ActionSpec, ActionType, build_trade_metric_reconciliation, runtime_options_from_training_payload
 from train_agent import (
     AdaptiveKLLearningRateCallback,
+    FullPathEvalCallback,
     TrainingDiagnosticsCallback,
+    aggregate_training_diagnostics,
     _archive_paths,
     _baseline_competition_blockers,
+    _baseline_reference_from_report,
     _build_promoted_training_diagnostics,
     _candidate_scaler_artifact_path,
     _clear_legacy_checkpoint_artifacts,
@@ -23,6 +27,7 @@ from train_agent import (
     _holdout_deployment_blockers,
     _load_training_resume_state,
     _publish_primary_candidate_artifacts,
+    _readiness_integrity_blockers,
     _recover_completed_fold_state,
     _resume_model_checkpoint_path,
     _resume_vecnormalize_checkpoint_path,
@@ -197,6 +202,48 @@ class TrainingArtifactTests(unittest.TestCase):
         )
         self.assertEqual([], blockers)
 
+    def test_baseline_reference_ignores_non_parity_report(self):
+        name, metrics = _baseline_reference_from_report(
+            {
+                "execution_parity": False,
+                "passing_models": ["mean_reversion"],
+                "holdout_metrics": {
+                    "models": {
+                        "mean_reversion": {
+                            "metrics": {
+                                "trade_count": 12,
+                                "net_pnl_usd": 25.0,
+                                "expectancy_usd": 1.2,
+                            }
+                        }
+                    }
+                },
+            }
+        )
+        self.assertIsNone(name)
+        self.assertEqual({}, metrics)
+
+    def test_readiness_integrity_blockers_require_pti_and_exact_runtime_baseline(self):
+        blockers = _readiness_integrity_blockers(
+            point_in_time_verified=False,
+            require_rl_beat_baseline=True,
+            baseline_reference_name=None,
+            baseline_reference_execution_parity=False,
+        )
+
+        self.assertTrue(any("point-in-time" in blocker.lower() for blocker in blockers))
+        self.assertTrue(any("exact-runtime baseline" in blocker.lower() for blocker in blockers))
+
+    def test_readiness_integrity_blockers_clear_when_truth_requirements_met(self):
+        blockers = _readiness_integrity_blockers(
+            point_in_time_verified=True,
+            require_rl_beat_baseline=True,
+            baseline_reference_name="runtime_mean_reversion",
+            baseline_reference_execution_parity=True,
+        )
+
+        self.assertEqual([], blockers)
+
     def test_holdout_blockers_include_trade_quality_checks(self):
         blockers = _holdout_deployment_blockers(
             holdout_sharpe=0.35,
@@ -349,6 +396,162 @@ class TrainingArtifactTests(unittest.TestCase):
         self.assertTrue(options["minimal_post_cost_reward"])
         self.assertTrue(options["force_fast_window_benchmark"])
 
+    def test_runtime_options_from_training_payload_defaults_to_truthful_minimal_reward(self):
+        options = runtime_options_from_training_payload({})
+        self.assertTrue(options["minimal_post_cost_reward"])
+
+    def test_resolve_checkpoint_diagnostics_path_prefers_heartbeat_when_fold_summary_missing(self):
+        tmpdir = make_test_dir("checkpoint_diag_path")
+        try:
+            heartbeat = tmpdir / "training_heartbeat.json"
+            heartbeat.write_text("{}", encoding="utf-8")
+            self.assertEqual(heartbeat, _resolve_checkpoint_diagnostics_path(tmpdir))
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_eval_risk_summary_exposes_flat_delta_and_directional_mode(self):
+        metrics = {
+            "gross_pnl_usd": 12.0,
+            "net_pnl_usd": -3.5,
+            "total_transaction_cost_usd": 15.5,
+            "expectancy_usd": -0.7,
+            "trade_count": 9,
+            "execution_diagnostics": {
+                "action_distribution": {"long": 9, "short": 0},
+                "trade_diagnostics": {},
+            },
+            "segment_metrics": {
+                "first": {"timed_sharpe": 0.1},
+                "middle": {"timed_sharpe": -0.2},
+                "last": {"timed_sharpe": -0.05},
+            },
+        }
+
+        summary = FullPathEvalCallback._build_eval_risk_summary(metrics)
+
+        self.assertEqual("reject_candidate", summary["verdict"])
+        self.assertFalse(summary["beats_flat_baseline"])
+        self.assertAlmostEqual(-3.5, summary["flat_baseline_delta_usd"])
+        self.assertAlmostEqual(-3.5, summary["gross_after_cost_usd"])
+        self.assertEqual("long_only", summary["directional_mode"])
+        self.assertIn("direction_concentration", summary["flags"])
+        self.assertIn("cost_dominates_gross", summary["flags"])
+
+    def test_eval_risk_summary_flags_dominant_direction_even_when_opposite_side_is_nonzero(self):
+        metrics = {
+            "gross_pnl_usd": 55.0,
+            "net_pnl_usd": 4.0,
+            "total_transaction_cost_usd": 51.0,
+            "expectancy_usd": 0.09,
+            "trade_count": 43,
+            "expectancy_by_direction": {
+                "long": {"trade_count": 42.0, "expectancy_usd": 0.12},
+                "short": {"trade_count": 1.0, "expectancy_usd": -0.8},
+            },
+            "pnl_concentration": {
+                "top_3_share_of_abs_net_pnl": 0.91,
+            },
+            "execution_diagnostics": {
+                "action_distribution": {"long": 42, "short": 1},
+                "trade_diagnostics": {},
+            },
+            "segment_metrics": {
+                "first": {"timed_sharpe": 0.04},
+                "middle": {"timed_sharpe": 0.01},
+                "last": {"timed_sharpe": -0.03},
+            },
+        }
+
+        summary = FullPathEvalCallback._build_eval_risk_summary(metrics)
+
+        self.assertIn("direction_concentration", summary["flags"])
+        self.assertIn("thin_post_cost_edge", summary["flags"])
+        self.assertIn("pnl_concentrated_in_few_trades", summary["flags"])
+        self.assertEqual("long_dominant", summary["directional_mode"])
+        self.assertGreater(summary["dominant_direction_share"], 0.95)
+
+    def test_truth_run_fail_fast_condition_requires_truthful_runtime_reject(self):
+        risk_summary = {
+            "verdict": "reject_candidate",
+            "flags": ["negative_expectancy", "policy_update_stalled", "direction_concentration"],
+            "beats_flat_baseline": False,
+            "directional_mode": "long_only",
+            "expectancy_usd": -1.25,
+            "trade_count": 14,
+        }
+
+        with patch.multiple(
+            train_agent,
+            TRAIN_TRUTH_RUN_FAIL_FAST_ENABLED=True,
+            TRAIN_ENV_MODE="runtime",
+            TRAIN_MINIMAL_POST_COST_REWARD=True,
+            TRAIN_REQUIRE_RL_BEAT_BASELINE=True,
+            TRAIN_ALPHA_GATE_ENABLED=False,
+            TRAIN_TRUTH_RUN_FAIL_FAST_WARMUP_STEPS=500_000,
+            TRAIN_TRUTH_RUN_FAIL_FAST_REJECT_STREAK=6,
+        ):
+            triggered, reasons = FullPathEvalCallback._truth_run_fail_fast_condition(
+                risk_summary,
+                num_timesteps=600_000,
+                reject_streak=1,
+            )
+
+        self.assertTrue(triggered)
+        self.assertTrue(any("policy_update_stalled" in reason for reason in reasons))
+
+    def test_truth_run_fail_fast_condition_triggers_on_repeated_concentrated_rejects(self):
+        risk_summary = {
+            "verdict": "reject_candidate",
+            "flags": ["direction_concentration", "thin_post_cost_edge", "pnl_concentrated_in_few_trades"],
+            "beats_flat_baseline": False,
+            "directional_mode": "long_dominant",
+            "dominant_direction_share": 0.96,
+            "expectancy_usd": 0.08,
+            "trade_count": 17,
+        }
+
+        with patch.multiple(
+            train_agent,
+            TRAIN_TRUTH_RUN_FAIL_FAST_ENABLED=True,
+            TRAIN_ENV_MODE="runtime",
+            TRAIN_MINIMAL_POST_COST_REWARD=True,
+            TRAIN_REQUIRE_RL_BEAT_BASELINE=True,
+            TRAIN_ALPHA_GATE_ENABLED=False,
+            TRAIN_TRUTH_RUN_FAIL_FAST_WARMUP_STEPS=500_000,
+            TRAIN_TRUTH_RUN_FAIL_FAST_REJECT_STREAK=4,
+        ):
+            triggered, reasons = FullPathEvalCallback._truth_run_fail_fast_condition(
+                risk_summary,
+                num_timesteps=700_000,
+                reject_streak=4,
+            )
+
+        self.assertTrue(triggered)
+        self.assertTrue(any("directional_mode=long_dominant@96%" in reason for reason in reasons))
+        self.assertTrue(any("thin_post_cost_edge" in reason for reason in reasons))
+        self.assertTrue(any("reject_streak=4" in reason for reason in reasons))
+
+    def test_aggregate_training_diagnostics_ignores_zero_duration_samples_for_median(self):
+        aggregated = aggregate_training_diagnostics(
+            [
+                {
+                    "trade_stats": {
+                        "action_selected_count": 10,
+                        "closed_trade_count": 2,
+                        "position_duration_sum": 12,
+                        "position_duration_count": 2,
+                        "position_durations_sample": [0, 5, 7],
+                    },
+                    "action_counts": {"hold": 8, "long": 2, "short": 0, "close": 0},
+                    "economics": {},
+                    "reward_components": {},
+                }
+            ]
+        )
+
+        self.assertEqual(6.0, aggregated["trade_diagnostics"]["avg_position_duration"])
+        self.assertEqual(6.0, aggregated["trade_diagnostics"]["median_position_duration"])
+
     def test_load_training_resume_state_ignores_terminal_stopped_and_collapsed_runs(self):
         tmpdir = make_test_dir("resume_state_terminal")
         try:
@@ -496,7 +699,7 @@ class TrainingArtifactTests(unittest.TestCase):
                 "transaction_penalty": 0.8,
                 "reward_clip_low": -4.0,
                 "reward_clip_high": 4.0,
-                "minimal_post_cost_reward": False,
+                "minimal_post_cost_reward": True,
             },
             _resolve_reward_profile(manifest),
         )
