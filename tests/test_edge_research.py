@@ -218,8 +218,12 @@ class EdgeResearchTests(unittest.TestCase):
                 probability_margin=0.05,
                 min_trade_count=20,
             )
+            self.assertFalse(report["execution_parity"])
+            self.assertIn("non-parity", report["parity_note"].lower())
             self.assertTrue(report["gate_passed"])
             self.assertTrue(report["passing_models"])
+            self.assertFalse(report["execution_parity"])
+            self.assertIn("non-parity", report["parity_note"].lower())
             self.assertIn("profit_factor", report["holdout_metrics"]["models"]["logistic_pair"]["metrics"])
             self.assertIn("sharpe_like", report["holdout_metrics"]["models"]["logistic_pair"]["metrics"])
             self.assertIn("tree_signed_target", report["holdout_metrics"]["models"])

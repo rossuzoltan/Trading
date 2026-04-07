@@ -107,7 +107,7 @@ class RuntimeGymConfig:
     alpha_gate_warmup_threshold_delta: float = 0.0
     alpha_gate_warmup_margin_scale: float = 1.0
     window_size: int = 1
-    minimal_post_cost_reward: bool = False
+    minimal_post_cost_reward: bool = True
     force_fast_window_benchmark: bool = False
     random_start: bool = False
     slim_info: bool = False

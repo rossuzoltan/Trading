@@ -707,6 +707,11 @@ def run_edge_baseline_research(
 
     report = {
         "symbol": str(symbol).upper(),
+        "execution_parity": False,
+        "parity_note": (
+            "Research baseline economics use simplified non-parity pip math and are "
+            "not execution-path identical to RuntimeEngine/ReplayBroker results."
+        ),
         "target_definition": {
             "type": "cost_adjusted_tradability",
             "horizon_bars": int(horizon_bars),

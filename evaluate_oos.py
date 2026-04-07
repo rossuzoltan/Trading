@@ -28,7 +28,6 @@ from artifact_manifest import (
     load_validated_vecnormalize,
 )
 from dataset_validation import validate_symbol_bar_spec
-from domain.models import VolumeBar
 from execution.replay_broker import ReplayBroker
 from risk.risk_engine import RiskEngine, RiskLimits
 from runtime.runtime_engine import ModelPolicy, RuntimeEngine, RuntimeSnapshot
@@ -93,7 +92,7 @@ class ReplayContext:
     obs_normalizer: Any | None
     scaler: Any
     execution_cost_profile: dict[str, float]
-    reward_profile: dict[str, float]
+    reward_profile: dict[str, Any]
     warmup_frame: pd.DataFrame
     replay_frame: pd.DataFrame
     replay_feature_frame: pd.DataFrame

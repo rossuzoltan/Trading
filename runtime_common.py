@@ -17,6 +17,8 @@ TRAINING_RUNTIME_OPTION_KEYS = (
     "training_churn_min_hold_bars",
     "training_churn_action_cooldown",
     "training_entry_spread_z_limit",
+    "training_minimal_post_cost_reward",
+    "training_force_fast_window_benchmark",
     "training_alpha_gate_enabled",
     "training_alpha_gate_model",
     "training_alpha_gate_probability_threshold",
