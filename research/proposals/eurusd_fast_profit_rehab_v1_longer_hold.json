@@ -1,0 +1,20 @@
+{
+  "experiment_name": "eurusd_fast_profit_rehab_v1_longer_hold",
+  "symbol": "EURUSD",
+  "timesteps": 120000,
+  "fast_mode": true,
+  "rationale": "Fast EURUSD profit rehab pass with longer minimum holds and cooldown to suppress churn.",
+  "overrides": {
+    "TRAIN_EXPERIMENT_PROFILE": "reward_strip_profit_rehab_v1",
+    "TRAIN_WINDOW_SIZE": 8,
+    "TRAIN_CHURN_MIN_HOLD_BARS": 16,
+    "TRAIN_CHURN_ACTION_COOLDOWN": 10
+  },
+  "tags": [
+    "fast_mode",
+    "profit_rehab",
+    "longer_hold",
+    "eurusd"
+  ],
+  "parent_experiment": "eurusd_reward_strip_window8"
+}

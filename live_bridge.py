@@ -45,6 +45,7 @@ from mt5_broker_caps import describe_trade_mode, read_symbol_caps, trade_mode_al
 from project_paths import resolve_dataset_path, resolve_manifest_path, validate_dataset_bar_spec
 from run_logging import configure_run_logging, set_log_context
 from runtime_common import STATE_FEATURE_COUNT, ActionSpec, ActionType, deserialize_action_map
+from runtime_common import TRAINING_RUNTIME_OPTION_KEYS, runtime_options_from_training_payload
 from symbol_utils import pip_size_for_symbol
 from trading_config import (
     ACTION_SL_MULTS,
@@ -100,14 +101,9 @@ def _resolve_reward_profile(manifest) -> dict[str, float]:
     }
 
 
-def _load_training_runtime_options(diagnostics_path: Path | None) -> dict[str, Any]:
+def _load_training_runtime_options(diagnostics_path: Path | None, *, default_window_size: int = 1) -> dict[str, Any]:
     payload = load_json_report(diagnostics_path) if diagnostics_path is not None and diagnostics_path.exists() else {}
-    return {
-        "window_size": int(payload.get("training_window_size", 1) or 1),
-        "churn_min_hold_bars": int(payload.get("training_churn_min_hold_bars", 0) or 0),
-        "churn_action_cooldown": int(payload.get("training_churn_action_cooldown", 0) or 0),
-        "entry_spread_z_limit": float(payload.get("training_entry_spread_z_limit", 1.5)),
-    }
+    return runtime_options_from_training_payload(payload, default_window_size=default_window_size)
 
 
 DAILY_LOSS_FRACTION = float(os.environ.get("TRADING_DAILY_LOSS_FRACTION", "0.05"))
@@ -688,7 +684,6 @@ def bootstrap_live_runtime(
         )
     dataset_id = dataset_id_for_path(dataset_path)
     diagnostics_path = Path(manifest.training_diagnostics_path) if manifest.training_diagnostics_path else None
-    runtime_options = _load_training_runtime_options(diagnostics_path)
 
     action_map = deserialize_action_map(manifest.action_map)
     observation_shape = list(getattr(manifest, "observation_shape", None) or [1, len(FEATURE_COLS) + STATE_FEATURE_COUNT])
@@ -713,6 +708,30 @@ def bootstrap_live_runtime(
         expected_observation_shape=observation_shape,
         expected_dataset_id=dataset_id,
     )
+    runtime_options = _load_training_runtime_options(
+        diagnostics_path,
+        default_window_size=int(observation_shape[0] if observation_shape else 1),
+    )
+    if diagnostics_path is None:
+        log.warning(
+            "Training diagnostics path missing in manifest for %s; using default runtime guard settings.",
+            symbol,
+        )
+    elif not diagnostics_path.exists():
+        log.warning(
+            "Training diagnostics file missing for %s at %s; using default runtime guard settings.",
+            symbol,
+            diagnostics_path,
+        )
+    else:
+        diagnostics_payload = load_json_report(diagnostics_path)
+        missing_keys = [key for key in TRAINING_RUNTIME_OPTION_KEYS if key not in diagnostics_payload]
+        if missing_keys:
+            log.warning(
+                "Training diagnostics for %s are incomplete; default runtime guard values used for keys: %s",
+                symbol,
+                ", ".join(missing_keys),
+            )
     feature_engine = FeatureEngine.from_scaler(scaler)  # validated above
     feature_engine.warm_up(_load_warmup_bars(symbol, ticks_per_bar))
 

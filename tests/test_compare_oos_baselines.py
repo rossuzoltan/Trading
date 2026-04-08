@@ -149,6 +149,8 @@ class CompareOosBaselinesTests(unittest.TestCase):
         results = baseline_tool._evaluate_runtime_baselines(replay_context=context)
 
         self.assertIn("runtime_flat", results)
+        self.assertIn("runtime_always_long", results)
+        self.assertIn("runtime_always_short", results)
         self.assertIn("runtime_mean_reversion", results)
         self.assertIn("runtime_trend", results)
         self.assertEqual(0, int(results["runtime_flat"]["metrics"]["trade_count"]))
@@ -161,6 +163,8 @@ class CompareOosBaselinesTests(unittest.TestCase):
             "validation_status": {"passed": True},
         }
         stress_side_effects = [
+            {"metrics": {"trade_count": 12, "net_pnl_usd": 7.5, "validation_status": {"passed": True}}},
+            {"metrics": {"trade_count": 10, "net_pnl_usd": 25.0, "validation_status": {"passed": True}}},
             {"metrics": {"trade_count": 10, "net_pnl_usd": 5.0, "validation_status": {"passed": True}}},
             {"metrics": {"trade_count": 10, "net_pnl_usd": -1.0, "validation_status": {"passed": True}}},
         ]
@@ -179,6 +183,29 @@ class CompareOosBaselinesTests(unittest.TestCase):
         self.assertTrue(verdict["fragile_under_cost_stress"])
         self.assertIn("1.5x", verdict["slippage_stress"])
         self.assertIn("2.0x", verdict["slippage_stress"])
+
+    def test_decision_summary_flags_no_trade_and_concentration_risks(self) -> None:
+        summary = evaluate_oos._build_decision_summary(
+            reject_fast_diagnostics={
+                "cost_share_of_gross_pnl": {"cost_share_of_abs_gross_pnl": 1.2},
+                "expectancy_by_direction": {
+                    "long": {"trade_count": 0.0, "expectancy_usd": 0.0},
+                    "short": {"trade_count": 10.0, "expectancy_usd": 2.0},
+                },
+                "pnl_concentration": {"top_3_share_of_abs_net_pnl": 0.9},
+            },
+            runtime_parity_verdict={
+                "best_runtime_baseline": "runtime_flat",
+                "fragile_under_cost_stress": True,
+            },
+        )
+
+        self.assertEqual("reject_trade_deployment", summary["verdict"])
+        self.assertIn("overtrading_or_weak_entry_quality", summary["flags"])
+        self.assertIn("direction_concentration", summary["flags"])
+        self.assertIn("pnl_concentrated_in_few_trades", summary["flags"])
+        self.assertIn("fragile_under_slippage_stress", summary["flags"])
+        self.assertIn("no_trade_baseline_preferred", summary["flags"])
 
     def test_build_baseline_comparison_uses_replay_context_fallback(self) -> None:
         context = self._build_context()
@@ -210,6 +237,11 @@ class CompareOosBaselinesTests(unittest.TestCase):
                 ),
                 patch.object(
                     baseline_tool,
+                    "load_json_report",
+                    return_value={"replay_metrics": {"trade_count": 9.0, "net_pnl_usd": 12.5, "profit_factor": 1.3}},
+                ),
+                patch.object(
+                    baseline_tool,
                     "_shared_build_runtime_parity_verdict",
                     return_value={
                         "best_runtime_baseline": "runtime_flat",
@@ -224,7 +256,16 @@ class CompareOosBaselinesTests(unittest.TestCase):
             self.assertTrue(report_path.exists())
 
         self.assertEqual("mean_reversion", report["best_baseline"])
-        self.assertIn(report["best_runtime_baseline"], {"runtime_flat", "runtime_mean_reversion", "runtime_trend"})
+        self.assertIn(
+            report["best_runtime_baseline"],
+            {
+                "runtime_flat",
+                "runtime_always_long",
+                "runtime_always_short",
+                "runtime_mean_reversion",
+                "runtime_trend",
+            },
+        )
         self.assertIn("runtime_holdout_models", report)
         self.assertIn("runtime_parity_verdict", report)
         self.assertAlmostEqual(7.0, float(report["cost_profile"]["commission_per_lot"]))

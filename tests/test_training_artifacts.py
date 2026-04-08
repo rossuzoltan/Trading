@@ -5,21 +5,29 @@ import shutil
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 from uuid import uuid4
 
+import train_agent
 from artifact_manifest import create_manifest, load_manifest, save_manifest
-from evaluate_oos import _resolve_execution_cost_profile, _resolve_reward_profile
-from runtime_common import ActionSpec, ActionType, build_trade_metric_reconciliation
+from evaluate_oos import _resolve_checkpoint_diagnostics_path, _resolve_execution_cost_profile, _resolve_reward_profile
+from runtime_common import ActionSpec, ActionType, build_trade_metric_reconciliation, runtime_options_from_training_payload
 from train_agent import (
     AdaptiveKLLearningRateCallback,
+    FullPathEvalCallback,
     TrainingDiagnosticsCallback,
+    aggregate_training_diagnostics,
     _archive_paths,
+    _baseline_competition_blockers,
+    _baseline_reference_from_report,
     _build_promoted_training_diagnostics,
     _candidate_scaler_artifact_path,
     _clear_legacy_checkpoint_artifacts,
     _deployment_candidate_rank,
     _holdout_deployment_blockers,
     _load_training_resume_state,
+    _publish_primary_candidate_artifacts,
+    _readiness_integrity_blockers,
     _recover_completed_fold_state,
     _resume_model_checkpoint_path,
     _resume_vecnormalize_checkpoint_path,
@@ -130,8 +138,8 @@ class TrainingArtifactTests(unittest.TestCase):
             )
         )
 
-        callback._on_step()
-        callback._on_step()
+        callback._on_rollout_end()
+        callback._on_rollout_end()
 
         self.assertEqual([0.02], callback.metrics["train/approx_kl"])
         self.assertEqual([0.15], callback.metrics["train/explained_variance"])
@@ -170,7 +178,7 @@ class TrainingArtifactTests(unittest.TestCase):
         callback.num_timesteps = 4096
 
         callback._on_training_start()
-        callback._on_step()
+        callback._on_rollout_end()
 
         expected_lr = min(4e-4 * 2.0, 1e-3)
         self.assertAlmostEqual(expected_lr, callback.current_base_lr)
@@ -178,6 +186,63 @@ class TrainingArtifactTests(unittest.TestCase):
         self.assertAlmostEqual(expected_lr, callback.model.lr_schedule(0.9))
         self.assertAlmostEqual(expected_lr, callback.model.lr_schedule(0.1))
         self.assertAlmostEqual(expected_lr, optimizer.param_groups[0]["lr"])
+
+    def test_baseline_competition_blockers_require_rl_to_match_positive_baseline(self):
+        blockers = _baseline_competition_blockers(
+            current_metrics={"net_pnl_usd": -10.0, "expectancy_usd": -0.5},
+            baseline_metrics={"trade_count": 12, "net_pnl_usd": 25.0, "expectancy_usd": 1.2},
+        )
+        self.assertTrue(any("net pnl" in blocker.lower() for blocker in blockers))
+        self.assertTrue(any("expectancy" in blocker.lower() for blocker in blockers))
+
+    def test_baseline_competition_blockers_ignore_non_profitable_baseline(self):
+        blockers = _baseline_competition_blockers(
+            current_metrics={"net_pnl_usd": -10.0, "expectancy_usd": -0.5},
+            baseline_metrics={"trade_count": 12, "net_pnl_usd": -25.0, "expectancy_usd": -1.2},
+        )
+        self.assertEqual([], blockers)
+
+    def test_baseline_reference_ignores_non_parity_report(self):
+        name, metrics = _baseline_reference_from_report(
+            {
+                "execution_parity": False,
+                "passing_models": ["mean_reversion"],
+                "holdout_metrics": {
+                    "models": {
+                        "mean_reversion": {
+                            "metrics": {
+                                "trade_count": 12,
+                                "net_pnl_usd": 25.0,
+                                "expectancy_usd": 1.2,
+                            }
+                        }
+                    }
+                },
+            }
+        )
+        self.assertIsNone(name)
+        self.assertEqual({}, metrics)
+
+    def test_readiness_integrity_blockers_require_pti_and_exact_runtime_baseline(self):
+        blockers = _readiness_integrity_blockers(
+            point_in_time_verified=False,
+            require_rl_beat_baseline=True,
+            baseline_reference_name=None,
+            baseline_reference_execution_parity=False,
+        )
+
+        self.assertTrue(any("point-in-time" in blocker.lower() for blocker in blockers))
+        self.assertTrue(any("exact-runtime baseline" in blocker.lower() for blocker in blockers))
+
+    def test_readiness_integrity_blockers_clear_when_truth_requirements_met(self):
+        blockers = _readiness_integrity_blockers(
+            point_in_time_verified=True,
+            require_rl_beat_baseline=True,
+            baseline_reference_name="runtime_mean_reversion",
+            baseline_reference_execution_parity=True,
+        )
+
+        self.assertEqual([], blockers)
 
     def test_holdout_blockers_include_trade_quality_checks(self):
         blockers = _holdout_deployment_blockers(
@@ -250,6 +315,242 @@ class TrainingArtifactTests(unittest.TestCase):
             self.assertEqual(50000 - 12345, state["remaining_timesteps_hint"])
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_publish_primary_candidate_artifacts_archives_existing_canonical_files(self):
+        tmpdir = make_test_dir("publish_candidate")
+        model_dir = tmpdir / "models"
+        model_dir.mkdir(parents=True, exist_ok=True)
+        dataset_path = tmpdir / "dataset.csv"
+        dataset_path.write_text("timestamp,Close\n", encoding="utf-8")
+
+        model_artifact_path = model_dir / "model_eurusd_best.zip"
+        vecnormalize_artifact_path = model_dir / "model_eurusd_best_vecnormalize.pkl"
+        canonical_scaler_path = model_dir / "scaler_EURUSD.pkl"
+        canonical_manifest_path = model_dir / "artifact_manifest_EURUSD.json"
+        default_manifest_path = model_dir / "artifact_manifest.json"
+        canonical_diagnostics_path = model_dir / "training_diagnostics_eurusd.json"
+        canonical_gate_path = model_dir / "gate_report_eurusd.json"
+        canonical_live_path = model_dir / "live_preflight_eurusd.json"
+        canonical_ops_path = model_dir / "ops_attestation_eurusd.json"
+        for path, content in (
+            (model_artifact_path, "old-model"),
+            (vecnormalize_artifact_path, "old-vec"),
+            (canonical_scaler_path, "old-scaler"),
+            (canonical_manifest_path, "{}"),
+            (default_manifest_path, "{}"),
+            (canonical_diagnostics_path, "{\"canonical\": true}"),
+            (canonical_gate_path, "{}"),
+            (canonical_live_path, "{}"),
+            (canonical_ops_path, "{}"),
+        ):
+            path.write_text(content, encoding="utf-8")
+
+        candidate_model_source = tmpdir / "candidate_model.zip"
+        candidate_vecnormalize_source = tmpdir / "candidate_vec.pkl"
+        candidate_scaler_source = tmpdir / "candidate_scaler.pkl"
+        candidate_model_source.write_text("new-model", encoding="utf-8")
+        candidate_vecnormalize_source.write_text("new-vec", encoding="utf-8")
+        candidate_scaler_source.write_text("new-scaler", encoding="utf-8")
+
+        try:
+            with patch("train_agent.TRAIN_MODEL_DIR", model_dir):
+                archived_paths = _publish_primary_candidate_artifacts(
+                    primary_symbol="EURUSD",
+                    model_artifact_path=model_artifact_path,
+                    vecnormalize_artifact_path=vecnormalize_artifact_path,
+                    candidate_model_source=candidate_model_source,
+                    candidate_vecnormalize_source=candidate_vecnormalize_source,
+                    candidate_scaler_source=candidate_scaler_source,
+                    holdout_start_utc="2024-01-01T00:00:00+00:00",
+                    dataset_path=dataset_path,
+                    run_id="run-archive-test",
+                    execution_cost_profile={"slippage_pips": 1.0, "commission_per_lot": 7.0},
+                    reward_profile={"minimal_post_cost_reward": True},
+                )
+
+            archive_root = model_dir / "archive" / "eurusd" / "run-archive-test"
+            self.assertTrue(archived_paths)
+            self.assertTrue(archive_root.exists())
+            self.assertEqual("new-model", model_artifact_path.read_text(encoding="utf-8"))
+            self.assertEqual("new-vec", vecnormalize_artifact_path.read_text(encoding="utf-8"))
+            self.assertEqual("new-scaler", canonical_scaler_path.read_text(encoding="utf-8"))
+            self.assertTrue((archive_root / "training_diagnostics_eurusd.json").exists())
+            self.assertTrue((archive_root / "model_eurusd_best.zip").exists())
+            self.assertTrue(canonical_manifest_path.exists())
+            self.assertTrue(default_manifest_path.exists())
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_runtime_options_from_training_payload_preserves_truth_flags(self):
+        options = runtime_options_from_training_payload(
+            {
+                "training_window_size": 8,
+                "training_alpha_gate_enabled": True,
+                "training_minimal_post_cost_reward": True,
+                "training_force_fast_window_benchmark": True,
+            }
+        )
+
+        self.assertEqual(8, options["window_size"])
+        self.assertTrue(options["alpha_gate_enabled"])
+        self.assertTrue(options["minimal_post_cost_reward"])
+        self.assertTrue(options["force_fast_window_benchmark"])
+
+    def test_runtime_options_from_training_payload_defaults_to_truthful_minimal_reward(self):
+        options = runtime_options_from_training_payload({})
+        self.assertTrue(options["minimal_post_cost_reward"])
+
+    def test_resolve_checkpoint_diagnostics_path_prefers_heartbeat_when_fold_summary_missing(self):
+        tmpdir = make_test_dir("checkpoint_diag_path")
+        try:
+            heartbeat = tmpdir / "training_heartbeat.json"
+            heartbeat.write_text("{}", encoding="utf-8")
+            self.assertEqual(heartbeat, _resolve_checkpoint_diagnostics_path(tmpdir))
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_eval_risk_summary_exposes_flat_delta_and_directional_mode(self):
+        metrics = {
+            "gross_pnl_usd": 12.0,
+            "net_pnl_usd": -3.5,
+            "total_transaction_cost_usd": 15.5,
+            "expectancy_usd": -0.7,
+            "trade_count": 9,
+            "execution_diagnostics": {
+                "action_distribution": {"long": 9, "short": 0},
+                "trade_diagnostics": {},
+            },
+            "segment_metrics": {
+                "first": {"timed_sharpe": 0.1},
+                "middle": {"timed_sharpe": -0.2},
+                "last": {"timed_sharpe": -0.05},
+            },
+        }
+
+        summary = FullPathEvalCallback._build_eval_risk_summary(metrics)
+
+        self.assertEqual("reject_candidate", summary["verdict"])
+        self.assertFalse(summary["beats_flat_baseline"])
+        self.assertAlmostEqual(-3.5, summary["flat_baseline_delta_usd"])
+        self.assertAlmostEqual(-3.5, summary["gross_after_cost_usd"])
+        self.assertEqual("long_only", summary["directional_mode"])
+        self.assertIn("direction_concentration", summary["flags"])
+        self.assertIn("cost_dominates_gross", summary["flags"])
+
+    def test_eval_risk_summary_flags_dominant_direction_even_when_opposite_side_is_nonzero(self):
+        metrics = {
+            "gross_pnl_usd": 55.0,
+            "net_pnl_usd": 4.0,
+            "total_transaction_cost_usd": 51.0,
+            "expectancy_usd": 0.09,
+            "trade_count": 43,
+            "expectancy_by_direction": {
+                "long": {"trade_count": 42.0, "expectancy_usd": 0.12},
+                "short": {"trade_count": 1.0, "expectancy_usd": -0.8},
+            },
+            "pnl_concentration": {
+                "top_3_share_of_abs_net_pnl": 0.91,
+            },
+            "execution_diagnostics": {
+                "action_distribution": {"long": 42, "short": 1},
+                "trade_diagnostics": {},
+            },
+            "segment_metrics": {
+                "first": {"timed_sharpe": 0.04},
+                "middle": {"timed_sharpe": 0.01},
+                "last": {"timed_sharpe": -0.03},
+            },
+        }
+
+        summary = FullPathEvalCallback._build_eval_risk_summary(metrics)
+
+        self.assertIn("direction_concentration", summary["flags"])
+        self.assertIn("thin_post_cost_edge", summary["flags"])
+        self.assertIn("pnl_concentrated_in_few_trades", summary["flags"])
+        self.assertEqual("long_dominant", summary["directional_mode"])
+        self.assertGreater(summary["dominant_direction_share"], 0.95)
+
+    def test_truth_run_fail_fast_condition_requires_truthful_runtime_reject(self):
+        risk_summary = {
+            "verdict": "reject_candidate",
+            "flags": ["negative_expectancy", "policy_update_stalled", "direction_concentration"],
+            "beats_flat_baseline": False,
+            "directional_mode": "long_only",
+            "expectancy_usd": -1.25,
+            "trade_count": 14,
+        }
+
+        with patch.multiple(
+            train_agent,
+            TRAIN_TRUTH_RUN_FAIL_FAST_ENABLED=True,
+            TRAIN_ENV_MODE="runtime",
+            TRAIN_MINIMAL_POST_COST_REWARD=True,
+            TRAIN_REQUIRE_RL_BEAT_BASELINE=True,
+            TRAIN_ALPHA_GATE_ENABLED=False,
+            TRAIN_TRUTH_RUN_FAIL_FAST_WARMUP_STEPS=500_000,
+            TRAIN_TRUTH_RUN_FAIL_FAST_REJECT_STREAK=6,
+        ):
+            triggered, reasons = FullPathEvalCallback._truth_run_fail_fast_condition(
+                risk_summary,
+                num_timesteps=600_000,
+                reject_streak=1,
+            )
+
+        self.assertTrue(triggered)
+        self.assertTrue(any("policy_update_stalled" in reason for reason in reasons))
+
+    def test_truth_run_fail_fast_condition_triggers_on_repeated_concentrated_rejects(self):
+        risk_summary = {
+            "verdict": "reject_candidate",
+            "flags": ["direction_concentration", "thin_post_cost_edge", "pnl_concentrated_in_few_trades"],
+            "beats_flat_baseline": False,
+            "directional_mode": "long_dominant",
+            "dominant_direction_share": 0.96,
+            "expectancy_usd": 0.08,
+            "trade_count": 17,
+        }
+
+        with patch.multiple(
+            train_agent,
+            TRAIN_TRUTH_RUN_FAIL_FAST_ENABLED=True,
+            TRAIN_ENV_MODE="runtime",
+            TRAIN_MINIMAL_POST_COST_REWARD=True,
+            TRAIN_REQUIRE_RL_BEAT_BASELINE=True,
+            TRAIN_ALPHA_GATE_ENABLED=False,
+            TRAIN_TRUTH_RUN_FAIL_FAST_WARMUP_STEPS=500_000,
+            TRAIN_TRUTH_RUN_FAIL_FAST_REJECT_STREAK=4,
+        ):
+            triggered, reasons = FullPathEvalCallback._truth_run_fail_fast_condition(
+                risk_summary,
+                num_timesteps=700_000,
+                reject_streak=4,
+            )
+
+        self.assertTrue(triggered)
+        self.assertTrue(any("directional_mode=long_dominant@96%" in reason for reason in reasons))
+        self.assertTrue(any("thin_post_cost_edge" in reason for reason in reasons))
+        self.assertTrue(any("reject_streak=4" in reason for reason in reasons))
+
+    def test_aggregate_training_diagnostics_ignores_zero_duration_samples_for_median(self):
+        aggregated = aggregate_training_diagnostics(
+            [
+                {
+                    "trade_stats": {
+                        "action_selected_count": 10,
+                        "closed_trade_count": 2,
+                        "position_duration_sum": 12,
+                        "position_duration_count": 2,
+                        "position_durations_sample": [0, 5, 7],
+                    },
+                    "action_counts": {"hold": 8, "long": 2, "short": 0, "close": 0},
+                    "economics": {},
+                    "reward_components": {},
+                }
+            ]
+        )
+
+        self.assertEqual(6.0, aggregated["trade_diagnostics"]["avg_position_duration"])
+        self.assertEqual(6.0, aggregated["trade_diagnostics"]["median_position_duration"])
 
     def test_load_training_resume_state_ignores_terminal_stopped_and_collapsed_runs(self):
         tmpdir = make_test_dir("resume_state_terminal")
@@ -398,6 +699,7 @@ class TrainingArtifactTests(unittest.TestCase):
                 "transaction_penalty": 0.8,
                 "reward_clip_low": -4.0,
                 "reward_clip_high": 4.0,
+                "minimal_post_cost_reward": True,
             },
             _resolve_reward_profile(manifest),
         )

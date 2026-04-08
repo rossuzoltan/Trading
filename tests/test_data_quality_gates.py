@@ -249,6 +249,33 @@ class DataQualityGateTests(unittest.TestCase):
         self.assertTrue(any("TRAIN_NUM_ENVS=1" in warning for warning in warnings))
         self.assertTrue(any("TRAIN_FORCE_DUMMY_VEC=1" in warning for warning in warnings))
 
+    def test_windows_subproc_disables_shared_memmap_buffers(self):
+        try:
+            from train_agent import resolve_shared_dataset_buffers
+        except Exception as exc:  # pragma: no cover - workspace import guard
+            self.skipTest(f"train_agent import unavailable: {exc}")
+        enabled, note = resolve_shared_dataset_buffers(
+            enabled=True,
+            vec_env_type="subproc",
+            platform_name="win32",
+        )
+        self.assertFalse(enabled)
+        self.assertIsNotNone(note)
+        self.assertIn("Windows SubprocVecEnv", str(note))
+
+    def test_non_windows_or_dummy_keeps_shared_dataset_buffers(self):
+        try:
+            from train_agent import resolve_shared_dataset_buffers
+        except Exception as exc:  # pragma: no cover - workspace import guard
+            self.skipTest(f"train_agent import unavailable: {exc}")
+        enabled, note = resolve_shared_dataset_buffers(
+            enabled=True,
+            vec_env_type="dummy",
+            platform_name="win32",
+        )
+        self.assertTrue(enabled)
+        self.assertIsNone(note)
+
     def test_bar_spec_default_is_2000(self):
         with patch.dict("os.environ", {}, clear=True):
             self.assertEqual(2000, resolve_bar_construction_ticks_per_bar("BAR_SPEC_TICKS_PER_BAR", "TRADING_TICKS_PER_BAR"))

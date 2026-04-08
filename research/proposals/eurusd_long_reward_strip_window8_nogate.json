@@ -1,0 +1,20 @@
+{
+  "experiment_name": "eurusd_long_reward_strip_window8_nogate",
+  "symbol": "EURUSD",
+  "timesteps": 450000,
+  "rationale": "Longer unattended EURUSD follow-up using the safer reward-strip window8 setup with alpha gate disabled.",
+  "overrides": {
+    "TRAIN_EXPERIMENT_PROFILE": "reward_strip_rehab_safer_alpha_gate",
+    "TRAIN_WINDOW_SIZE": 8,
+    "TRAIN_CHURN_MIN_HOLD_BARS": 8,
+    "TRAIN_CHURN_ACTION_COOLDOWN": 5,
+    "TRAIN_ALPHA_GATE_ENABLED": false
+  },
+  "tags": [
+    "long",
+    "followup",
+    "nogate",
+    "eurusd"
+  ],
+  "parent_experiment": "eurusd_reward_strip_window8"
+}

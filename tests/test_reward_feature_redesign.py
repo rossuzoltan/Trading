@@ -49,7 +49,7 @@ class RewardFeatureRedesignTests(unittest.TestCase):
             self._allow_long = bool(allow_long)
             self._allow_short = bool(allow_short)
 
-        def allowed_directions(self, row):
+        def allowed_directions(self, row, threshold_override=None, margin_override=None):
             return self._allow_long, self._allow_short, {"long_score": 0.9 if self._allow_long else 0.1, "short_score": 0.9 if self._allow_short else 0.1}
 
     def _make_runtime_engine(self) -> RuntimeEngine:
@@ -391,7 +391,7 @@ class RewardFeatureRedesignTests(unittest.TestCase):
             bars_frame=history,
             scaler=scaler,
             action_map=action_map,
-            config=RuntimeGymConfig(random_start=False, slippage_pips=0.1),
+            config=RuntimeGymConfig(random_start=False, slippage_pips=0.1, minimal_post_cost_reward=False),
             recovery_config={
                 "participation_bonus": {
                     "enabled": True,
@@ -443,6 +443,49 @@ class RewardFeatureRedesignTests(unittest.TestCase):
         self.assertTrue(mask[0])
         self.assertFalse(mask[2])
         self.assertFalse(mask[3])
+
+    def test_runtime_env_minimal_reward_zeros_shaping_penalty_fields(self) -> None:
+        history = _make_history(rows=320)
+        raw = _compute_raw(history).dropna(subset=FEATURE_COLS)
+        scaler = StandardScaler().fit(raw.loc[:, FEATURE_COLS])
+        action_map = build_action_map([0.5], [0.5])
+        env = RuntimeGymEnv(
+            symbol="EURUSD",
+            bars_frame=history,
+            scaler=scaler,
+            action_map=action_map,
+            config=RuntimeGymConfig(random_start=False, slippage_pips=0.1, minimal_post_cost_reward=True),
+        )
+
+        env.reset(seed=7)
+        _, reward, terminated, truncated, info = env.step(2)
+
+        self.assertFalse(terminated)
+        self.assertFalse(truncated)
+        reward_components = info["reward_components"]
+        self.assertAlmostEqual(
+            float(info["equity"]) - 1_000.0,
+            float(reward),
+            places=6,
+        )
+        for key in (
+            "participation_bonus_applied",
+            "slippage_penalty_applied",
+            "drawdown_penalty_applied",
+            "transaction_penalty_applied",
+            "turnover_penalty_applied",
+            "downside_risk_penalty_applied",
+            "rapid_reversal_penalty_applied",
+            "holding_penalty_applied",
+            "net_return_adjustment_applied",
+        ):
+            self.assertEqual(0.0, float(reward_components[key]))
+        diagnostics = env.get_training_diagnostics()
+        components = diagnostics["reward_components"]
+        self.assertEqual(0.0, float(components["slippage_penalty_sum"]))
+        self.assertEqual(0.0, float(components["drawdown_penalty_sum"]))
+        self.assertEqual(0.0, float(components["turnover_penalty_sum"]))
+        self.assertEqual(0.0, float(components["downside_risk_penalty_sum"]))
 
     def test_runtime_env_action_masks_ignore_stale_buffer_when_raw_features_are_current(self) -> None:
         history = _make_history(rows=320)

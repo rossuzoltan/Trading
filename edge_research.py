@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,12 @@ from sklearn.preprocessing import StandardScaler
 from symbol_utils import pip_value_for_volume, price_to_pips
 
 
+EDGE_RESEARCH_PERF: dict[str, float] = {
+    "prepare_targets_calls": 0,
+    "prepare_targets_total_ns": 0,
+}
+
+
 @dataclass
 class BaselineAlphaGate:
     symbol: str
@@ -26,6 +33,12 @@ class BaselineAlphaGate:
     long_model: Pipeline | None = None
     short_model: Pipeline | None = None
     signed_model: Pipeline | None = None
+    fit_trade_count: float = 0.0
+    fit_long_trade_count: float = 0.0
+    fit_short_trade_count: float = 0.0
+    fit_expectancy_usd: float = 0.0
+    fit_profit_factor: float = 0.0
+    fit_quality_passed: bool = False
 
     def score_row(self, row: pd.Series | dict[str, Any]) -> dict[str, float]:
         features = np.asarray(
@@ -44,16 +57,28 @@ class BaselineAlphaGate:
             scores["signed_score"] = float(self.signed_model.predict(features)[0])
         return scores
 
-    def allowed_directions(self, row: pd.Series | dict[str, Any]) -> tuple[bool, bool, dict[str, float]]:
+    def allowed_directions(
+        self,
+        row: pd.Series | dict[str, Any],
+        *,
+        threshold_override: float | None = None,
+        margin_override: float | None = None,
+    ) -> tuple[bool, bool, dict[str, float]]:
         scores = self.score_row(row)
         if self.model_kind == "logistic_pair":
             long_score = float(scores["long_score"])
             short_score = float(scores["short_score"])
-            allow_long = long_score >= float(self.probability_threshold) and (
-                (long_score - short_score) >= float(self.probability_margin)
+            effective_threshold = float(
+                self.probability_threshold if threshold_override is None else threshold_override
             )
-            allow_short = short_score >= float(self.probability_threshold) and (
-                (short_score - long_score) >= float(self.probability_margin)
+            effective_margin = float(
+                self.probability_margin if margin_override is None else margin_override
+            )
+            allow_long = long_score >= effective_threshold and (
+                (long_score - short_score) >= effective_margin
+            )
+            allow_short = short_score >= effective_threshold and (
+                (short_score - long_score) >= effective_margin
             )
             return bool(allow_long), bool(allow_short), scores
         if self.model_kind == "ridge_signed_target":
@@ -90,6 +115,7 @@ def _prepare_targets(
     slippage_pips: float,
     min_edge_pips: float,
 ) -> pd.DataFrame:
+    start_ns = time.perf_counter_ns()
     dataset = _ensure_cost_columns(frame)
     required = [*feature_cols, "Close", "Open", "avg_spread"]
     missing = [column for column in required if column not in dataset.columns]
@@ -103,6 +129,8 @@ def _prepare_targets(
     prepared["exit_spread"] = prepared["avg_spread"].shift(-horizon_bars).fillna(prepared["avg_spread"])
     prepared = prepared.replace([np.inf, -np.inf], np.nan).dropna()
     if prepared.empty:
+        EDGE_RESEARCH_PERF["prepare_targets_calls"] += 1
+        EDGE_RESEARCH_PERF["prepare_targets_total_ns"] += max(time.perf_counter_ns() - start_ns, 0)
         return prepared
 
     raw_move_pips = prepared.apply(
@@ -132,6 +160,8 @@ def _prepare_targets(
         prepared["long_net_pips"],
         -prepared["short_net_pips"],
     )
+    EDGE_RESEARCH_PERF["prepare_targets_calls"] += 1
+    EDGE_RESEARCH_PERF["prepare_targets_total_ns"] += max(time.perf_counter_ns() - start_ns, 0)
     return prepared
 
 
@@ -236,6 +266,48 @@ def _choose_probability_threshold(
     return best
 
 
+def _alpha_gate_quality_report(
+    metrics: dict[str, Any],
+    *,
+    min_trade_count: int,
+    min_directional_trade_count: int,
+    max_single_direction_fraction: float,
+) -> dict[str, Any]:
+    trade_count = int(float(metrics.get("trade_count", 0.0) or 0.0))
+    long_trade_count = int(float(metrics.get("long_trade_count", 0.0) or 0.0))
+    short_trade_count = int(float(metrics.get("short_trade_count", 0.0) or 0.0))
+    expectancy_usd = float(metrics.get("expectancy_usd", 0.0) or 0.0)
+    profit_factor = float(metrics.get("profit_factor", 0.0) or 0.0)
+    dominant_direction = max(long_trade_count, short_trade_count)
+    dominant_fraction = (
+        float(dominant_direction) / float(trade_count)
+        if trade_count > 0
+        else 1.0
+    )
+    directionally_balanced = (
+        long_trade_count >= int(min_directional_trade_count)
+        and short_trade_count >= int(min_directional_trade_count)
+    )
+    economically_viable = expectancy_usd > 0.0 and profit_factor > 1.0
+    quality_passed = (
+        trade_count >= int(min_trade_count)
+        and dominant_fraction <= float(max_single_direction_fraction)
+        and directionally_balanced
+        and economically_viable
+    )
+    return {
+        "trade_count": trade_count,
+        "long_trade_count": long_trade_count,
+        "short_trade_count": short_trade_count,
+        "expectancy_usd": expectancy_usd,
+        "profit_factor": profit_factor,
+        "dominant_direction_fraction": float(dominant_fraction),
+        "directionally_balanced": bool(directionally_balanced),
+        "economically_viable": bool(economically_viable),
+        "quality_passed": bool(quality_passed),
+    }
+
+
 def _fit_probability_pair(x_train: np.ndarray, frame_train: pd.DataFrame) -> tuple[Pipeline | None, Pipeline | None]:
     if frame_train["long_target"].nunique() < 2 or frame_train["short_target"].nunique() < 2:
         return None, None
@@ -268,6 +340,9 @@ def fit_baseline_alpha_gate(
     probability_threshold: float,
     probability_margin: float,
     model_preference: str = "auto",
+    min_trade_count: int = 20,
+    min_directional_trade_count: int = 4,
+    max_single_direction_fraction: float = 0.90,
 ) -> BaselineAlphaGate | None:
     prepared_train = _prepare_targets(
         train_frame,
@@ -286,22 +361,77 @@ def fit_baseline_alpha_gate(
     if preference in {"auto", "logistic_pair"}:
         logistic_long, logistic_short = _fit_probability_pair(x_train, prepared_train)
         if logistic_long is not None and logistic_short is not None:
-            return BaselineAlphaGate(
-                symbol=str(symbol).upper(),
-                feature_cols=tuple(feature_cols),
-                model_kind="logistic_pair",
-                probability_threshold=float(probability_threshold),
-                probability_margin=float(probability_margin),
-                min_edge_pips=float(min_edge_pips),
-                long_model=logistic_long,
-                short_model=logistic_short,
+            long_train = np.asarray(logistic_long.predict_proba(x_train)[:, 1], dtype=np.float64)
+            short_train = np.asarray(logistic_short.predict_proba(x_train)[:, 1], dtype=np.float64)
+            selected = _choose_probability_threshold(
+                frame=prepared_train,
+                symbol=symbol,
+                horizon_bars=horizon_bars,
+                long_scores=long_train,
+                short_scores=short_train,
+                probability_threshold=probability_threshold,
+                probability_margin=probability_margin,
             )
+            quality = _alpha_gate_quality_report(
+                selected["metrics"],
+                min_trade_count=min_trade_count,
+                min_directional_trade_count=min_directional_trade_count,
+                max_single_direction_fraction=max_single_direction_fraction,
+            )
+            if quality["quality_passed"]:
+                selected_metrics = dict(selected["metrics"] or {})
+                return BaselineAlphaGate(
+                    symbol=str(symbol).upper(),
+                    feature_cols=tuple(feature_cols),
+                    model_kind="logistic_pair",
+                    probability_threshold=float(selected["threshold"]),
+                    probability_margin=float(probability_margin),
+                    min_edge_pips=float(min_edge_pips),
+                    long_model=logistic_long,
+                    short_model=logistic_short,
+                    fit_trade_count=float(quality["trade_count"]),
+                    fit_long_trade_count=float(quality["long_trade_count"]),
+                    fit_short_trade_count=float(quality["short_trade_count"]),
+                    fit_expectancy_usd=float(selected_metrics.get("expectancy_usd", 0.0)),
+                    fit_profit_factor=float(selected_metrics.get("profit_factor", 0.0)),
+                    fit_quality_passed=True,
+                )
+            if preference == "logistic_pair":
+                return BaselineAlphaGate(
+                    symbol=str(symbol).upper(),
+                    feature_cols=tuple(feature_cols),
+                    model_kind="logistic_pair",
+                    probability_threshold=float(selected["threshold"]),
+                    probability_margin=float(probability_margin),
+                    min_edge_pips=float(min_edge_pips),
+                    long_model=logistic_long,
+                    short_model=logistic_short,
+                    fit_trade_count=float(quality["trade_count"]),
+                    fit_long_trade_count=float(quality["long_trade_count"]),
+                    fit_short_trade_count=float(quality["short_trade_count"]),
+                    fit_expectancy_usd=float(dict(selected["metrics"] or {}).get("expectancy_usd", 0.0)),
+                    fit_profit_factor=float(dict(selected["metrics"] or {}).get("profit_factor", 0.0)),
+                    fit_quality_passed=False,
+                )
         if preference == "logistic_pair":
             return None
 
     if preference in {"auto", "ridge_signed_target", "ridge"}:
         ridge = Pipeline(steps=[("scaler", StandardScaler()), ("model", Ridge(alpha=1.0))])
         ridge.fit(x_train, prepared_train["signed_target"].to_numpy(dtype=np.float64))
+        ridge_train = np.asarray(ridge.predict(x_train), dtype=np.float64)
+        ridge_signals = np.zeros(len(prepared_train), dtype=np.int8)
+        ridge_signals[ridge_train >= min_edge_pips] = 1
+        ridge_signals[ridge_train <= -min_edge_pips] = -1
+        ridge_metrics = _simulate_signals(prepared_train, ridge_signals, symbol=symbol, horizon_bars=horizon_bars)
+        ridge_quality = _alpha_gate_quality_report(
+            ridge_metrics,
+            min_trade_count=min_trade_count,
+            min_directional_trade_count=min_directional_trade_count,
+            max_single_direction_fraction=max_single_direction_fraction,
+        )
+        if not ridge_quality["quality_passed"]:
+            return None
         return BaselineAlphaGate(
             symbol=str(symbol).upper(),
             feature_cols=tuple(feature_cols),
@@ -310,6 +440,12 @@ def fit_baseline_alpha_gate(
             probability_margin=float(probability_margin),
             min_edge_pips=float(min_edge_pips),
             signed_model=ridge,
+            fit_trade_count=float(ridge_quality["trade_count"]),
+            fit_long_trade_count=float(ridge_quality["long_trade_count"]),
+            fit_short_trade_count=float(ridge_quality["short_trade_count"]),
+            fit_expectancy_usd=float(ridge_metrics.get("expectancy_usd", 0.0)),
+            fit_profit_factor=float(ridge_metrics.get("profit_factor", 0.0)),
+            fit_quality_passed=True,
         )
     return None
 
@@ -571,6 +707,11 @@ def run_edge_baseline_research(
 
     report = {
         "symbol": str(symbol).upper(),
+        "execution_parity": False,
+        "parity_note": (
+            "Research baseline economics use simplified non-parity pip math and are "
+            "not execution-path identical to RuntimeEngine/ReplayBroker results."
+        ),
         "target_definition": {
             "type": "cost_adjusted_tradability",
             "horizon_bars": int(horizon_bars),

@@ -1,50 +1,56 @@
 # Next Agent Context
 
-## Goal
-- Continue the trading-bot hardening work with minimal re-analysis.
-- Current focus: train and evaluate **per-symbol** models, then repair the thin EURUSD/GBPUSD raw data if needed.
+## Current Goal
+- Continue the Bot v1 RC1 hardening path, not the older PPO investigation track.
+- Current focus:
+  - RC1 artifact generation and certification for the approved paper-live candidates
+  - shadow-mode execution tracing for the rule-first selector path
 
-## Do Not Re-Audit
-- The shared event-driven runtime refactor is already in place.
-- The regression suite scope has expanded; always rerun tests in the local workspace before assuming green state.
-- The current blocker is strategy/data quality, not the live-bridge architecture.
+## Approved RC1 Scope
+- `EURUSD` at `5000` ticks/bar is approved as an RC1 paper-live candidate.
+- `GBPUSD` at `10000` ticks/bar is approved as an RC1 paper-live candidate.
+- `USDJPY` is explicitly demoted back to challenger status.
 
-## Current Repo State
-- Runtime/test stack is stabilized.
-- `train_agent.py` is now **symbol-scoped** via `TRAIN_SYMBOL`.
-- `evaluate_oos.py` is now **symbol-scoped** via `EVAL_SYMBOL`.
-- `download_dukascopy.py` now supports retries and `--force-refresh-pairs`.
+## Current Architecture
+- `strategies/rule_logic.py` is the single source of truth for deterministic entry logic.
+- `rule_selector.py` is the manifest-driven rule consumer and gate enforcer.
+- `selector_manifest.py` is the RC contract for both rule manifests and supervised selector artifacts.
+- `tools/generate_v1_rc.py` builds the RC1 artifact packs.
+- `tools/verify_v1_rc.py` certifies parity, baseline comparisons, and truth-engine drift.
+- `runtime/shadow_broker.py` is the shadow-mode adapter for `RuleSelector` decisions.
+
+## RC1 Safety Contract
+- RC1 manifests are Version `4`.
+- Mandatory RC1 traceability fields:
+  - `release_stage = "paper_live_candidate"`
+  - `live_trading_approved = false`
+  - `evaluator_hash`
+  - `logic_hash`
+  - `manifest_hash`
+- Do not treat RC1 artifacts as live-trading approved.
 
 ## Verified Commands
-- Tests:
-  - `.\.venv\Scripts\python.exe -m unittest discover tests`
-- Note:
-  - Treat older handoff test counts as historical only; use the current local run output as source of truth.
+- Generate and certify RC1 packs:
+  - `.\.venv\Scripts\python.exe .\tools\generate_v1_rc.py`
+- Re-run RC1 certification only:
+  - `.\.venv\Scripts\python.exe .\tools\verify_v1_rc.py`
+- Run targeted RC/shadow tests:
+  - `.\.venv\Scripts\python.exe -m unittest tests.test_rc1_shadow`
+- Run the shadow simulator:
+  - `.\tools\run_shadow_simulator.ps1 -ManifestPath models\rc1\eurusd_5k_v1_mr_rc1\manifest.json`
 
-## Current Data Snapshot
-- `data/EURUSD_ticks.parquet`: `67,477,967` ticks
-- `data/GBPUSD_ticks.parquet`: `70,793,556` ticks
-- `data/USDJPY_ticks.parquet`: `31,399,697` ticks
-- `data/DATA_CLEAN_VOLUME.csv` symbol rows:
-  - `USDJPY`: `15,700`
-  - `GBPUSD`: `35,397`
-  - `EURUSD`: `33,739`
+## Current Expectations
+- Every RC1 pack should contain:
+  - `manifest.json`
+  - `release_notes_rc1.md`
+  - `baseline_scoreboard_rc1.json`
+  - `baseline_scoreboard_rc1.md`
+- `tools/verify_v1_rc.py` must fail if `evaluate_oos.py` or `strategies/rule_logic.py` drift from the manifest hashes.
+- Latest verified RC1 regeneration succeeded:
+  - `eurusd_5k_v1_mr_rc1`: net `+$133.42`, `27` trades
+  - `gbpusd_10k_v1_mr_rc1`: net `+$111.81`, `21` trades
 
-## Important Interpretation
-- The active combined dataset is now a clean `2000` ticks/bar build across `EURUSD`, `GBPUSD`, and `USDJPY`.
-- EURUSD and GBPUSD are no longer thin; the older low-count handoff numbers are obsolete.
-- USDJPY now has fewer bars than the prior mixed-spec dataset because it has been rebuilt at the correct `2000` ticks/bar spec.
-- Use `data/dataset_build_info.json` and `tools/project_healthcheck.py` as the source of truth before a large run.
-
-## Latest Rebuild
-```powershell
-.\.venv\Scripts\python.exe download_dukascopy.py --pairs EURUSD GBPUSD --days 1095 --bar-volume 2000 --force-refresh-pairs EURUSD GBPUSD --max-workers 16
-.\.venv\Scripts\python.exe build_volume_bars.py --ticks-per-bar 2000
-.\.venv\Scripts\python.exe .\tools\project_healthcheck.py
-```
-- Current healthcheck status: dataset integrity OK for `EURUSD`, `GBPUSD`, `USDJPY`.
-
-## User Intent
-- Optimize for correctness first.
-- If needed, download better market data from good sources.
-- Keep the next pass efficient and avoid wasting tokens on re-reading the whole repo.
+## Guardrails
+- Do not re-promote `USDJPY` into RC1 without new evidence.
+- Do not relax `live_trading_approved: false` in the RC manifest path.
+- Do not treat static release notes as truth when the generated scoreboards disagree; the generated scoreboards are the certification artifacts.

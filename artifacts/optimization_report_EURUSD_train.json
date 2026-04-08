@@ -1,0 +1,1477 @@
+{
+  "hashes": {
+    "manifest": "2c52c411",
+    "evaluator": "3434c70a",
+    "rule_logic": "5ae99788"
+  },
+  "results": [
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "threshold": 0.8
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.68 < 1.25) | Negative Expectancy ($-2.34) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -51.52738396580651,
+      "pf": 0.6824530494199826,
+      "expectancy": -2.3421538166275684,
+      "trades": 22,
+      "win_rate": 0.2727272727272727,
+      "max_dd": 0.07563966886576116,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "threshold": 1.0
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.85 < 1.25) | Negative Expectancy ($-1.07) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -52.25731837813839,
+      "pf": 0.8512539789296156,
+      "expectancy": -1.0664758852681304,
+      "trades": 49,
+      "win_rate": 0.32653061224489793,
+      "max_dd": 0.08023794923039623,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "threshold": 1.2
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.94 < 1.25) | Negative Expectancy ($-0.40) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -26.81853593833307,
+      "pf": 0.9443759057843945,
+      "expectancy": -0.40027665579601596,
+      "trades": 67,
+      "win_rate": 0.34328358208955223,
+      "max_dd": 0.09873962792388036,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "threshold": 1.5
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Too few trades (1 < 10) | Low PF (0.00 < 1.25) | Negative Expectancy ($-7.19)",
+      "net_pnl": -7.187519648544708,
+      "pf": 0.0,
+      "expectancy": -7.187519648544708,
+      "trades": 1,
+      "win_rate": 0.0,
+      "max_dd": 0.018007125479836145,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "threshold": 2.0
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Too few trades (4 < 10)",
+      "net_pnl": 19.425966220074315,
+      "pf": 1.930768990607224,
+      "expectancy": 4.856491555018579,
+      "trades": 4,
+      "win_rate": 0.5,
+      "max_dd": 0.023393059164739993,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "price_mean_reversion",
+        "params": {
+          "threshold": 1.0
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.40 < 1.25) | Negative Expectancy ($-5.01) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -50.12494641895455,
+      "pf": 0.4004460572074988,
+      "expectancy": -5.012494641895455,
+      "trades": 10,
+      "win_rate": 0.2,
+      "max_dd": 0.061653994676861945,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "price_mean_reversion",
+        "params": {
+          "threshold": 1.5
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.85 < 1.25) | Negative Expectancy ($-1.13) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -51.89704371806374,
+      "pf": 0.8497766435663211,
+      "expectancy": -1.128196602566603,
+      "trades": 46,
+      "win_rate": 0.32608695652173914,
+      "max_dd": 0.14841028257712202,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "price_mean_reversion",
+        "params": {
+          "threshold": 2.0
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.90 < 1.25) | Negative Expectancy ($-0.77) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -52.0801943961485,
+      "pf": 0.8964509584655674,
+      "expectancy": -0.7658852117080661,
+      "trades": 68,
+      "win_rate": 0.3382352941176471,
+      "max_dd": 0.13618036432261268,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "price_mean_reversion",
+        "params": {
+          "threshold": 2.5
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.65 < 1.25) | Negative Expectancy ($-2.79) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -50.169449484021015,
+      "pf": 0.6460103645365906,
+      "expectancy": -2.7871916380011674,
+      "trades": 18,
+      "win_rate": 0.2777777777777778,
+      "max_dd": 0.10414239872790779,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "price_mean_reversion",
+        "params": {
+          "threshold": 3.0
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.72 < 1.25) | Negative Expectancy ($-2.10) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -42.00336427333491,
+      "pf": 0.7171983666492793,
+      "expectancy": -2.1001682136667457,
+      "trades": 20,
+      "win_rate": 0.3,
+      "max_dd": 0.05622310105893785,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "price_mr_spread_filter",
+        "params": {
+          "threshold": 1.0
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.40 < 1.25) | Negative Expectancy ($-5.01) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -50.12494641895455,
+      "pf": 0.4004460572074988,
+      "expectancy": -5.012494641895455,
+      "trades": 10,
+      "win_rate": 0.2,
+      "max_dd": 0.061653994676861945,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "price_mr_spread_filter",
+        "params": {
+          "threshold": 1.5
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.83 < 1.25) | Negative Expectancy ($-1.24) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -50.776306057181046,
+      "pf": 0.8331882446037433,
+      "expectancy": -1.2384464891995377,
+      "trades": 41,
+      "win_rate": 0.3170731707317073,
+      "max_dd": 0.1345240508237934,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "price_mr_spread_filter",
+        "params": {
+          "threshold": 2.0
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.84 < 1.25) | Negative Expectancy ($-1.19) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -50.006694427277125,
+      "pf": 0.839465154531826,
+      "expectancy": -1.1906355816018364,
+      "trades": 42,
+      "win_rate": 0.30952380952380953,
+      "max_dd": 0.10056059905123342,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "price_mr_spread_filter",
+        "params": {
+          "threshold": 2.5
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.60 < 1.25) | Negative Expectancy ($-3.15) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -50.32641800961346,
+      "pf": 0.597479934338849,
+      "expectancy": -3.1454011256008414,
+      "trades": 16,
+      "win_rate": 0.25,
+      "max_dd": 0.08982165991152037,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "price_mr_spread_filter",
+        "params": {
+          "threshold": 3.0
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 44.376211026583405,
+      "pf": 1.8129157375971097,
+      "expectancy": 4.4376211026583405,
+      "trades": 10,
+      "win_rate": 0.5,
+      "max_dd": 0.03159825437843584,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "combined_mr",
+        "params": {
+          "threshold": 1.0
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.53 < 1.25) | Negative Expectancy ($-3.92) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -50.92122469565595,
+      "pf": 0.5320183528285781,
+      "expectancy": -3.917017284281227,
+      "trades": 13,
+      "win_rate": 0.23076923076923078,
+      "max_dd": 0.0793608835911521,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "combined_mr",
+        "params": {
+          "threshold": 1.2
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.40 < 1.25) | Negative Expectancy ($-5.36) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -58.90508024344388,
+      "pf": 0.40477261004731113,
+      "expectancy": -5.3550072948585346,
+      "trades": 11,
+      "win_rate": 0.18181818181818182,
+      "max_dd": 0.0871054985886736,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "combined_mr",
+        "params": {
+          "threshold": 1.5
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Too few trades (0 < 10) | Low PF (0.00 < 1.25) | Negative Expectancy ($0.00)",
+      "net_pnl": 0.0,
+      "pf": 0.0,
+      "expectancy": 0.0,
+      "trades": 0,
+      "win_rate": 0.0,
+      "max_dd": 0.0,
+      "long_share": 0.0,
+      "short_share": 0.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "combined_mr",
+        "params": {
+          "threshold": 2.0
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Too few trades (0 < 10) | Low PF (0.00 < 1.25) | Negative Expectancy ($0.00)",
+      "net_pnl": 0.0,
+      "pf": 0.0,
+      "expectancy": 0.0,
+      "trades": 0,
+      "win_rate": 0.0,
+      "max_dd": 0.0,
+      "long_share": 0.0,
+      "short_share": 0.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "trend",
+        "params": {
+          "threshold": 0.0
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Too few trades (8 < 10) | Low PF (0.28 < 1.25) | Negative Expectancy ($-6.41)",
+      "net_pnl": -51.28512435745699,
+      "pf": 0.2839927844859065,
+      "expectancy": -6.410640544682124,
+      "trades": 8,
+      "win_rate": 0.125,
+      "max_dd": 0.06980056272609504,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "trend",
+        "params": {
+          "threshold": 0.5
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Too few trades (8 < 10) | Low PF (0.28 < 1.25) | Negative Expectancy ($-6.41)",
+      "net_pnl": -51.28512435745699,
+      "pf": 0.2839927844859065,
+      "expectancy": -6.410640544682124,
+      "trades": 8,
+      "win_rate": 0.125,
+      "max_dd": 0.06980056272609504,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "trend",
+        "params": {
+          "threshold": 1.0
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Too few trades (8 < 10) | Low PF (0.28 < 1.25) | Negative Expectancy ($-6.41)",
+      "net_pnl": -51.28512435745699,
+      "pf": 0.2839927844859065,
+      "expectancy": -6.410640544682124,
+      "trades": 8,
+      "win_rate": 0.125,
+      "max_dd": 0.06980056272609504,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": true,
+          "threshold_up": 0.8,
+          "threshold_down": 0.2
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.83 < 1.25) | Negative Expectancy ($-1.26) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -55.563490821951746,
+      "pf": 0.825398683737487,
+      "expectancy": -1.2628066095898125,
+      "trades": 44,
+      "win_rate": 0.3181818181818182,
+      "max_dd": 0.11382890019365044,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": true,
+          "threshold_up": 0.8,
+          "threshold_down": 0.1
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.83 < 1.25) | Negative Expectancy ($-1.26) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -55.563490821951746,
+      "pf": 0.825398683737487,
+      "expectancy": -1.2628066095898125,
+      "trades": 44,
+      "win_rate": 0.3181818181818182,
+      "max_dd": 0.11382890019365044,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": true,
+          "threshold_up": 0.8,
+          "threshold_down": 0.0
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.83 < 1.25) | Negative Expectancy ($-1.26) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -55.563490821951746,
+      "pf": 0.825398683737487,
+      "expectancy": -1.2628066095898125,
+      "trades": 44,
+      "win_rate": 0.3181818181818182,
+      "max_dd": 0.11382890019365044,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": true,
+          "threshold_up": 0.8,
+          "threshold_down": -0.1
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.83 < 1.25) | Negative Expectancy ($-1.26) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -55.563490821951746,
+      "pf": 0.825398683737487,
+      "expectancy": -1.2628066095898125,
+      "trades": 44,
+      "win_rate": 0.3181818181818182,
+      "max_dd": 0.11382890019365044,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": true,
+          "threshold_up": 0.9,
+          "threshold_down": 0.2
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.83 < 1.25) | Negative Expectancy ($-1.24) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -50.978447442580546,
+      "pf": 0.8327175850158118,
+      "expectancy": -1.2433767668922084,
+      "trades": 41,
+      "win_rate": 0.3170731707317073,
+      "max_dd": 0.13914816208209613,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": true,
+          "threshold_up": 0.9,
+          "threshold_down": 0.1
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.83 < 1.25) | Negative Expectancy ($-1.24) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -50.978447442580546,
+      "pf": 0.8327175850158118,
+      "expectancy": -1.2433767668922084,
+      "trades": 41,
+      "win_rate": 0.3170731707317073,
+      "max_dd": 0.13914816208209613,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": true,
+          "threshold_up": 0.9,
+          "threshold_down": 0.0
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.83 < 1.25) | Negative Expectancy ($-1.24) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -50.978447442580546,
+      "pf": 0.8327175850158118,
+      "expectancy": -1.2433767668922084,
+      "trades": 41,
+      "win_rate": 0.3170731707317073,
+      "max_dd": 0.13914816208209613,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": true,
+          "threshold_up": 0.9,
+          "threshold_down": -0.1
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.83 < 1.25) | Negative Expectancy ($-1.24) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -50.978447442580546,
+      "pf": 0.8327175850158118,
+      "expectancy": -1.2433767668922084,
+      "trades": 41,
+      "win_rate": 0.3170731707317073,
+      "max_dd": 0.13914816208209613,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": true,
+          "threshold_up": 1.0,
+          "threshold_down": 0.2
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.90 < 1.25) | Negative Expectancy ($-0.77) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -52.0801943961485,
+      "pf": 0.8964509584655674,
+      "expectancy": -0.7658852117080661,
+      "trades": 68,
+      "win_rate": 0.3382352941176471,
+      "max_dd": 0.13618036432261268,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": true,
+          "threshold_up": 1.0,
+          "threshold_down": 0.1
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.90 < 1.25) | Negative Expectancy ($-0.77) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -52.0801943961485,
+      "pf": 0.8964509584655674,
+      "expectancy": -0.7658852117080661,
+      "trades": 68,
+      "win_rate": 0.3382352941176471,
+      "max_dd": 0.13618036432261268,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": true,
+          "threshold_up": 1.0,
+          "threshold_down": 0.0
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.90 < 1.25) | Negative Expectancy ($-0.77) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -52.0801943961485,
+      "pf": 0.8964509584655674,
+      "expectancy": -0.7658852117080661,
+      "trades": 68,
+      "win_rate": 0.3382352941176471,
+      "max_dd": 0.13618036432261268,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": true,
+          "threshold_up": 1.0,
+          "threshold_down": -0.1
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.90 < 1.25) | Negative Expectancy ($-0.77) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -52.0801943961485,
+      "pf": 0.8964509584655674,
+      "expectancy": -0.7658852117080661,
+      "trades": 68,
+      "win_rate": 0.3382352941176471,
+      "max_dd": 0.13618036432261268,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": true,
+          "threshold_up": 1.1,
+          "threshold_down": 0.2
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.57 < 1.25) | Negative Expectancy ($-3.41) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -57.97314884947366,
+      "pf": 0.5657251735285662,
+      "expectancy": -3.410185226439627,
+      "trades": 17,
+      "win_rate": 0.23529411764705882,
+      "max_dd": 0.11908199420408083,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": true,
+          "threshold_up": 1.1,
+          "threshold_down": 0.1
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.57 < 1.25) | Negative Expectancy ($-3.41) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -57.97314884947366,
+      "pf": 0.5657251735285662,
+      "expectancy": -3.410185226439627,
+      "trades": 17,
+      "win_rate": 0.23529411764705882,
+      "max_dd": 0.11908199420408083,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": true,
+          "threshold_up": 1.1,
+          "threshold_down": 0.0
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.57 < 1.25) | Negative Expectancy ($-3.41) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -57.97314884947366,
+      "pf": 0.5657251735285662,
+      "expectancy": -3.410185226439627,
+      "trades": 17,
+      "win_rate": 0.23529411764705882,
+      "max_dd": 0.11908199420408083,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": true,
+          "threshold_up": 1.1,
+          "threshold_down": -0.1
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.57 < 1.25) | Negative Expectancy ($-3.41) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -57.97314884947366,
+      "pf": 0.5657251735285662,
+      "expectancy": -3.410185226439627,
+      "trades": 17,
+      "win_rate": 0.23529411764705882,
+      "max_dd": 0.11908199420408083,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": false,
+          "threshold_up": 0.8,
+          "threshold_down": 0.2
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.60 < 1.25) | Negative Expectancy ($-3.17) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -50.75076231613298,
+      "pf": 0.6022644570758905,
+      "expectancy": -3.171922644758311,
+      "trades": 16,
+      "win_rate": 0.25,
+      "max_dd": 0.0757438473507445,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": false,
+          "threshold_up": 0.8,
+          "threshold_down": 0.1
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.99 < 1.25) | Negative Expectancy ($-0.08) | Max DD too high (15.0% > 15%) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -12.0916778981084,
+      "pf": 0.9892628202399176,
+      "expectancy": -0.07851738894875585,
+      "trades": 154,
+      "win_rate": 0.35714285714285715,
+      "max_dd": 0.1504876229643385,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": false,
+          "threshold_up": 0.8,
+          "threshold_down": 0.0
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.42 < 1.25) | Negative Expectancy ($-5.01) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -50.05968464012528,
+      "pf": 0.41967085196301784,
+      "expectancy": -5.005968464012528,
+      "trades": 10,
+      "win_rate": 0.2,
+      "max_dd": 0.07326380121937139,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": false,
+          "threshold_up": 0.8,
+          "threshold_down": -0.1
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.72 < 1.25) | Negative Expectancy ($-2.15) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -51.553527674177985,
+      "pf": 0.7203808124387739,
+      "expectancy": -2.1480636530907495,
+      "trades": 24,
+      "win_rate": 0.2916666666666667,
+      "max_dd": 0.06994180429599017,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": false,
+          "threshold_up": 0.9,
+          "threshold_down": 0.2
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.60 < 1.25) | Negative Expectancy ($-3.17) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -50.75076231613298,
+      "pf": 0.6022644570758905,
+      "expectancy": -3.171922644758311,
+      "trades": 16,
+      "win_rate": 0.25,
+      "max_dd": 0.0757438473507445,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": false,
+          "threshold_up": 0.9,
+          "threshold_down": 0.1
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.99 < 1.25) | Negative Expectancy ($-0.08) | Max DD too high (15.0% > 15%) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -12.0916778981084,
+      "pf": 0.9892628202399176,
+      "expectancy": -0.07851738894875585,
+      "trades": 154,
+      "win_rate": 0.35714285714285715,
+      "max_dd": 0.1504876229643385,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": false,
+          "threshold_up": 0.9,
+          "threshold_down": 0.0
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.42 < 1.25) | Negative Expectancy ($-5.01) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -50.05968464012528,
+      "pf": 0.41967085196301784,
+      "expectancy": -5.005968464012528,
+      "trades": 10,
+      "win_rate": 0.2,
+      "max_dd": 0.07326380121937139,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": false,
+          "threshold_up": 0.9,
+          "threshold_down": -0.1
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.72 < 1.25) | Negative Expectancy ($-2.15) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -51.553527674177985,
+      "pf": 0.7203808124387739,
+      "expectancy": -2.1480636530907495,
+      "trades": 24,
+      "win_rate": 0.2916666666666667,
+      "max_dd": 0.06994180429599017,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": false,
+          "threshold_up": 1.0,
+          "threshold_down": 0.2
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.60 < 1.25) | Negative Expectancy ($-3.17) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -50.75076231613298,
+      "pf": 0.6022644570758905,
+      "expectancy": -3.171922644758311,
+      "trades": 16,
+      "win_rate": 0.25,
+      "max_dd": 0.0757438473507445,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": false,
+          "threshold_up": 1.0,
+          "threshold_down": 0.1
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.99 < 1.25) | Negative Expectancy ($-0.08) | Max DD too high (15.0% > 15%) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -12.0916778981084,
+      "pf": 0.9892628202399176,
+      "expectancy": -0.07851738894875585,
+      "trades": 154,
+      "win_rate": 0.35714285714285715,
+      "max_dd": 0.1504876229643385,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": false,
+          "threshold_up": 1.0,
+          "threshold_down": 0.0
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.42 < 1.25) | Negative Expectancy ($-5.01) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -50.05968464012528,
+      "pf": 0.41967085196301784,
+      "expectancy": -5.005968464012528,
+      "trades": 10,
+      "win_rate": 0.2,
+      "max_dd": 0.07326380121937139,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": false,
+          "threshold_up": 1.0,
+          "threshold_down": -0.1
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.72 < 1.25) | Negative Expectancy ($-2.15) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -51.553527674177985,
+      "pf": 0.7203808124387739,
+      "expectancy": -2.1480636530907495,
+      "trades": 24,
+      "win_rate": 0.2916666666666667,
+      "max_dd": 0.06994180429599017,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": false,
+          "threshold_up": 1.1,
+          "threshold_down": 0.2
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.60 < 1.25) | Negative Expectancy ($-3.17) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -50.75076231613298,
+      "pf": 0.6022644570758905,
+      "expectancy": -3.171922644758311,
+      "trades": 16,
+      "win_rate": 0.25,
+      "max_dd": 0.0757438473507445,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": false,
+          "threshold_up": 1.1,
+          "threshold_down": 0.1
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.99 < 1.25) | Negative Expectancy ($-0.08) | Max DD too high (15.0% > 15%) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -12.0916778981084,
+      "pf": 0.9892628202399176,
+      "expectancy": -0.07851738894875585,
+      "trades": 154,
+      "win_rate": 0.35714285714285715,
+      "max_dd": 0.1504876229643385,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": false,
+          "threshold_up": 1.1,
+          "threshold_down": 0.0
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.42 < 1.25) | Negative Expectancy ($-5.01) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -50.05968464012528,
+      "pf": 0.41967085196301784,
+      "expectancy": -5.005968464012528,
+      "trades": 10,
+      "win_rate": 0.2,
+      "max_dd": 0.07326380121937139,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    },
+    {
+      "config": {
+        "rule_family": "volatility_breakout",
+        "params": {
+          "mean_revert": false,
+          "threshold_up": 1.1,
+          "threshold_down": -0.1
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.72 < 1.25) | Negative Expectancy ($-2.15) | Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": -51.553527674177985,
+      "pf": 0.7203808124387739,
+      "expectancy": -2.1480636530907495,
+      "trades": 24,
+      "win_rate": 0.2916666666666667,
+      "max_dd": 0.06994180429599017,
+      "long_share": 0.0,
+      "short_share": 1.0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true
+    }
+  ]
+}

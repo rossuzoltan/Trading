@@ -4,6 +4,7 @@ import json
 import logging
 import math
 import shutil
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -120,12 +121,17 @@ class VolumeBarBuilder:
 
 
 def _as_tick_event(record: Any) -> TickEvent:
-    if isinstance(record, Mapping):
-        time_msc = int(record.get("time_msc") or int(record["time"]) * 1000)
-        bid = float(record["bid"])
-        ask = float(record["ask"])
-        volume = float(record.get("volume_real", record.get("volume", 1.0)))
-        return TickEvent(time_msc=time_msc, bid=bid, ask=ask, volume=volume)
+    if hasattr(record, "__getitem__") and not hasattr(record, "bid"):
+        time_val = record["time_msc"] if "time_msc" in getattr(getattr(record, "dtype", None), "names", []) or "time_msc" in record else record["time"] * 1000
+        try:
+            vol = record["volume_real"]
+        except (KeyError, IndexError, ValueError):
+            try:
+                vol = record.get("volume_real", record.get("volume", 1.0))
+            except AttributeError:
+                vol = record["volume"] if "volume" in getattr(getattr(record, "dtype", None), "names", []) else 1.0
+        return TickEvent(time_msc=int(time_val), bid=float(record["bid"]), ask=float(record["ask"]), volume=float(vol))
+    
     time_msc = int(getattr(record, "time_msc", getattr(record, "time", 0) * 1000))
     return TickEvent(
         time_msc=time_msc,
@@ -333,6 +339,8 @@ class RuntimeEngine:
         reward_clip_low: float = -5.0,
         reward_clip_high: float = 5.0,
         window_size: int = 1,
+        minimal_post_cost_reward: bool = False,
+        force_fast_window_benchmark: bool = False,
         alpha_gate: BaselineAlphaGate | None = None,
         churn_min_hold_bars: int = 0,
         churn_action_cooldown: int = 0,
@@ -359,6 +367,8 @@ class RuntimeEngine:
         self.reward_clip_low = float(reward_clip_low)
         self.reward_clip_high = float(reward_clip_high)
         self.window_size = max(int(window_size), 1)
+        self.minimal_post_cost_reward = bool(minimal_post_cost_reward)
+        self.force_fast_window_benchmark = bool(force_fast_window_benchmark)
         self.alpha_gate = alpha_gate
         self.churn_min_hold_bars = max(int(churn_min_hold_bars), 0)
         self.churn_action_cooldown = max(int(churn_action_cooldown), 0)
@@ -369,12 +379,33 @@ class RuntimeEngine:
         self.processed_bars_count = 0
         self.last_close_bar_index = None
         self.policy_mode = "RL"  # Default to Reinforcement Learning
+        self._perf = {
+            "process_bar_calls": 0,
+            "process_bar_total_ns": 0,
+            "push_record_branch_calls": 0,
+            "push_series_fallback_calls": 0,
+            "window_gt1_calls": 0,
+            "force_fast_window_benchmark_calls": 0,
+        }
+        setattr(self.feature_engine, "_force_fast_window_benchmark", self.force_fast_window_benchmark)
 
     def startup_reconcile(self) -> None:
         pos_snapshot = self.broker.current_position(self.symbol)
         sync_confirmed_position(self.confirmed_position, pos_snapshot, last_reward=0.0)
         self.last_equity = float(self.broker.current_equity(self.symbol))
         self.snapshot.last_equity = self.last_equity
+
+    def perf_snapshot(self) -> dict[str, Any]:
+        snapshot: dict[str, Any] = {
+            key: int(value) if key.endswith("_calls") else float(value)
+            for key, value in self._perf.items()
+        }
+        calls = int(self._perf.get("process_bar_calls", 0))
+        total_ns = int(self._perf.get("process_bar_total_ns", 0))
+        snapshot["process_bar_mean_ns"] = float(total_ns / calls) if calls else 0.0
+        if hasattr(self.feature_engine, "perf_snapshot"):
+            snapshot["feature_engine"] = self.feature_engine.perf_snapshot()
+        return snapshot
 
     def _refresh_confirmed_position(self, *, last_reward: float) -> None:
         pos_snapshot = self.broker.current_position(self.symbol)
@@ -625,6 +656,7 @@ class RuntimeEngine:
         }
 
     def process_bar(self, bar: Any, *, action_index_override: int | None = None) -> ProcessResult:
+        start_ns = time.perf_counter_ns()
         execution_log_start = len(getattr(self.broker, "execution_log", []))
         trade_log_start = len(getattr(self.broker, "trade_log", []))
         was_flat_before = self.confirmed_position.is_flat
@@ -639,8 +671,17 @@ class RuntimeEngine:
         # Use the structured-array fast path only when the bar actually carries a raw record.
         raw_record = getattr(bar, "row", None)
         if hasattr(self.feature_engine, "push_record") and isinstance(raw_record, np.void):
-            self.feature_engine.push_record(raw_record, refresh_buffer=(self.window_size > 1))
+            self._perf["push_record_branch_calls"] += 1
+            if self.window_size > 1:
+                self._perf["window_gt1_calls"] += 1
+            if self.force_fast_window_benchmark:
+                self._perf["force_fast_window_benchmark_calls"] += 1
+            self.feature_engine.push_record(
+                raw_record,
+                refresh_buffer=(self.window_size > 1 and not self.force_fast_window_benchmark),
+            )
         else:
+            self._perf["push_series_fallback_calls"] += 1
             self.feature_engine.push(bar.to_series() if hasattr(bar, "to_series") else bar)
 
         feature_rows = self.feature_engine.recent_observation_window(self.window_size)
@@ -723,7 +764,19 @@ class RuntimeEngine:
             turnover_lots=turnover_lots,
             avg_spread=avg_spread,
         )
-        reward = float(reward_components["reward_clipped"])
+        reward = float(equity - self.last_equity) if self.minimal_post_cost_reward else float(reward_components["reward_clipped"])
+        if self.minimal_post_cost_reward:
+            reward_components["drawdown_penalty_applied"] = 0.0
+            reward_components["transaction_penalty_applied"] = 0.0
+            reward_components["pre_bonus_reward"] = float(reward)
+            reward_components["final_reward_unclipped"] = float(reward)
+            reward_components["reward_raw_unclipped"] = float(reward)
+            reward_components["reward_unclipped"] = float(reward)
+            reward_components["reward_clipped"] = float(reward)
+            reward_components["final_reward_clipped_low"] = 0.0
+            reward_components["final_reward_clipped_high"] = 0.0
+            reward_components["clip_hit_high"] = 0.0
+            reward_components["clip_hit_low"] = 0.0
         self._refresh_confirmed_position(last_reward=reward)
         if not was_flat_before and self.confirmed_position.is_flat:
             self.last_close_bar_index = self.processed_bars_count
@@ -732,7 +785,7 @@ class RuntimeEngine:
         self.snapshot.last_equity = equity
 
         if not risk_ok:
-            return self._kill_result(
+            result = self._kill_result(
                 bar=bar,
                 reward=reward,
                 equity=equity,
@@ -744,12 +797,15 @@ class RuntimeEngine:
                 trade_log_start=trade_log_start,
                 reward_components=reward_components,
             )
+            self._perf["process_bar_calls"] += 1
+            self._perf["process_bar_total_ns"] += max(time.perf_counter_ns() - start_ns, 0)
+            return result
 
         broker_fail_ok, broker_fail_reason = self.risk_engine.check_broker_failures(
             self.snapshot.consecutive_broker_failures
         )
         if not broker_fail_ok:
-            return self._kill_result(
+            result = self._kill_result(
                 bar=bar,
                 reward=reward,
                 equity=equity,
@@ -761,12 +817,15 @@ class RuntimeEngine:
                 trade_log_start=trade_log_start,
                 reward_components=reward_components,
             )
+            self._perf["process_bar_calls"] += 1
+            self._perf["process_bar_total_ns"] += max(time.perf_counter_ns() - start_ns, 0)
+            return result
 
         self._sync_snapshot_risk_state()
         if self.state_store is not None:
             self.persist()
 
-        return ProcessResult(
+        result = ProcessResult(
             bar=bar,
             action_index=action_index,
             action=action,
@@ -783,6 +842,9 @@ class RuntimeEngine:
             reward_components=reward_components,
             policy_mode=used_policy_mode,
         )
+        self._perf["process_bar_calls"] += 1
+        self._perf["process_bar_total_ns"] += max(time.perf_counter_ns() - start_ns, 0)
+        return result
 
     def flatten_open_position(self, bar: VolumeBar) -> SubmitResult | None:
         self._refresh_confirmed_position(last_reward=self.confirmed_position.last_reward)

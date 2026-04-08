@@ -18,6 +18,7 @@ but they are no longer exposed in FEATURE_COLS.
 from __future__ import annotations
 
 import os
+import time
 import joblib
 import numpy as np
 import pandas as pd
@@ -308,6 +309,13 @@ def _compute_raw(df: pd.DataFrame, *, latest_only_hurst: bool = False, fast_mode
     df["ma20_slope"] = df["ma20"].diff() / atr_safe
     df["ma50_slope"] = df["ma50"].diff() / atr_safe
 
+    # ── Price Z-score (challenger feature) ───────────────────────────────────
+    # (Close - MA20) / rolling_std(Close, 20): scale-free price extension measure.
+    # Not in FEATURE_COLS — used as a challenger signal in rule experiments.
+    price_roll_std = df["Close"].rolling(20).std().replace(0, np.nan)
+    df["price_z"] = (df["Close"] - df["ma20"]) / price_roll_std
+    df["price_z"] = df["price_z"].fillna(0.0)
+
     # ── Hurst Exponent (rolling 100 bars) ────────────────────────────────────
     # Only compute if we have enough rows AND not in fast_mode (slow — uses vectorised R/S)
     if not fast_mode and len(df) >= 100:
@@ -382,13 +390,38 @@ class FeatureEngine:
         self._buffer_size: int = 400  # Increased for safety with indicators
         self._count: int = 0
         self._feature_fast: bool = FEATURE_ENGINE_FAST
+        self._force_fast_window_benchmark: bool = False
         self._last_features_raw: np.ndarray = np.zeros(len(FEATURE_COLS), dtype=np.float32)
         self._last_features_scaled: np.ndarray = np.zeros(len(FEATURE_COLS), dtype=np.float32)
         self._last_aux_data: dict[str, float] = {
             "atr_14": 0.0,
             "spread_z": 0.0,
             "time_delta_z": 0.0,
+            "price_z": 0.0,
         }
+        self._perf = {
+            "push_record_calls": 0,
+            "push_record_total_ns": 0,
+            "push_record_refresh_true_calls": 0,
+            "push_record_refresh_false_calls": 0,
+            "refresh_buffer_calls": 0,
+            "refresh_buffer_total_ns": 0,
+            "get_obs_hot_path_calls": 0,
+            "get_obs_hot_path_total_ns": 0,
+            "recent_observation_window_calls": 0,
+            "recent_observation_window_total_ns": 0,
+            "recent_window_repeat_fast_calls": 0,
+        }
+
+    def perf_snapshot(self) -> dict[str, float]:
+        snapshot: dict[str, float] = {}
+        for key, value in self._perf.items():
+            snapshot[key] = int(value) if key.endswith("_calls") else float(value)
+        for prefix in ("push_record", "refresh_buffer", "get_obs_hot_path", "recent_observation_window"):
+            calls = int(self._perf.get(f"{prefix}_calls", 0))
+            total_ns = int(self._perf.get(f"{prefix}_total_ns", 0))
+            snapshot[f"{prefix}_mean_ns"] = float(total_ns / calls) if calls else 0.0
+        return snapshot
 
     def _sync_scaler_cache(self) -> None:
         if self._scaler is not None:
@@ -406,6 +439,7 @@ class FeatureEngine:
         atr_14: float,
         spread_z: float,
         time_delta_z: float,
+        price_z: float = 0.0,
     ) -> None:
         self._last_features_raw = np.nan_to_num(
             np.asarray(raw_features, dtype=np.float32),
@@ -423,6 +457,7 @@ class FeatureEngine:
             "atr_14": float(atr_14),
             "spread_z": float(spread_z),
             "time_delta_z": float(time_delta_z),
+            "price_z": float(price_z),
         }
 
     def _refresh_feature_cache_from_buffer(self) -> None:
@@ -448,6 +483,7 @@ class FeatureEngine:
             atr_14=float(row.get("atr_14", 0.0)),
             spread_z=float(row.get("spread_z", 0.0)),
             time_delta_z=float(row.get("time_delta_z", 0.0)),
+            price_z=float(row.get("price_z", 0.0)),
         )
 
     def fit_transform(
@@ -574,6 +610,7 @@ class FeatureEngine:
 
     def push_record(self, record: np.void, *, refresh_buffer: bool | None = None) -> None:
         """Fast path for push() using raw numpy structured array records."""
+        start_ns = time.perf_counter_ns()
         if self._raw_buffer_np is None:
             raise RuntimeError("Call warm_up() before push().")
 
@@ -586,12 +623,17 @@ class FeatureEngine:
 
         should_refresh = (not self._feature_fast) if refresh_buffer is None else bool(refresh_buffer)
         if should_refresh:
+            self._perf["push_record_refresh_true_calls"] += 1
             self._refresh_buffer()
         else:
+            self._perf["push_record_refresh_false_calls"] += 1
             self._get_obs_hot_path()
+        self._perf["push_record_calls"] += 1
+        self._perf["push_record_total_ns"] += max(time.perf_counter_ns() - start_ns, 0)
 
     def _refresh_buffer(self) -> None:
         """Core optimized step: convert ONLY valid numpy buffer rows to DF."""
+        start_ns = time.perf_counter_ns()
         # Use only valid slots (avoid 1970-01-01 epoch zeros)
         valid_raw = self._raw_buffer_np[-self._count:]
         valid_ts  = self._timestamps_np[-self._count:]
@@ -610,15 +652,20 @@ class FeatureEngine:
         self._buffer = self._drop_invalid_feature_rows(raw)
         self._sync_scaler_cache()
         self._refresh_feature_cache_from_buffer()
+        self._perf["refresh_buffer_calls"] += 1
+        self._perf["refresh_buffer_total_ns"] += max(time.perf_counter_ns() - start_ns, 0)
 
     def _get_obs_hot_path(self) -> np.ndarray:
         """
         ULTRA-FAST PATH: compute only FEATURE_COLS using numpy.
         Zero DataFrame creation. Zero pandas_ta logic.
         """
+        start_ns = time.perf_counter_ns()
         if self._count < WARMUP_BARS:
             zeros = np.zeros(len(FEATURE_COLS), dtype=np.float32)
             self._set_feature_cache(zeros, zeros, atr_14=0.0, spread_z=0.0, time_delta_z=0.0)
+            self._perf["get_obs_hot_path_calls"] += 1
+            self._perf["get_obs_hot_path_total_ns"] += max(time.perf_counter_ns() - start_ns, 0)
             return zeros
 
         # Slice relevant buffers - LIMIT TO LAST 500 BARS FOR PERFORMANCE
@@ -666,6 +713,12 @@ class FeatureEngine:
         spread_z = z_score(s[-1], s)
         time_delta_z = np.clip(z_score(d[-1], d), -5.0, 5.0)
 
+        # 5b. price_z: (close - MA20) / std(close,20)
+        c20 = c[-20:] if len(c) >= 20 else c
+        price_mean = np.mean(c20)
+        price_std = np.std(c20)
+        price_z = float((c[-1] - price_mean) / price_std) if price_std > 0 else 0.0
+
         # 6. Temporal (Cyclical) - Pure numpy/math (assuming ts is datetime64[ns])
         # last_dt = pd.Timestamp(ts[-1])
         # ns to s -> to hour
@@ -711,7 +764,10 @@ class FeatureEngine:
             atr_14=float(atr),
             spread_z=float(spread_z),
             time_delta_z=float(time_delta_z),
+            price_z=float(price_z),
         )
+        self._perf["get_obs_hot_path_calls"] += 1
+        self._perf["get_obs_hot_path_total_ns"] += max(time.perf_counter_ns() - start_ns, 0)
         return scaled_features
 
     @property
@@ -757,9 +813,19 @@ class FeatureEngine:
         return dict(self._last_aux_data)
 
     def recent_observation_window(self, window_size: int = 1) -> np.ndarray:
+        start_ns = time.perf_counter_ns()
         size = max(int(window_size), 1)
         if size == 1:
-            return self.latest_observation.reshape(1, -1)
+            rows = self.latest_observation.reshape(1, -1)
+            self._perf["recent_observation_window_calls"] += 1
+            self._perf["recent_observation_window_total_ns"] += max(time.perf_counter_ns() - start_ns, 0)
+            return rows
+        if self._force_fast_window_benchmark:
+            self._perf["recent_window_repeat_fast_calls"] += 1
+            rows = np.repeat(self.latest_observation.reshape(1, -1), size, axis=0).astype(np.float32, copy=False)
+            self._perf["recent_observation_window_calls"] += 1
+            self._perf["recent_observation_window_total_ns"] += max(time.perf_counter_ns() - start_ns, 0)
+            return rows
         if self._buffer is None or self._buffer.empty:
             raise RuntimeError("No observations. Call warm_up() first.")
 
@@ -776,4 +842,7 @@ class FeatureEngine:
             pad_source = rows[0:1] if rows.size else np.zeros((1, len(FEATURE_COLS)), dtype=np.float32)
             pad = np.repeat(pad_source, size - rows.shape[0], axis=0)
             rows = np.vstack([pad, rows])
-        return np.nan_to_num(rows.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+        rows = np.nan_to_num(rows.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+        self._perf["recent_observation_window_calls"] += 1
+        self._perf["recent_observation_window_total_ns"] += max(time.perf_counter_ns() - start_ns, 0)
+        return rows

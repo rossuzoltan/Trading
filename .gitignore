@@ -14,6 +14,10 @@ models/
 data/
 tests/tmp/
 tmp/
+research/results/*
+!research/results/.gitkeep
+research/ledger/*
+!research/ledger/.gitkeep
 
 tensorboard_log/
 ppo_forex_tensorboard/
