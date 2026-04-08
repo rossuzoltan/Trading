@@ -35,42 +35,53 @@ def _hash_file(filepath: Path) -> str:
 def build_parameter_grid() -> list[dict[str, Any]]:
     candidates = []
 
-    # 1. mean_reversion (Control / Spread-based)
-    for threshold in [0.8, 1.0, 1.2, 1.5, 2.0]:
-        candidates.append({
-            "rule_family": "mean_reversion",
-            "params": {"threshold": threshold}
-        })
+    # 1. mean_reversion (Price-based with cost/regime guards)
+    for threshold in [1.0, 1.25, 1.5, 1.75]:
+        for max_spread_z in [0.5, 0.75]:
+            for max_abs_ma20_slope, max_abs_ma50_slope in [(0.15, 0.08), (0.2, 0.1)]:
+                candidates.append({
+                    "rule_family": "mean_reversion",
+                    "params": {
+                        "threshold": threshold,
+                        "max_spread_z": max_spread_z,
+                        "max_time_delta_z": 2.0,
+                        "max_abs_ma20_slope": max_abs_ma20_slope,
+                        "max_abs_ma50_slope": max_abs_ma50_slope,
+                    },
+                })
 
-    # 2. price_mean_reversion
-    for threshold in [1.0, 1.5, 2.0, 2.5, 3.0]:
-        candidates.append({
-            "rule_family": "price_mean_reversion",
-            "params": {"threshold": threshold}
-        })
+    # 2. pro_mean_reversion
+    for adx_threshold in [20.0, 25.0, 30.0]:
+        for rsi_oversold in [30.0, 35.0]:
+            for pz in [1.25, 1.5, 1.75]:
+                for hurst in [False, True]:
+                    candidates.append({
+                        "rule_family": "pro_mean_reversion",
+                        "params": {
+                            "adx_threshold": adx_threshold,
+                            "rsi_oversold": rsi_oversold,
+                            "rsi_overbought": 100.0 - rsi_oversold,
+                            "price_z_threshold": pz,
+                            "hurst_filter": hurst
+                        }
+                    })
 
-    # 3. price_mr_spread_filter
-    for threshold in [1.0, 1.5, 2.0, 2.5, 3.0]:
-        candidates.append({
-            "rule_family": "price_mr_spread_filter",
-            "params": {"threshold": threshold}
-        })
+    # 3. macd_trend
+    for macdh_threshold in [0.0, 0.0001]:
+        for require_ma_alignment in [True, False]:
+            for adx_trend in [0.0, 25.0]:
+                for hurst in [False, True]:
+                    candidates.append({
+                        "rule_family": "macd_trend",
+                        "params": {
+                            "macdh_threshold": macdh_threshold,
+                            "require_ma_alignment": require_ma_alignment,
+                            "adx_trend_threshold": adx_trend,
+                            "hurst_filter": hurst
+                        }
+                    })
 
-    # 4. combined_mr
-    for threshold in [1.0, 1.2, 1.5, 2.0]:
-        candidates.append({
-            "rule_family": "combined_mr",
-            "params": {"threshold": threshold}
-        })
-
-    # 5. trend
-    for threshold in [0.0, 0.5, 1.0]:
-        candidates.append({
-            "rule_family": "trend",
-            "params": {"threshold": threshold}
-        })
-
-    # 6. volatility_breakout
+    # 4. volatility_breakout
     for mean_revert in [True, False]:
         for threshold_up in [0.8, 0.9, 1.0, 1.1]:
             for threshold_down in [0.2, 0.1, 0.0, -0.1]:

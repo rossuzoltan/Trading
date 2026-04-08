@@ -1,7 +1,9 @@
 # Current Usage Guide
 
-This is the practical operator guide for the current supported stack:
-`MaskablePPO + RuntimeGymEnv + volume bars`.
+This is the practical operator guide for the current supported stack.
+
+The repo still contains RL tooling, but the primary operational path is now:
+`rule-first RC1 + shadow evidence + paper-live gate`.
 
 Use this document when you want to run the project now without re-learning the
 entire repo from code or old handoff notes.
@@ -19,19 +21,19 @@ entire repo from code or old handoff notes.
 Run:
 
 ```powershell
-.\.venv\Scripts\python.exe .\tools\project_healthcheck.py
+.\.venv\Scripts\python.exe .\tools\project_healthcheck.py --mode rc1
 ```
 
 What this tells you:
 
-- dataset exists and matches the expected bar spec
-- runtime artifacts are structurally valid when present
+- approved RC1 packs exist and are structurally valid
+- dataset metadata exists and matches the active anchor bar spec
 - required packages and files are available
 
-Use strict runtime asset validation only when you expect trained artifacts:
+Use RL mode only when you are explicitly working the legacy/research runtime path:
 
 ```powershell
-.\.venv\Scripts\python.exe .\tools\project_healthcheck.py --strict-runtime-assets
+.\.venv\Scripts\python.exe .\tools\project_healthcheck.py --mode rl --strict-runtime-assets
 ```
 
 ## 3. Data Workflow
@@ -54,7 +56,53 @@ Re-run healthcheck after a rebuild:
 .\.venv\Scripts\python.exe .\tools\project_healthcheck.py
 ```
 
-## 4. Normal Training
+## 4. Rule-First Anchor Workflow
+
+The primary path is no longer "train until the replay looks good". The anchor
+workflow is:
+
+1. Healthcheck in `rc1` mode
+2. Generate and certify RC1 packs
+3. Run historical replay as a pre-shadow screen
+4. Only if certification is not demoted, run shadow mode with the RC1 manifest
+5. Build the paper-live gate verdict
+
+Commands:
+
+```powershell
+.\.venv\Scripts\python.exe .\tools\project_healthcheck.py --mode rc1
+.\.venv\Scripts\python.exe .\tools\generate_v1_rc.py
+.\.venv\Scripts\python.exe .\tools\mt5_historical_replay.py --symbol EURUSD --days 30
+.\tools\run_shadow_simulator.ps1 -ManifestPath models\rc1\eurusd_5k_v1_mr_rc1\manifest.json
+.\.venv\Scripts\python.exe .\tools\paper_live_gate.py --manifest-path .\models\rc1\eurusd_5k_v1_mr_rc1\manifest.json
+```
+
+Shadow artifacts are written under:
+
+- `artifacts/shadow/<SYMBOL>/<MANIFEST_HASH>/events.jsonl`
+- `artifacts/shadow/<SYMBOL>/<MANIFEST_HASH>/shadow_summary.json`
+- `artifacts/shadow/<SYMBOL>/<MANIFEST_HASH>/shadow_summary.md`
+
+Gate artifacts are written under:
+
+- `artifacts/gates/<SYMBOL>/<MANIFEST_HASH>/paper_live_gate.json`
+- `artifacts/gates/<SYMBOL>/<MANIFEST_HASH>/paper_live_gate.md`
+
+Current status as of `2026-04-08`:
+
+- both approved-scope RC1 packs are structurally valid
+- both current gate verdicts are still `demoted`
+- historical MT5 replay is directionally healthier than before, but not yet promotion-ready
+- do not treat `EURUSD` or `GBPUSD` as active shadow anchors until certification recovers
+
+Historical replay writes under the RC1 pack directory:
+
+- `mt5_historical_replay_report.md`
+- `mt5_historical_replay_report.json`
+- `mt5_historical_replay_report.audit.jsonl`
+- `mt5_historical_replay_report.bars.jsonl`
+
+## 5. Normal Training
 
 Train one symbol at a time:
 
@@ -74,10 +122,10 @@ Important current behavior:
 Useful status command while training:
 
 ```powershell
-.\.venv\Scripts\python.exe .\training_status.py --symbol EURUSD
+.\.venv\Scripts\python.exe .\tools\training_status.py --symbol EURUSD
 ```
 
-## 5. Current Experiment Profiles
+## 6. Current Experiment Profiles
 
 The training script now supports reproducible experiment presets via
 `TRAIN_EXPERIMENT_PROFILE`.
@@ -113,7 +161,7 @@ $env:TRAIN_TOTAL_TIMESTEPS='120000'
 Manual overrides still win over the profile. If you set an env var explicitly,
 the profile will not overwrite it.
 
-## 6. Windowed Observations
+## 7. Windowed Observations
 
 The runtime path now supports a real observation window via `TRAIN_WINDOW_SIZE`.
 
@@ -138,7 +186,7 @@ Notes:
 - larger windows change the model observation shape
 - that shape is now persisted in manifests and respected by replay/live validation
 
-## 7. Evaluation
+## 8. Evaluation
 
 Run OOS evaluation for one symbol:
 
@@ -154,7 +202,7 @@ Current behavior:
 - if training diagnostics recorded churn min-hold, cooldown, or entry-spread guard settings, OOS replay applies the same execution-time masks
 - if training diagnostics recorded alpha gate usage, OOS replay rebuilds and applies the same gate
 - replay reports now include an authoritative `runtime_parity_verdict`; the deployment gate reads that verdict directly instead of relying on a separately-run comparison file
-- use `.\.venv\Scripts\python.exe .\compare_oos_baselines.py --symbol EURUSD` to compare the RL replay against simple baselines; it now falls back to checkpoint artifacts and can recompute the RL replay when no saved replay report exists
+- use `.\.venv\Scripts\python.exe .\tools\compare_oos_baselines.py --symbol EURUSD` to compare the RL replay against simple baselines; it now falls back to checkpoint artifacts and can recompute the RL replay when no saved replay report exists
 
 If you need a quick postmortem after a losing replay or a closed-trade audit:
 
@@ -164,43 +212,45 @@ If you need a quick postmortem after a losing replay or a closed-trade audit:
 
 The helper now tolerates summary-only replay reports when a closed-trade log is not available.
 
-## 8. Deployment And Live Readiness
+## 9. Paper-Live Gate And Live Readiness
 
-Before treating a model as live-ready:
+Before treating anything as live-ready:
 
 1. Run tests
-2. Run symbol-specific OOS evaluation
-3. Run MT5 preflight
-4. Check ops evidence and audit outputs
+2. Generate or re-verify the RC1 pack
+3. Collect shadow evidence
+4. Build the paper-live gate verdict
+5. Run MT5 preflight
+6. Check ops evidence and audit outputs
 
 Commands:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover tests
-$env:EVAL_SYMBOL='EURUSD'; .\.venv\Scripts\python.exe .\evaluate_oos.py
-.\.venv\Scripts\python.exe .\compare_oos_baselines.py --symbol EURUSD
+.\.venv\Scripts\python.exe .\tools\verify_v1_rc.py
+.\.venv\Scripts\python.exe .\tools\paper_live_gate.py --manifest-path .\models\rc1\eurusd_5k_v1_mr_rc1\manifest.json
 .\.venv\Scripts\python.exe .\mt5_live_preflight.py --symbol EURUSD --ticks-per-bar 5000
 ```
 
-## 9. Main Decision Rules
+## 10. Main Decision Rules
 
 - If the baseline gate fails, do not keep pushing PPO on that feature set.
+- Do not treat a positive replay as sufficient; `paper_live_gate.json` is the operational verdict.
 - Prefer per-symbol training and per-symbol evaluation.
 - Treat reward-ablation and churn-control as the first corrective experiments when PPO degenerates into microtrading.
 - Do not treat old `RecurrentPPO` or H1-only notes as the active architecture.
 - Do not declare live readiness from training curves alone; use holdout, preflight, and audit evidence.
 
-## 10. Good Default Workflows
+## 11. Good Default Workflows
 
-Standard training pass:
+Standard anchor pass:
 
 ```powershell
-.\.venv\Scripts\python.exe .\tools\project_healthcheck.py
-$env:TRAIN_SYMBOL='EURUSD'
-$env:TRAIN_TOTAL_TIMESTEPS='3000000'
-.\.venv\Scripts\python.exe .\train_agent.py
-$env:EVAL_SYMBOL='EURUSD'
-.\.venv\Scripts\python.exe .\evaluate_oos.py
+.\.venv\Scripts\python.exe .\tools\project_healthcheck.py --mode rc1
+.\.venv\Scripts\python.exe .\tools\generate_v1_rc.py
+.\.venv\Scripts\python.exe .\tools\mt5_historical_replay.py --symbol EURUSD --days 30
+.\tools\run_shadow_simulator.ps1 -ManifestPath models\rc1\eurusd_5k_v1_mr_rc1\manifest.json
+.\.venv\Scripts\python.exe .\tools\paper_live_gate.py --manifest-path .\models\rc1\eurusd_5k_v1_mr_rc1\manifest.json
 ```
 
 Fast corrective run after a bad PPO diagnosis:
@@ -213,8 +263,12 @@ $env:TRAIN_TOTAL_TIMESTEPS='120000'
 .\.venv\Scripts\python.exe .\train_agent.py
 ```
 
-## 11. Files That Matter Most
+## 12. Files That Matter Most
 
+- `docs/PROFITABILITY_PLAN.md`
+- `rule_selector.py`
+- `runtime/shadow_broker.py`
+- `tools/paper_live_gate.py`
 - `train_agent.py`
 - `runtime_gym_env.py`
 - `runtime/runtime_engine.py`
@@ -224,8 +278,9 @@ $env:TRAIN_TOTAL_TIMESTEPS='120000'
 - `trading_config.py`
 - `tools/project_healthcheck.py`
 
-## 12. Read Next
+## 13. Read Next
 
+- `docs/PROFITABILITY_PLAN.md`
 - `docs/NEXT_AGENT_CONTEXT.md`
 - `docs/NEXT_AGENT_FILE_MAP.md`
 - `docs/NEXT_AGENT_RUNBOOK.md`

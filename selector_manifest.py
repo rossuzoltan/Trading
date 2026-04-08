@@ -44,6 +44,7 @@ class RuntimeConstraints:
     spread_sanity_max_pips: float
     max_concurrent_positions: int
     daily_loss_stop_usd: float
+    rollover_block_utc_hours: list[int] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

@@ -5,13 +5,14 @@ import json
 import logging
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
 from feature_engine import FeatureEngine
+from paper_live_metrics import resolve_shadow_evidence_paths, write_shadow_summary
 from rule_selector import RuleSelector
 from runtime.runtime_engine import Mt5CursorTickSource, TickCursor, VolumeBarBuilder
 from selector_manifest import load_selector_manifest
@@ -54,6 +55,20 @@ def _iso_utc(timestamp: Any) -> str:
 
 @dataclass
 class ShadowAuditRecord:
+    timestamp_utc: str
+    symbol: str
+    ticks_per_bar: int
+    manifest_hash: str
+    logic_hash: str
+    evaluator_hash: str
+    signal_direction: int
+    action_state: str
+    no_trade_reason: str
+    spread_pips: float
+    session_filter_pass: bool
+    risk_filter_pass: bool
+    position_state: str
+    would_hold: bool
     bar_ts: str
     signal: int
     reason: str
@@ -70,11 +85,10 @@ class ShadowAuditRecord:
     daily_loss_ok: bool
     active_position_state: str  # flat, long, short
     position_side: int          # 0, 1, -1
+    current_position_direction: int
     position_after: int
     manifest_fingerprint: str
     release_stage: str
-    symbol: str
-    ticks_per_bar: int
 
 
 class ShadowBroker:
@@ -96,10 +110,15 @@ class ShadowBroker:
     ) -> None:
         self.selector = selector if isinstance(selector, RuleSelector) else RuleSelector(selector)
         self.audit_path = Path(audit_path)
-        self.manifest_fingerprint = manifest_fingerprint
-        self.release_stage = release_stage
-        self.symbol = symbol
-        self.ticks_per_bar = ticks_per_bar
+        selector_manifest = self.selector.manifest
+        self.manifest_fingerprint = manifest_fingerprint or selector_manifest.manifest_hash
+        self.release_stage = release_stage or selector_manifest.release_stage
+        self.symbol = symbol or selector_manifest.strategy_symbol
+        self.ticks_per_bar = int(ticks_per_bar or selector_manifest.ticks_per_bar or selector_manifest.bar_construction_ticks_per_bar or 0)
+        self.logic_hash = selector_manifest.logic_hash
+        self.evaluator_hash = selector_manifest.evaluator_hash
+        self.summary_json_path = self.audit_path.parent / "shadow_summary.json"
+        self.summary_markdown_path = self.audit_path.parent / "shadow_summary.md"
         
         self.position_direction = 0
         self.daily_pnl_usd = 0.0
@@ -162,8 +181,33 @@ class ShadowBroker:
             self.position_direction = normalized_signal
             
         active_state = "long" if current_direction == 1 else "short" if current_direction == -1 else "flat"
+        action_state = "hold"
+        if would_open and would_close:
+            action_state = "reverse"
+        elif would_open:
+            action_state = "open"
+        elif would_close:
+            action_state = "close"
+        elif would_hold_position:
+            action_state = "hold"
+        elif would_remain_flat:
+            action_state = "flat"
 
         record = ShadowAuditRecord(
+            timestamp_utc=_iso_utc(bar_ts),
+            symbol=self.symbol,
+            ticks_per_bar=self.ticks_per_bar,
+            manifest_hash=self.manifest_fingerprint or decision.manifest_id,
+            logic_hash=self.logic_hash,
+            evaluator_hash=self.evaluator_hash,
+            signal_direction=int(normalized_signal),
+            action_state=action_state,
+            no_trade_reason=decision.reason,
+            spread_pips=float(current_spread_pips),
+            session_filter_pass=bool(gate_status["session_ok"]),
+            risk_filter_pass=bool(gate_status["risk_ok"]),
+            position_state=active_state,
+            would_hold=would_hold_position,
             bar_ts=_iso_utc(bar_ts),
             signal=int(normalized_signal),
             reason=decision.reason,
@@ -180,13 +224,17 @@ class ShadowBroker:
             daily_loss_ok=bool(gate_status["daily_loss_ok"]),
             active_position_state=active_state,
             position_side=int(current_direction),
+            current_position_direction=int(current_direction),
             position_after=int(self.position_direction),
             manifest_fingerprint=self.manifest_fingerprint or decision.manifest_id,
             release_stage=self.release_stage,
-            symbol=self.symbol,
-            ticks_per_bar=self.ticks_per_bar,
         )
         _append_jsonl(self.audit_path, asdict(record))
+        write_shadow_summary(
+            events_path=self.audit_path,
+            summary_json_path=self.summary_json_path,
+            summary_markdown_path=self.summary_markdown_path,
+        )
         self.records_written += 1
         return record
 
@@ -221,23 +269,20 @@ def run_mt5_shadow_loop(
     except ImportError as exc:
         raise RuntimeError("MetaTrader5 is required for the shadow simulator.") from exc
 
-    # Default to directory rather than single file
-    base_audit_dir = Path(audit_dir) if audit_dir is not None else Path(manifest_path).parent / "shadow_audits"
-    base_audit_dir.mkdir(parents=True, exist_ok=True)
-    
-    def get_daily_audit_path(date_str: str) -> Path:
-        return base_audit_dir / f"shadow_audit_{date_str}.jsonl"
+    shadow_paths = resolve_shadow_evidence_paths(
+        symbol=resolved_symbol,
+        manifest_hash=manifest.manifest_hash,
+        base_dir=audit_dir,
+    )
+    shadow_paths.root_dir.mkdir(parents=True, exist_ok=True)
 
     feature_engine = FeatureEngine()
     warmup_frame = _load_warmup_bars(resolved_symbol, resolved_ticks_per_bar)
     feature_engine.warm_up(warmup_frame)
 
-    current_date_str = datetime.now(timezone.utc).strftime("%Y%m%d")
-    current_audit_path = get_daily_audit_path(current_date_str)
-
     broker = ShadowBroker(
         manifest_path, 
-        audit_path=current_audit_path,
+        audit_path=shadow_paths.events_path,
         manifest_fingerprint=manifest.manifest_hash,
         release_stage=manifest.release_stage,
         symbol=resolved_symbol,
@@ -249,36 +294,12 @@ def run_mt5_shadow_loop(
     cursor = TickCursor()
     processed_bars = 0
     
-    # Daily summary tracking
-    def new_daily_stats():
-        return {
-            "total_bars_processed": 0,
-            "total_would_open": 0,
-            "total_would_close": 0,
-            "total_would_hold_position": 0,
-            "total_would_remain_flat": 0,
-            "total_no_trade": 0,
-            "long_open_count": 0,
-            "short_open_count": 0,
-            "reason_counts": {
-                "spread": 0,
-                "session": 0,
-                "risk": 0,
-                "no_signal": 0,
-                "max_position": 0
-            },
-            "first_bar_ts": None,
-            "last_bar_ts": None
-        }
-
-    daily_stats = new_daily_stats()
-
     _connect_mt5(mt5)
     log.info(
         "Starting shadow simulator symbol=%s ticks_per_bar=%s audit_dir=%s",
         resolved_symbol,
         resolved_ticks_per_bar,
-        base_audit_dir,
+        shadow_paths.root_dir,
     )
     
     consecutive_errors = 0
@@ -309,20 +330,6 @@ def run_mt5_shadow_loop(
                 if bar is None:
                     continue
                 
-                # Check for UTC day rollover
-                bar_date_str = pd.Timestamp(bar.timestamp).tz_convert("UTC").strftime("%Y%m%d")
-                if bar_date_str != current_date_str:
-                    # Write summary
-                    summary_path = base_audit_dir / f"shadow_summary_{current_date_str}.json"
-                    with summary_path.open("w", encoding="utf-8") as f:
-                        json.dump(daily_stats, f, indent=2)
-                    log.info("Daily Rollover Info: %s", json.dumps(daily_stats))
-                    
-                    # Reset for new day
-                    current_date_str = bar_date_str
-                    broker.audit_path = get_daily_audit_path(current_date_str)
-                    daily_stats = new_daily_stats()
-                
                 feature_engine.push(bar.to_series())
                 if feature_engine._buffer is None or feature_engine._buffer.empty:
                     continue
@@ -337,36 +344,6 @@ def run_mt5_shadow_loop(
                     is_session_open=_is_forex_session_open(bar.timestamp),
                 )
                 processed_bars += 1
-                
-                # Update stats
-                daily_stats["total_bars_processed"] += 1
-                if not daily_stats["first_bar_ts"]:
-                    daily_stats["first_bar_ts"] = record.bar_ts
-                daily_stats["last_bar_ts"] = record.bar_ts
-                
-                if record.would_open:
-                    daily_stats["total_would_open"] += 1
-                    if record.signal > 0:
-                        daily_stats["long_open_count"] += 1
-                    elif record.signal < 0:
-                        daily_stats["short_open_count"] += 1
-                elif record.would_close:
-                    daily_stats["total_would_close"] += 1
-                elif record.would_hold_position:
-                    daily_stats["total_would_hold_position"] += 1
-                elif record.would_remain_flat:
-                    daily_stats["total_would_remain_flat"] += 1
-                    daily_stats["total_no_trade"] += 1
-                    
-                if record.reason:
-                    r_mapped = record.reason.lower()
-                    for r_key in daily_stats["reason_counts"].keys():
-                        if r_key in r_mapped:
-                            daily_stats["reason_counts"][r_key] += 1
-                            break
-                    else:
-                        if "signal" in r_mapped:
-                            daily_stats["reason_counts"]["no_signal"] += 1
 
                 log.info(
                     "shadow bar=%s signal=%s allow=%s open=%s close=%s flat=%s hold=%s reason=%s",
@@ -380,10 +357,6 @@ def run_mt5_shadow_loop(
                     record.reason,
                 )
                 if max_bars is not None and processed_bars >= max_bars:
-                    # Flush final summary if exiting abruptly
-                    summary_path = base_audit_dir / f"shadow_summary_{current_date_str}.json"
-                    with summary_path.open("w", encoding="utf-8") as f:
-                        json.dump(daily_stats, f, indent=2)
                     return processed_bars
             time.sleep(max(float(poll_interval_ms), 1.0) / 1000.0)
     finally:

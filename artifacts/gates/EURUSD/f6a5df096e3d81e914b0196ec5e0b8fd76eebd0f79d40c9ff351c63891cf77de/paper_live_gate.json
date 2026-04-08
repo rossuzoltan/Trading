@@ -1,0 +1,226 @@
+{
+  "symbol": "EURUSD",
+  "ticks_per_bar": 5000,
+  "manifest_hash": "f6a5df096e3d81e914b0196ec5e0b8fd76eebd0f79d40c9ff351c63891cf77de",
+  "logic_hash": "c3b83b7968134fd998fa5a3b0812bd4afd599d100e2cc8b23a2e1aed5fca277f",
+  "evaluator_hash": "3434c70a6ad1dc6ae18e9f40a39c130d6640d51be6af122abe488b606d166635",
+  "release_stage": "paper_live_candidate",
+  "anchor_status": "demoted",
+  "replay_metrics": {
+    "net_pnl_usd": -50.37801269977899,
+    "gross_pnl_usd": -36.251442712874386,
+    "total_cost_usd": 14.126569986904851,
+    "profit_factor": 0.6050648499249752,
+    "expectancy_usd": -2.9634125117517054,
+    "trade_count": 17,
+    "win_rate": 0.23529411764705882,
+    "long_count": 0,
+    "short_count": 17
+  },
+  "baseline_comparison": {
+    "mandatory_baselines": {
+      "runtime_flat": {
+        "net_pnl_usd": 0.0,
+        "gross_pnl_usd": 0.0,
+        "total_cost_usd": 0.0,
+        "profit_factor": 0.0,
+        "expectancy_usd": 0.0,
+        "trade_count": 0,
+        "win_rate": 0.0,
+        "long_count": 0,
+        "short_count": 0
+      },
+      "runtime_always_short": {
+        "net_pnl_usd": -50.45120050308094,
+        "gross_pnl_usd": -46.7953295100949,
+        "total_cost_usd": 3.6558709929859012,
+        "profit_factor": 0.0,
+        "expectancy_usd": -10.090240100616189,
+        "trade_count": 5,
+        "win_rate": 0.0,
+        "long_count": 0,
+        "short_count": 5
+      },
+      "runtime_trend": {
+        "net_pnl_usd": -50.67856145621977,
+        "gross_pnl_usd": -46.9458844560331,
+        "total_cost_usd": 3.732677000186404,
+        "profit_factor": 0.0,
+        "expectancy_usd": -10.135712291243953,
+        "trade_count": 5,
+        "win_rate": 0.0,
+        "long_count": 0,
+        "short_count": 5
+      }
+    },
+    "raw_anchor_baseline": {
+      "net_pnl_usd": -50.72814391876716,
+      "gross_pnl_usd": -31.42187693462151,
+      "total_cost_usd": 19.30626698414643,
+      "profit_factor": 0.7009659075594321,
+      "expectancy_usd": -2.3058247235803253,
+      "trade_count": 22,
+      "win_rate": 0.2727272727272727,
+      "long_count": 0,
+      "short_count": 22
+    },
+    "deployed_anchor_rc": {
+      "net_pnl_usd": -50.37801269977899,
+      "gross_pnl_usd": -36.251442712874386,
+      "total_cost_usd": 14.126569986904851,
+      "profit_factor": 0.6050648499249752,
+      "expectancy_usd": -2.9634125117517054,
+      "trade_count": 17,
+      "win_rate": 0.23529411764705882,
+      "long_count": 0,
+      "short_count": 17
+    },
+    "mandatory_baseline_pass": false,
+    "raw_anchor_baseline_pass": false,
+    "same_logic_as_raw_anchor": false
+  },
+  "shadow_window_start": null,
+  "shadow_window_end": null,
+  "shadow_summary_stats": {
+    "event_count": 0,
+    "trading_days": 0,
+    "actionable_event_count": 0,
+    "evidence_sufficient": false,
+    "shadow_window_start": null,
+    "shadow_window_end": null,
+    "no_trade_reason_counts": {},
+    "directional_occupancy": {
+      "flat": 0.0,
+      "long": 0.0,
+      "short": 0.0
+    },
+    "counts": {}
+  },
+  "drift_metrics": {
+    "reference_source": "models\\rc1\\eurusd_5k_v1_mr_rc1\\baseline_holdout_eurusd.json",
+    "signal_density_ratio": 0.0,
+    "would_open_density_ratio": 0.0,
+    "spread_rejection_delta_pp": 0.0,
+    "session_rejection_delta_pp": 0.0,
+    "directional_occupancy_delta_pp": 2.0618556701030926,
+    "normal_failures": [
+      "signal_density_ratio",
+      "would_open_density_ratio"
+    ],
+    "critical_failures": [
+      "signal_density_ratio",
+      "would_open_density_ratio"
+    ],
+    "critical": true,
+    "verdict": "critical",
+    "thresholds": {
+      "signal_density_ratio": {
+        "normal_range": [
+          0.75,
+          1.25
+        ],
+        "critical_range": [
+          0.6,
+          1.4
+        ]
+      },
+      "would_open_density_ratio": {
+        "normal_range": [
+          0.7,
+          1.3
+        ],
+        "critical_range": [
+          0.6,
+          1.4
+        ]
+      },
+      "spread_rejection_delta_pp": {
+        "normal_max": 10.0,
+        "critical_max": 20.0
+      },
+      "session_rejection_delta_pp": {
+        "normal_max": 10.0,
+        "critical_max": 20.0
+      },
+      "directional_occupancy_delta_pp": {
+        "normal_max": 15.0,
+        "critical_max": 20.0
+      }
+    }
+  },
+  "restart_status": {
+    "present": false,
+    "ok": false,
+    "path": "models\\restart_drill_eurusd.json"
+  },
+  "ops_attestation_status": {
+    "present": false,
+    "ok": false,
+    "path": "models\\ops_attestation_eurusd.json"
+  },
+  "preflight_status": {
+    "present": false,
+    "ok": false,
+    "path": "models\\live_preflight_eurusd.json"
+  },
+  "historical_replay_status": {
+    "present": true,
+    "ok": false,
+    "path": "models\\rc1\\eurusd_5k_v1_mr_rc1\\mt5_historical_replay_report.json",
+    "overall_verdict": "DRIFT_CRITICAL",
+    "payload": {
+      "symbol": "EURUSD",
+      "days": 30,
+      "bars_processed": 551,
+      "window_start_utc": "2026-03-12T08:39:54.374000+00:00",
+      "window_end_utc": "2026-04-08T05:22:47.312000+00:00",
+      "would_open_count": 22,
+      "would_close_count": 22,
+      "would_hold_count": 14,
+      "would_flat_count": 493,
+      "would_open_pct": 3.9927404718693285,
+      "would_close_pct": 3.9927404718693285,
+      "would_hold_pct": 2.540834845735027,
+      "would_flat_pct": 89.47368421052632,
+      "long_open_count": 11,
+      "short_open_count": 11,
+      "live_trades_per_bar": 0.039927404718693285,
+      "replay_trades_per_bar": 0.0133399209486166,
+      "signal_density_ratio": 2.9930765611346377,
+      "live_avg_spread_pips": 0.3763475499092559,
+      "backtest_spread_pips": 0.5,
+      "spread_ratio": 0.7526950998185118,
+      "long_short_ratio": 1.0,
+      "reason_counts": {
+        "spread": 7,
+        "session": 4,
+        "no_signal": 504
+      },
+      "session_opens": {
+        "Asia": 1,
+        "London": 4,
+        "London/NY": 13,
+        "NY": 3,
+        "Rollover": 1
+      },
+      "overall_verdict": "DRIFT_CRITICAL",
+      "overall_verdict_label": "DRIFT_CRITICAL - Significant live vs backtest divergence",
+      "manifest_path": "C:\\dev\\trading\\models\\rc1\\eurusd_5k_v1_mr_rc1\\manifest.json",
+      "manifest_hash": "f6a5df096e3d81e914b0196ec5e0b8fd76eebd0f79d40c9ff351c63891cf77de",
+      "logic_hash": "c3b83b7968134fd998fa5a3b0812bd4afd599d100e2cc8b23a2e1aed5fca277f",
+      "evaluator_hash": "3434c70a6ad1dc6ae18e9f40a39c130d6640d51be6af122abe488b606d166635",
+      "ticks_per_bar": 5000,
+      "audit_trace_path": "C:\\dev\\trading\\models\\rc1\\eurusd_5k_v1_mr_rc1\\mt5_historical_replay_report.audit.jsonl",
+      "raw_bars_path": "C:\\dev\\trading\\models\\rc1\\eurusd_5k_v1_mr_rc1\\mt5_historical_replay_report.bars.jsonl"
+    }
+  },
+  "final_verdict": "demoted",
+  "verdict_reason": "deployed anchor underperformed a mandatory baseline; deployed anchor underperformed the raw anchor baseline on PF or expectancy; shadow evidence below threshold: need 20 trading days and 30 actionable events; restart drill failed or missing; preflight failed or missing; ops attestation failed or missing; historical MT5 replay shows critical drift",
+  "weekly_reviews": [],
+  "replay_reference": {
+    "reference_source": "models\\rc1\\eurusd_5k_v1_mr_rc1\\baseline_holdout_eurusd.json",
+    "signal_density": 0.04816285998013903,
+    "would_open_density": 0.04816285998013903,
+    "long_share": 0.020618556701030927
+  }
+}

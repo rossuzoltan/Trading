@@ -32,16 +32,34 @@ RC_CONFIGS: tuple[dict[str, Any], ...] = (
         "ticks_per_bar": 5000,
         "name": "eurusd_5k_v1_mr_rc1",
         "rule_family": "mean_reversion",
-        "rule_params": {"threshold": 1.0, "sl_value": 1.5, "tp_value": 3.0},
-        "spread_limit_pips": 1.5,
+        "rule_params": {
+            "threshold": 1.5,
+            "sl_value": 1.5,
+            "tp_value": 3.0,
+            "max_spread_z": 0.5,
+            "max_time_delta_z": 2.0,
+            "max_abs_ma20_slope": 0.15,
+            "max_abs_ma50_slope": 0.08,
+        },
+        "spread_limit_pips": 1.0,
+        "rollover_block_utc_hours": [21, 22, 23, 0],
     },
     {
         "symbol": "GBPUSD",
         "ticks_per_bar": 10000,
         "name": "gbpusd_10k_v1_mr_rc1",
         "rule_family": "mean_reversion",
-        "rule_params": {"threshold": 1.0, "sl_value": 1.5, "tp_value": 3.0},
-        "spread_limit_pips": 2.5,
+        "rule_params": {
+            "threshold": 1.75,
+            "sl_value": 1.5,
+            "tp_value": 3.0,
+            "max_spread_z": 0.75,
+            "max_time_delta_z": 2.0,
+            "max_abs_ma20_slope": 0.15,
+            "max_abs_ma50_slope": 0.08,
+        },
+        "spread_limit_pips": 1.25,
+        "rollover_block_utc_hours": [21, 22, 23, 0],
     },
 )
 
@@ -89,6 +107,7 @@ def generate_rc_notes(manifest: dict[str, Any]) -> str:
         "* Approved only for paper-live shadow evidence collection.\n\n"
         "## Runtime Contract\n"
         f"* **Spread Guard**: `{runtime_constraints.get('spread_sanity_max_pips')}` pips\n"
+        f"* **Rollover Block (UTC)**: `{runtime_constraints.get('rollover_block_utc_hours')}`\n"
         f"* **Daily Loss Stop**: `${runtime_constraints.get('daily_loss_stop_usd')}`\n"
         f"* **Rule Params**: `{json.dumps(rule_params, sort_keys=True)}`\n\n"
         "## Traceability\n"
@@ -105,6 +124,7 @@ def build_manifest(config: dict[str, Any], *, git_commit: str, evaluator_hash: s
         spread_sanity_max_pips=float(config["spread_limit_pips"]),
         max_concurrent_positions=1,
         daily_loss_stop_usd=100.0,
+        rollover_block_utc_hours=list(config.get("rollover_block_utc_hours", [21, 22, 23, 0])),
     )
     manifest = create_rule_manifest(
         strategy_symbol=config["symbol"],

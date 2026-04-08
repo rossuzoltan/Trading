@@ -35,6 +35,7 @@ from project_paths import (
     validate_dataset_integrity,
 )
 from runtime_common import STATE_FEATURE_COUNT, deserialize_action_map
+from selector_manifest import load_selector_manifest, validate_paper_live_candidate_manifest
 from trading_config import resolve_bar_construction_ticks_per_bar
 
 ensure_project_venv(project_root=ROOT, script_path=__file__)
@@ -70,6 +71,12 @@ OPTIONAL_PACKAGES = {
 }
 DEFAULT_RUNTIME_MODEL_NAME = "models/model_<symbol>_best.zip"
 DEFAULT_RUNTIME_SCALER_NAME = "models/scaler_<SYMBOL>.pkl"
+RC1_REQUIRED_FILES = (
+    "manifest.json",
+    "baseline_scoreboard_rc1.json",
+    "baseline_scoreboard_rc1.md",
+    "release_notes_rc1.md",
+)
 
 
 def _print_header(title: str) -> None:
@@ -198,7 +205,7 @@ def _validate_runtime_manifest_bundle(
     )
 
 
-def _check_runtime_assets(*, strict_runtime_assets: bool = False) -> tuple[list[str], list[str]]:
+def _check_rl_runtime_assets(*, strict_runtime_assets: bool = False) -> tuple[list[str], list[str]]:
     issues: list[str] = []
     warnings: list[str] = []
     dataset_path: Path | None = None
@@ -322,6 +329,87 @@ def _check_runtime_assets(*, strict_runtime_assets: bool = False) -> tuple[list[
     return issues, warnings
 
 
+def _check_rc1_assets() -> tuple[list[str], list[str]]:
+    issues: list[str] = []
+    warnings: list[str] = []
+    rc1_root = MODELS_DIR / "rc1"
+    if not rc1_root.exists():
+        return [f"RC1 root is missing: {_display_path(rc1_root)}"], warnings
+
+    rc_dirs = sorted(path for path in rc1_root.iterdir() if path.is_dir())
+    if not rc_dirs:
+        return [f"No RC1 packs found under {_display_path(rc1_root)}"], warnings
+
+    seen_symbols: set[str] = set()
+    for pack_dir in rc_dirs:
+        manifest_path = pack_dir / "manifest.json"
+        if not manifest_path.exists():
+            issues.append(f"RC1 pack missing manifest: {_display_path(manifest_path)}")
+            continue
+        try:
+            manifest = load_selector_manifest(manifest_path, verify_manifest_hash=True)
+            validate_paper_live_candidate_manifest(manifest, verify_manifest_hash=True)
+        except Exception as exc:
+            issues.append(f"RC1 pack {_display_path(pack_dir)} failed manifest validation: {exc}")
+            continue
+
+        seen_symbols.add(manifest.strategy_symbol)
+        for filename in RC1_REQUIRED_FILES:
+            required_path = pack_dir / filename
+            if not required_path.exists():
+                issues.append(f"RC1 pack {_display_path(pack_dir)} missing {filename}")
+
+        ticks_per_bar = int(manifest.ticks_per_bar or manifest.bar_construction_ticks_per_bar or 0)
+        dataset_path = None
+        try:
+            dataset_path = resolve_dataset_path(ticks_per_bar=ticks_per_bar)
+            print(f"RC1 dataset {manifest.strategy_symbol}: {_display_path(dataset_path)}")
+            metadata = load_dataset_build_info(required=False, ticks_per_bar=ticks_per_bar)
+            if metadata is None:
+                issues.append(
+                    f"Dataset build metadata missing for {manifest.strategy_symbol} {ticks_per_bar} ticks/bar."
+                )
+            else:
+                validate_dataset_bar_spec(
+                    dataset_path=dataset_path,
+                    expected_ticks_per_bar=ticks_per_bar,
+                    metadata_required=True,
+                )
+                validate_dataset_integrity(
+                    dataset_path=dataset_path,
+                    expected_ticks_per_bar=ticks_per_bar,
+                    metadata_required=True,
+                    symbol=manifest.strategy_symbol,
+                )
+        except Exception as exc:
+            issues.append(
+                f"RC1 dataset validation failed for {manifest.strategy_symbol} {ticks_per_bar} ticks/bar: {exc}"
+            )
+            continue
+
+        print(
+            f"RC1 pack {manifest.strategy_symbol}: OK "
+            f"({_display_path(pack_dir)} @ {ticks_per_bar} ticks/bar)"
+        )
+
+    approved_pairs = {"EURUSD", "GBPUSD"}
+    missing_pairs = sorted(approved_pairs - seen_symbols)
+    if missing_pairs:
+        issues.append("Missing approved RC1 anchor packs: " + ", ".join(missing_pairs))
+
+    return issues, warnings
+
+
+def _check_runtime_assets(
+    *,
+    strict_runtime_assets: bool = False,
+    mode: str = "rc1",
+) -> tuple[list[str], list[str]]:
+    if mode == "rl":
+        return _check_rl_runtime_assets(strict_runtime_assets=strict_runtime_assets)
+    return _check_rc1_assets()
+
+
 def _check_venv_layout() -> list[str]:
     issues: list[str] = []
     venv_dir = ROOT_DIR / ".venv"
@@ -373,7 +461,7 @@ def _check_requirements() -> list[str]:
     return issues
 
 
-def main(*, strict_runtime_assets: bool = False) -> int:
+def main(*, strict_runtime_assets: bool = False, mode: str = "rc1") -> int:
     print("Trading Project Health Check")
     print("============================")
 
@@ -389,7 +477,10 @@ def main(*, strict_runtime_assets: bool = False) -> int:
         print("Core repo files are present.")
 
     _print_header("Runtime Assets")
-    asset_issues, asset_warnings = _check_runtime_assets(strict_runtime_assets=strict_runtime_assets)
+    asset_issues, asset_warnings = _check_runtime_assets(
+        strict_runtime_assets=strict_runtime_assets,
+        mode=mode,
+    )
     all_issues.extend(asset_issues)
     if asset_issues:
         for issue in asset_issues:
@@ -432,9 +523,15 @@ def main(*, strict_runtime_assets: bool = False) -> int:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Trading project health checks")
     parser.add_argument(
+        "--mode",
+        choices=("rc1", "rl"),
+        default="rc1",
+        help="Select the active operational surface. Default: rc1.",
+    )
+    parser.add_argument(
         "--strict-runtime-assets",
         action="store_true",
         help="Treat missing model/scaler/compatibility dataset artifacts as hard issues.",
     )
     args = parser.parse_args()
-    raise SystemExit(main(strict_runtime_assets=args.strict_runtime_assets))
+    raise SystemExit(main(strict_runtime_assets=args.strict_runtime_assets, mode=args.mode))

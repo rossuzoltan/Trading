@@ -50,13 +50,13 @@ class ShadowBrokerTests(unittest.TestCase):
 
             open_record = broker.evaluate(
                 bar_ts="2026-04-08T10:00:00+00:00",
-                features={"spread_z": -1.5},
+                features={"price_z": -1.6, "spread_z": 0.1, "ma20_slope": 0.05, "ma50_slope": 0.02},
                 current_spread_pips=0.7,
                 is_session_open=True,
             )
             reverse_record = broker.evaluate(
                 bar_ts="2026-04-08T10:05:00+00:00",
-                features={"spread_z": 1.8},
+                features={"price_z": 1.8, "spread_z": 0.1, "ma20_slope": -0.04, "ma50_slope": -0.02},
                 current_spread_pips=0.8,
                 is_session_open=True,
             )
@@ -86,7 +86,7 @@ class ShadowBrokerTests(unittest.TestCase):
 
             record = broker.evaluate(
                 bar_ts="2026-04-08T22:30:00+00:00",
-                features={"spread_z": -2.0},
+                features={"price_z": -2.0, "spread_z": 0.0, "ma20_slope": 0.0, "ma50_slope": 0.0},
                 current_spread_pips=0.6,
                 is_session_open=False,
             )

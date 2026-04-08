@@ -9,6 +9,13 @@ from uuid import uuid4
 from artifact_manifest import create_manifest, save_manifest
 from feature_engine import FEATURE_COLS
 from runtime_common import STATE_FEATURE_COUNT, build_action_map
+from selector_manifest import (
+    CostModel,
+    RuntimeConstraints,
+    ThresholdPolicy,
+    create_rule_manifest,
+    save_selector_manifest,
+)
 from tools import project_healthcheck
 import project_paths
 from trading_config import ACTION_SL_MULTS, ACTION_TP_MULTS
@@ -79,7 +86,7 @@ class ProjectHealthcheckTests(unittest.TestCase):
                 patch.object(project_healthcheck, "load_validated_model", model_loader), \
                 patch.object(project_healthcheck, "load_validated_scaler", scaler_loader), \
                 patch.object(project_healthcheck, "load_validated_vecnormalize", vecnormalize_loader):
-                issues, warnings = project_healthcheck._check_runtime_assets()
+                issues, warnings = project_healthcheck._check_runtime_assets(mode="rl")
 
             self.assertEqual([], issues)
             self.assertEqual([], warnings)
@@ -105,9 +112,56 @@ class ProjectHealthcheckTests(unittest.TestCase):
                 patch.object(project_healthcheck, "load_validated_model", side_effect=RuntimeError("Dataset id mismatch")), \
                 patch.object(project_healthcheck, "load_validated_scaler", return_value=object()), \
                 patch.object(project_healthcheck, "load_validated_vecnormalize", return_value=None):
-                issues, warnings = project_healthcheck._check_runtime_assets()
+                issues, warnings = project_healthcheck._check_runtime_assets(mode="rl")
 
             self.assertTrue(any("Runtime bundle GBPUSD failed validation" in issue for issue in issues))
+            self.assertEqual([], warnings)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_check_runtime_assets_defaults_to_rc1_pack_validation(self):
+        tmpdir = make_test_dir("healthcheck_rc1")
+        try:
+            models_dir = tmpdir / "models"
+            rc1_dir = models_dir / "rc1"
+            rc1_dir.mkdir(parents=True, exist_ok=True)
+            dataset_path = tmpdir / "data" / "DATA_CLEAN_VOLUME_5000.csv"
+            dataset_path.parent.mkdir(parents=True, exist_ok=True)
+            dataset_path.write_text("Gmt time,Symbol,Volume\n2024-01-01T00:00:00Z,EURUSD,5000\n", encoding="utf-8")
+
+            for symbol in ("EURUSD", "GBPUSD"):
+                pack_dir = rc1_dir / f"{symbol.lower()}_pack"
+                pack_dir.mkdir(parents=True, exist_ok=True)
+                manifest = create_rule_manifest(
+                    strategy_symbol=symbol,
+                    rule_family="mean_reversion",
+                    rule_params={"threshold": 1.0},
+                    dataset_path=dataset_path,
+                    ticks_per_bar=5000 if symbol == "EURUSD" else 10000,
+                    cost_model=CostModel(commission_per_lot=7.0, slippage_pips=0.25),
+                    threshold_policy=ThresholdPolicy(min_edge_pips=0.0, reject_ambiguous=True),
+                    runtime_constraints=RuntimeConstraints(
+                        session_filter_active=True,
+                        spread_sanity_max_pips=1.5,
+                        max_concurrent_positions=1,
+                        daily_loss_stop_usd=100.0,
+                    ),
+                    release_stage="paper_live_candidate",
+                    evaluator_hash="eval",
+                    logic_hash="logic",
+                )
+                save_selector_manifest(manifest, pack_dir / "manifest.json")
+                for filename in project_healthcheck.RC1_REQUIRED_FILES[1:]:
+                    (pack_dir / filename).write_text("{}", encoding="utf-8")
+
+            with patch.object(project_healthcheck, "MODELS_DIR", models_dir), \
+                patch.object(project_healthcheck, "resolve_dataset_path", return_value=dataset_path), \
+                patch.object(project_healthcheck, "load_dataset_build_info", return_value={"bar_construction_ticks_per_bar": 5000}), \
+                patch.object(project_healthcheck, "validate_dataset_bar_spec", return_value=None), \
+                patch.object(project_healthcheck, "validate_dataset_integrity", return_value={"symbols": ["EURUSD"]}):
+                issues, warnings = project_healthcheck._check_runtime_assets(mode="rc1")
+
+            self.assertEqual([], issues)
             self.assertEqual([], warnings)
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)

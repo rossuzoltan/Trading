@@ -12,6 +12,9 @@ MODELS_DIR = ROOT_DIR / "models"
 CHECKPOINTS_DIR = ROOT_DIR / "checkpoints"
 DOCS_DIR = ROOT_DIR / "docs"
 LOGS_DIR = ROOT_DIR / "logs"
+ARTIFACTS_DIR = ROOT_DIR / "artifacts"
+SHADOW_ARTIFACTS_DIR = ARTIFACTS_DIR / "shadow"
+GATE_ARTIFACTS_DIR = ARTIFACTS_DIR / "gates"
 DATASET_BUILD_INFO_PATH = DATA_DIR / "dataset_build_info.json"
 LEGACY_DATASET_QC_REPORT_PATH = DATA_DIR / "volume_bars_qc_report.json"
 REQUIRED_DATASET_COLUMNS = (
@@ -43,8 +46,32 @@ DEFAULT_MANIFEST_CANDIDATES = (
 
 
 def ensure_runtime_dirs() -> None:
-    for path in (DATA_DIR, MODELS_DIR, CHECKPOINTS_DIR, DOCS_DIR, LOGS_DIR):
+    for path in (DATA_DIR, MODELS_DIR, CHECKPOINTS_DIR, DOCS_DIR, LOGS_DIR, ARTIFACTS_DIR, SHADOW_ARTIFACTS_DIR, GATE_ARTIFACTS_DIR):
         path.mkdir(parents=True, exist_ok=True)
+
+
+def shadow_artifact_dir(
+    symbol: str,
+    manifest_hash: str,
+    *,
+    base_dir: str | Path | None = None,
+) -> Path:
+    root = Path(base_dir) if base_dir is not None else SHADOW_ARTIFACTS_DIR
+    normalized_symbol = symbol.strip().upper() or "UNKNOWN"
+    normalized_hash = (manifest_hash or "unknown").strip() or "unknown"
+    return root / normalized_symbol / normalized_hash
+
+
+def gate_artifact_dir(
+    symbol: str,
+    manifest_hash: str,
+    *,
+    base_dir: str | Path | None = None,
+) -> Path:
+    root = Path(base_dir) if base_dir is not None else GATE_ARTIFACTS_DIR
+    normalized_symbol = symbol.strip().upper() or "UNKNOWN"
+    normalized_hash = (manifest_hash or "unknown").strip() or "unknown"
+    return root / normalized_symbol / normalized_hash
 
 
 def _first_existing(paths: list[Path]) -> Path | None:
