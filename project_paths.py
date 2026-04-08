@@ -74,20 +74,25 @@ def list_manifest_paths() -> list[Path]:
     return discovered
 
 
-def resolve_dataset_path(preferred: str | Path | None = None) -> Path:
+def resolve_dataset_path(preferred: str | Path | None = None, *, ticks_per_bar: int | None = None) -> Path:
     candidates: list[Path] = []
     if preferred is not None:
         candidates.append(Path(preferred))
+    
+    if ticks_per_bar is not None:
+        candidates.append(DATA_DIR / f"DATA_CLEAN_VOLUME_{int(ticks_per_bar)}.csv")
+        candidates.append(DATA_DIR / f"FOREX_MULTI_SET_{int(ticks_per_bar)}.csv")
+        
     candidates.extend(DEFAULT_DATASET_CANDIDATES)
 
     resolved = _first_existing(candidates)
     if resolved is not None:
         return resolved
 
-    names = ", ".join(path.name for path in DEFAULT_DATASET_CANDIDATES)
+    names = ", ".join(path.name for path in candidates if path.name)
     raise FileNotFoundError(
         f"No dataset found. Expected one of: {names}. "
-        "Run download_dukascopy.py or build_volume_bars.py first."
+        "Run download_dukascopy.py or build_volume_bars.py with --ticks-per-bar first."
     )
 
 
@@ -95,10 +100,16 @@ def resolve_dataset_build_info_path(
     preferred: str | Path | None = None,
     *,
     required: bool = False,
+    ticks_per_bar: int | None = None,
 ) -> Path | None:
     candidates: list[Path] = []
     if preferred is not None:
         candidates.append(Path(preferred))
+    
+    if ticks_per_bar is not None:
+        candidates.append(DATA_DIR / f"dataset_build_info_{int(ticks_per_bar)}.json")
+        candidates.append(DATA_DIR / f"volume_bars_qc_report_{int(ticks_per_bar)}.json")
+        
     candidates.extend((DATASET_BUILD_INFO_PATH, LEGACY_DATASET_QC_REPORT_PATH))
 
     resolved = _first_existing(candidates)
@@ -108,7 +119,7 @@ def resolve_dataset_build_info_path(
     names = ", ".join(path.name for path in candidates if path.name)
     raise FileNotFoundError(
         f"No dataset build metadata found. Expected one of: {names}. "
-        "Run build_volume_bars.py first."
+        "Run build_volume_bars.py with --ticks-per-bar first."
     )
 
 
@@ -116,8 +127,9 @@ def load_dataset_build_info(
     preferred: str | Path | None = None,
     *,
     required: bool = False,
+    ticks_per_bar: int | None = None,
 ) -> dict | None:
-    path = resolve_dataset_build_info_path(preferred=preferred, required=required)
+    path = resolve_dataset_build_info_path(preferred=preferred, required=required, ticks_per_bar=ticks_per_bar)
     if path is None:
         return None
     return json.loads(path.read_text(encoding="utf-8"))
@@ -150,7 +162,11 @@ def validate_dataset_bar_spec(
     metadata_path: str | Path | None = None,
     metadata_required: bool = False,
 ) -> dict | None:
-    build_info_path = resolve_dataset_build_info_path(preferred=metadata_path, required=metadata_required)
+    build_info_path = resolve_dataset_build_info_path(
+        preferred=metadata_path, 
+        required=metadata_required,
+        ticks_per_bar=expected_ticks_per_bar
+    )
     if build_info_path is None:
         return None
 
@@ -282,8 +298,8 @@ def validate_dataset_integrity(
         "duplicate_symbol_timestamp_rows": duplicate_rows,
         "symbols": sorted(actual_counts.keys()),
         "symbol_reports": symbol_reports,
-        "metadata_path": str(resolve_dataset_build_info_path(preferred=metadata_path, required=metadata_required))
-        if resolve_dataset_build_info_path(preferred=metadata_path, required=metadata_required) is not None
+        "metadata_path": str(resolve_dataset_build_info_path(preferred=metadata_path, required=metadata_required, ticks_per_bar=expected_ticks_per_bar))
+        if resolve_dataset_build_info_path(preferred=metadata_path, required=metadata_required, ticks_per_bar=expected_ticks_per_bar) is not None
         else None,
     }
 

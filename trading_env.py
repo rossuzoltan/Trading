@@ -18,6 +18,14 @@ Phase 10 upgrades (Top 0.1% features)
 
 from __future__ import annotations
 
+import warnings
+warnings.warn(
+    "[DEPRECATED] ForexTradingEnv is obsolete. The canonical RL environment "
+    "is now RuntimeGymEnv in runtime_gym_env.py. Please update your dependencies.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 import json
 import numpy as np
 import pandas as pd

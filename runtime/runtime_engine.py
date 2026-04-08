@@ -121,12 +121,17 @@ class VolumeBarBuilder:
 
 
 def _as_tick_event(record: Any) -> TickEvent:
-    if isinstance(record, Mapping):
-        time_msc = int(record.get("time_msc") or int(record["time"]) * 1000)
-        bid = float(record["bid"])
-        ask = float(record["ask"])
-        volume = float(record.get("volume_real", record.get("volume", 1.0)))
-        return TickEvent(time_msc=time_msc, bid=bid, ask=ask, volume=volume)
+    if hasattr(record, "__getitem__") and not hasattr(record, "bid"):
+        time_val = record["time_msc"] if "time_msc" in getattr(getattr(record, "dtype", None), "names", []) or "time_msc" in record else record["time"] * 1000
+        try:
+            vol = record["volume_real"]
+        except (KeyError, IndexError, ValueError):
+            try:
+                vol = record.get("volume_real", record.get("volume", 1.0))
+            except AttributeError:
+                vol = record["volume"] if "volume" in getattr(getattr(record, "dtype", None), "names", []) else 1.0
+        return TickEvent(time_msc=int(time_val), bid=float(record["bid"]), ask=float(record["ask"]), volume=float(vol))
+    
     time_msc = int(getattr(record, "time_msc", getattr(record, "time", 0) * 1000))
     return TickEvent(
         time_msc=time_msc,

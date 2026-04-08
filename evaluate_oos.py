@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import pickle
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable
@@ -12,6 +12,9 @@ from typing import Any, Callable
 from interpreter_guard import ensure_project_venv
 
 ensure_project_venv(project_root=Path(__file__).resolve().parent, script_path=__file__)
+
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from strategies.rule_logic import compute_rule_direction
 
 import matplotlib
 matplotlib.use("Agg")
@@ -21,12 +24,13 @@ import pandas as pd
 from sb3_contrib import MaskablePPO
 
 from artifact_manifest import (
-    dataset_id_for_path,
-    load_manifest,
+    dataset_id_for_path as legacy_dataset_id_for_path,
+    load_manifest as load_legacy_manifest,
     load_validated_model,
     load_validated_scaler,
     load_validated_vecnormalize,
 )
+from selector_manifest import load_selector_manifest, dataset_id_for_path as v3_dataset_id_for_path
 from dataset_validation import validate_symbol_bar_spec
 from execution.replay_broker import ReplayBroker
 from risk.risk_engine import RiskEngine, RiskLimits
@@ -104,6 +108,9 @@ class ReplayContext:
     manifest_path: Path | None
     artifact_metadata: dict[str, Any]
     runtime_options: dict[str, Any]
+    engine_type: str = "ML"
+    rule_family: str | None = None
+    rule_params: dict[str, Any] = field(default_factory=dict)
 
 
 def _clone_context_with_segment(context: ReplayContext, segment: pd.DataFrame) -> ReplayContext:
@@ -188,13 +195,7 @@ def _target_direction_to_action_index(*, action_map, position_direction: int, ta
 
 
 def _trend_provider(*, feature_row, position_direction: int, action_map, **_: object) -> int:
-    ma20_slope = float(feature_row.get("ma20_slope", 0.0) or 0.0)
-    ma50_slope = float(feature_row.get("ma50_slope", 0.0) or 0.0)
-    target_direction = 0
-    if ma20_slope > 0.0 and ma50_slope > 0.0:
-        target_direction = 1
-    elif ma20_slope < 0.0 and ma50_slope < 0.0:
-        target_direction = -1
+    target_direction = compute_rule_direction("trend", feature_row, {})
     return _target_direction_to_action_index(
         action_map=action_map,
         position_direction=int(position_direction or 0),
@@ -203,12 +204,8 @@ def _trend_provider(*, feature_row, position_direction: int, action_map, **_: ob
 
 
 def _mean_reversion_provider(*, feature_row, position_direction: int, action_map, **_: object) -> int:
-    spread_z = float(feature_row.get("spread_z", 0.0) or 0.0)
-    target_direction = 0
-    if spread_z <= -1.0:
-        target_direction = 1
-    elif spread_z >= 1.0:
-        target_direction = -1
+    # We pass threshold as 1.0 by default for the baseline
+    target_direction = compute_rule_direction("mean_reversion", feature_row, {"threshold": 1.0})
     return _target_direction_to_action_index(
         action_map=action_map,
         position_direction=int(position_direction or 0),
@@ -228,6 +225,14 @@ RUNTIME_BASELINE_PROVIDERS: dict[str, Callable[..., int]] = {
     "runtime_mean_reversion": _mean_reversion_provider,
     "runtime_trend": _trend_provider,
 }
+
+def _rule_action_provider(*, feature_row, position_direction, action_map, rule_family, rule_params, **_: object) -> int:
+    target_direction = compute_rule_direction(rule_family, feature_row, rule_params)
+    return _target_direction_to_action_index(
+        action_map=action_map,
+        position_direction=int(position_direction or 0),
+        target_direction=target_direction,
+    )
 
 
 def _metrics_profitable(metrics: dict[str, Any] | None) -> bool:
@@ -478,12 +483,41 @@ def _load_symbol_raw_frame(
 
 
 def _load_promoted_manifest_context(symbol: str) -> ReplayContext | None:
+    manifest_path_env = os.environ.get("EVAL_MANIFEST_PATH")
+    print(f"DEBUG: Loading promoted manifest context for {symbol}. EVAL_MANIFEST_PATH={manifest_path_env}")
     try:
-        manifest_path = resolve_manifest_path(symbol=symbol, preferred=EVAL_MANIFEST_PATH)
+        manifest_path = resolve_manifest_path(symbol=symbol, preferred=manifest_path_env)
+        print(f"DEBUG: Found manifest path: {manifest_path}")
     except FileNotFoundError:
+        print(f"DEBUG: Manifest path not found for {symbol}")
         return None
-    manifest = load_manifest(manifest_path)
-    dataset_path = resolve_dataset_path()
+    
+    # Try loading as SelectorManifest (V3+) first, then fallback to Legacy (V1)
+    is_v3 = False
+    try:
+        with open(manifest_path, "r") as f:
+            raw_m = json.load(f)
+            print(f"DEBUG: Loaded raw manifest JSON. Version: {raw_m.get('manifest_version')}")
+            if raw_m.get("manifest_version") in ["2", "3", "4"]:
+                is_v3 = True
+    except Exception as e:
+        print(f"DEBUG: Failed to parse manifest JSON as v3/v4: {e}")
+        pass
+
+    if is_v3:
+        manifest = load_selector_manifest(manifest_path)
+        print(f"DEBUG: Successfully loaded SelectorManifest (v3/v4)")
+    else:
+        manifest = load_legacy_manifest(manifest_path)
+        print(f"DEBUG: Loaded legacy manifest")
+
+    print(f"DEBUG: Resolving dataset for {symbol} (ticks_per_bar={getattr(manifest, 'ticks_per_bar', None)})")
+    try:
+        dataset_path = resolve_dataset_path(ticks_per_bar=getattr(manifest, "ticks_per_bar", None))
+        print(f"DEBUG: Resolved dataset path: {dataset_path}")
+    except Exception as e:
+        print(f"DEBUG: Dataset resolution failed: {e}")
+        return None
     manifest_ticks = manifest.bar_construction_ticks_per_bar or manifest.ticks_per_bar
     raw = _load_symbol_raw_frame(symbol=symbol, dataset_path=dataset_path, expected_ticks_per_bar=manifest_ticks)
     featured = _compute_raw(raw).dropna(subset=list(FEATURE_COLS))
@@ -514,34 +548,60 @@ def _load_promoted_manifest_context(symbol: str) -> ReplayContext | None:
         if len(trainable_feature_frame) > max_bars:
             trainable_feature_frame = trainable_feature_frame.iloc[-max_bars:].copy()
 
-    dataset_id = dataset_id_for_path(dataset_path)
-    action_map = deserialize_action_map(manifest.action_map)
-    diagnostics_path = Path(manifest.training_diagnostics_path) if manifest.training_diagnostics_path else None
+    if is_v3:
+        dataset_id = v3_dataset_id_for_path(dataset_path)
+    else:
+        dataset_id = legacy_dataset_id_for_path(dataset_path)
+        
+    action_map = []
+    if not is_v3:
+        # Legacy Action Map from manifest
+        from runtime_common import deserialize_action_map
+        action_map = deserialize_action_map(manifest.action_map)
+    else:
+        # For V3/RULE, we might use a standard map if not present
+        # In this task we standardize on 1.5/3.0 for RC1
+        from runtime_common import ActionSpec, ActionType
+        action_map = [
+            ActionSpec(ActionType.HOLD),
+            ActionSpec(ActionType.OPEN, direction=1, sl_value=1.5, tp_value=3.0),
+            ActionSpec(ActionType.OPEN, direction=-1, sl_value=1.5, tp_value=3.0),
+            ActionSpec(ActionType.CLOSE),
+        ]
+
+    model = None
+    obs_normalizer = None
+    scaler = None
+    diagnostics_path = Path(manifest.training_diagnostics_path) if getattr(manifest, "training_diagnostics_path", None) else None
     runtime_options = _load_training_runtime_options(diagnostics_path)
-    expected_observation_shape = list(getattr(manifest, "observation_shape", None) or [])
-    if not expected_observation_shape:
-        expected_observation_shape = [int(runtime_options["window_size"]), len(FEATURE_COLS) + STATE_FEATURE_COUNT]
-    model = load_validated_model(
-        manifest,
-        expected_symbol=symbol,
-        expected_action_map=action_map,
-        expected_observation_shape=expected_observation_shape,
-        expected_dataset_id=dataset_id,
-    )
-    obs_normalizer = load_validated_vecnormalize(
-        manifest,
-        expected_symbol=symbol,
-        expected_action_map=action_map,
-        expected_observation_shape=expected_observation_shape,
-        expected_dataset_id=dataset_id,
-    )
-    scaler = load_validated_scaler(
-        manifest,
-        expected_symbol=symbol,
-        expected_action_map=action_map,
-        expected_observation_shape=expected_observation_shape,
-        expected_dataset_id=dataset_id,
-    )
+    
+    if not is_v3 or manifest.engine_type == "ML":
+        expected_observation_shape = list(getattr(manifest, "observation_shape", None) or [])
+        if not expected_observation_shape:
+            runtime_options = _load_training_runtime_options(diagnostics_path)
+            expected_observation_shape = [int(runtime_options["window_size"]), len(FEATURE_COLS) + STATE_FEATURE_COUNT]
+        
+        model = load_validated_model(
+            manifest,
+            expected_symbol=symbol,
+            expected_action_map=action_map,
+            expected_observation_shape=expected_observation_shape,
+            expected_dataset_id=dataset_id,
+        )
+        obs_normalizer = load_validated_vecnormalize(
+            manifest,
+            expected_symbol=symbol,
+            expected_action_map=action_map,
+            expected_observation_shape=expected_observation_shape,
+            expected_dataset_id=dataset_id,
+        )
+        scaler = load_validated_scaler(
+            manifest,
+            expected_symbol=symbol,
+            expected_action_map=action_map,
+            expected_observation_shape=expected_observation_shape,
+            expected_dataset_id=dataset_id,
+        )
     return ReplayContext(
         symbol=symbol.upper(),
         source="promoted_manifest",
@@ -563,11 +623,18 @@ def _load_promoted_manifest_context(symbol: str) -> ReplayContext | None:
         manifest_path=manifest_path,
         artifact_metadata={
             "manifest_path": str(manifest_path),
-            "model_path": str(manifest.model_path),
-            "vecnormalize_path": str(manifest.vecnormalize_path) if manifest.vecnormalize_path else None,
+            "model_path": str(getattr(manifest, "model_path", None)),
+            "vecnormalize_path": (
+                str(getattr(manifest, "vecnormalize_path", None))
+                if getattr(manifest, "vecnormalize_path", None)
+                else None
+            ),
             "training_diagnostics_path": str(diagnostics_path) if diagnostics_path is not None else None,
         },
         runtime_options=runtime_options,
+        engine_type=manifest.engine_type if is_v3 else "ML",
+        rule_family=getattr(manifest, "rule_family", None) if is_v3 else None,
+        rule_params=dict(getattr(manifest, "rule_params", {})) if is_v3 else {},
     )
 
 
@@ -1133,7 +1200,20 @@ def main() -> None:
             "artifact_source": context.source,
         },
     )
-    equity_curve, timestamps, trade_log, execution_log, diagnostics = run_replay(replay_context=context)
+    
+    action_index_provider = None
+    if context.engine_type == "RULE" and context.rule_family:
+        from functools import partial
+        action_index_provider = partial(
+            _rule_action_provider,
+            rule_family=context.rule_family,
+            rule_params=context.rule_params
+        )
+
+    equity_curve, timestamps, trade_log, execution_log, diagnostics = run_replay(
+        replay_context=context,
+        action_index_provider=action_index_provider
+    )
     final_equity = equity_curve[-1] if equity_curve else 1_000.0
     timed_sharpe = compute_timed_sharpe(equity_curve, timestamps)
     max_dd = compute_max_drawdown(equity_curve)

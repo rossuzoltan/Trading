@@ -309,6 +309,13 @@ def _compute_raw(df: pd.DataFrame, *, latest_only_hurst: bool = False, fast_mode
     df["ma20_slope"] = df["ma20"].diff() / atr_safe
     df["ma50_slope"] = df["ma50"].diff() / atr_safe
 
+    # ── Price Z-score (challenger feature) ───────────────────────────────────
+    # (Close - MA20) / rolling_std(Close, 20): scale-free price extension measure.
+    # Not in FEATURE_COLS — used as a challenger signal in rule experiments.
+    price_roll_std = df["Close"].rolling(20).std().replace(0, np.nan)
+    df["price_z"] = (df["Close"] - df["ma20"]) / price_roll_std
+    df["price_z"] = df["price_z"].fillna(0.0)
+
     # ── Hurst Exponent (rolling 100 bars) ────────────────────────────────────
     # Only compute if we have enough rows AND not in fast_mode (slow — uses vectorised R/S)
     if not fast_mode and len(df) >= 100:
@@ -390,6 +397,7 @@ class FeatureEngine:
             "atr_14": 0.0,
             "spread_z": 0.0,
             "time_delta_z": 0.0,
+            "price_z": 0.0,
         }
         self._perf = {
             "push_record_calls": 0,
@@ -431,6 +439,7 @@ class FeatureEngine:
         atr_14: float,
         spread_z: float,
         time_delta_z: float,
+        price_z: float = 0.0,
     ) -> None:
         self._last_features_raw = np.nan_to_num(
             np.asarray(raw_features, dtype=np.float32),
@@ -448,6 +457,7 @@ class FeatureEngine:
             "atr_14": float(atr_14),
             "spread_z": float(spread_z),
             "time_delta_z": float(time_delta_z),
+            "price_z": float(price_z),
         }
 
     def _refresh_feature_cache_from_buffer(self) -> None:
@@ -473,6 +483,7 @@ class FeatureEngine:
             atr_14=float(row.get("atr_14", 0.0)),
             spread_z=float(row.get("spread_z", 0.0)),
             time_delta_z=float(row.get("time_delta_z", 0.0)),
+            price_z=float(row.get("price_z", 0.0)),
         )
 
     def fit_transform(
@@ -702,6 +713,12 @@ class FeatureEngine:
         spread_z = z_score(s[-1], s)
         time_delta_z = np.clip(z_score(d[-1], d), -5.0, 5.0)
 
+        # 5b. price_z: (close - MA20) / std(close,20)
+        c20 = c[-20:] if len(c) >= 20 else c
+        price_mean = np.mean(c20)
+        price_std = np.std(c20)
+        price_z = float((c[-1] - price_mean) / price_std) if price_std > 0 else 0.0
+
         # 6. Temporal (Cyclical) - Pure numpy/math (assuming ts is datetime64[ns])
         # last_dt = pd.Timestamp(ts[-1])
         # ns to s -> to hour
@@ -747,6 +764,7 @@ class FeatureEngine:
             atr_14=float(atr),
             spread_z=float(spread_z),
             time_delta_z=float(time_delta_z),
+            price_z=float(price_z),
         )
         self._perf["get_obs_hot_path_calls"] += 1
         self._perf["get_obs_hot_path_total_ns"] += max(time.perf_counter_ns() - start_ns, 0)
