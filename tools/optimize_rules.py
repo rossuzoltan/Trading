@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import logging
+import multiprocessing
 import os
 import sys
 from dataclasses import replace
@@ -21,6 +22,27 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+from edge_research import fit_baseline_alpha_gate
+from feature_engine import FEATURE_COLS
+from evaluate_oos import (
+    load_replay_context,
+    run_replay,
+    _rule_action_provider,
+    _target_direction_to_action_index,
+)
+
+def _run_worker(base_ctx, config, alpha_gate):
+    """Worker function for multiprocessing."""
+    try:
+        from dataclasses import replace
+        # We copy via replace since it's a dataclass, preventing state leakage.
+        ctx = replace(base_ctx)
+        from tools.optimize_rules import _run_single_variant
+        return _run_single_variant(ctx, config, alpha_gate=alpha_gate)
+    except Exception as e:
+        print(f"Worker Error evaluating {config}: {e}")
+        return None
 
 log = logging.getLogger("optimize_rules")
 
@@ -35,41 +57,46 @@ def _hash_file(filepath: Path) -> str:
 def build_parameter_grid() -> list[dict[str, Any]]:
     candidates = []
 
-    # 1. mean_reversion (Price-based with cost/regime guards)
-    for threshold in [1.0, 1.25, 1.5, 1.75]:
-        for max_spread_z in [0.5, 0.75]:
-            for max_abs_ma20_slope, max_abs_ma50_slope in [(0.15, 0.08), (0.2, 0.1)]:
-                candidates.append({
-                    "rule_family": "mean_reversion",
-                    "params": {
-                        "threshold": threshold,
-                        "max_spread_z": max_spread_z,
-                        "max_time_delta_z": 2.0,
-                        "max_abs_ma20_slope": max_abs_ma20_slope,
-                        "max_abs_ma50_slope": max_abs_ma50_slope,
-                    },
-                })
-
-    # 2. pro_mean_reversion
-    for adx_threshold in [20.0, 25.0, 30.0]:
-        for rsi_oversold in [30.0, 35.0]:
-            for pz in [1.25, 1.5, 1.75]:
-                for hurst in [False, True]:
+    # 1. mean_reversion (Standard & Aggressive)
+    # Testing everything from 'tight' (0.5) to 'deep' (2.0)
+    for long_threshold in [-0.5, -0.75, -1.0, -1.25, -1.5, -1.75, -2.0]:
+        for short_threshold in [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]:
+            for max_spread_z in [0.75, 1.25]:
+                for max_abs_ma20_slope, max_abs_ma50_slope in [(0.15, 0.08), (0.25, 0.15), (0.5, 0.3)]:
                     candidates.append({
-                        "rule_family": "pro_mean_reversion",
+                        "rule_family": "mean_reversion",
                         "params": {
-                            "adx_threshold": adx_threshold,
-                            "rsi_oversold": rsi_oversold,
-                            "rsi_overbought": 100.0 - rsi_oversold,
-                            "price_z_threshold": pz,
-                            "hurst_filter": hurst
-                        }
+                            "long_threshold": long_threshold,
+                            "short_threshold": short_threshold,
+                            "max_spread_z": max_spread_z,
+                            "max_time_delta_z": 2.5,
+                            "max_abs_ma20_slope": max_abs_ma20_slope,
+                            "max_abs_ma50_slope": max_abs_ma50_slope,
+                        },
                     })
 
-    # 3. macd_trend
-    for macdh_threshold in [0.0, 0.0001]:
+    # 2. pro_mean_reversion (RSI/ADX based)
+    for adx_threshold in [20.0, 30.0, 45.0]:
+        for rsi_oversold in [25.0, 35.0, 45.0]:
+            for long_pz in [-0.75, -1.25, -1.75]:
+                for short_pz in [0.75, 1.25, 1.75]:
+                    for hurst in [False, True]:
+                        candidates.append({
+                            "rule_family": "pro_mean_reversion",
+                            "params": {
+                                "adx_threshold": adx_threshold,
+                                "rsi_oversold": rsi_oversold,
+                                "rsi_overbought": 100.0 - rsi_oversold,
+                                "long_pz": long_pz,
+                                "short_pz": short_pz,
+                                "hurst_filter": hurst
+                            }
+                        })
+
+    # 3. macd_trend (Momentum)
+    for macdh_threshold in [0.0, 0.00005, 0.0002]:
         for require_ma_alignment in [True, False]:
-            for adx_trend in [0.0, 25.0]:
+            for adx_trend in [0.0, 20.0, 30.0]:
                 for hurst in [False, True]:
                     candidates.append({
                         "rule_family": "macd_trend",
@@ -81,16 +108,30 @@ def build_parameter_grid() -> list[dict[str, Any]]:
                         }
                     })
 
-    # 4. volatility_breakout
+    # 4. volatility_breakout (Bollinger)
     for mean_revert in [True, False]:
-        for threshold_up in [0.8, 0.9, 1.0, 1.1]:
-            for threshold_down in [0.2, 0.1, 0.0, -0.1]:
+        for threshold_up in [0.7, 0.85, 1.0, 1.15, 1.3]:
+            for threshold_down in [0.3, 0.15, 0.0, -0.15, -0.3]:
                 candidates.append({
                     "rule_family": "volatility_breakout",
                     "params": {
                         "mean_revert": mean_revert,
                         "threshold_up": threshold_up,
-                        "threshold_down": threshold_down
+                        "threshold_down": threshold_down,
+                    }
+                })
+
+    # 5. microstructure_bounce (High Frequency)
+    for td_threshold in [-1.5, -2.5, -3.5]:
+        for long_pz in [-0.5, -1.0, -1.5]:
+            for short_pz in [0.5, 1.0, 1.5]:
+                candidates.append({
+                    "rule_family": "microstructure_bounce",
+                    "params": {
+                        "td_threshold": td_threshold,
+                        "long_pz": long_pz,
+                        "short_pz": short_pz,
+                        "spread_max_z": 1.5
                     }
                 })
 
@@ -114,12 +155,13 @@ def _rollover_share(trade_log: list[dict], rollover_hours: list[int] = [21, 22, 
     return count / len(trade_log)
 
 
-def _direction_share(trade_log: list[dict]) -> tuple[float, float]:
+def _direction_metrics(trade_log: list[dict]) -> tuple[float, float, int, int]:
     if not trade_log:
-        return 0.0, 0.0
+        return 0.0, 0.0, 0, 0
     longs = sum(1 for t in trade_log if int(t.get("direction", 0) or 0) > 0)
     shorts = sum(1 for t in trade_log if int(t.get("direction", 0) or 0) < 0)
-    return longs / len(trade_log), shorts / len(trade_log)
+    total = len(trade_log)
+    return longs / total, shorts / total, longs, shorts
 
 
 def extract_constrained_metrics(
@@ -149,7 +191,7 @@ def extract_constrained_metrics(
     
     roll_hours = [21, 22, 23, 0]
     roll_share = _rollover_share(trade_log, rollover_hours=roll_hours)
-    long_share, short_share = _direction_share(trade_log)
+    long_share, short_share, long_trades, short_trades = _direction_metrics(trade_log)
     max_direction_share = max(long_share, short_share)
     
     # Calculate Max Drawdown safely
@@ -164,8 +206,12 @@ def extract_constrained_metrics(
     status = "REJECTED"
     reason = []
     
-    if trades < 10:
-        reason.append(f"Too few trades ({trades} < 10)")
+    confidence_band = "stable"
+    if trades < 5:
+        reason.append(f"Too few trades ({trades} < 5)")
+        confidence_band = "rejected"
+    elif trades < 10:
+        confidence_band = "exploratory"
     if pf < 1.25:
         reason.append(f"Low PF ({pf:.2f} < 1.25)")
     if expectancy <= 0:
@@ -193,21 +239,24 @@ def extract_constrained_metrics(
         "max_dd": max_dd,
         "long_share": long_share,
         "short_share": short_share,
+        "long_trades": long_trades,
+        "short_trades": short_trades,
         "roll_share": roll_share,
         "rollover_hours": roll_hours,
         "accounting_valid": is_valid,
+        "confidence_band": confidence_band,
     }
 
 
 # ── Execution Task ───────────────────────────────────────────────────────────
 
-def _run_single_variant(replay_context: Any, config: dict[str, Any]) -> dict[str, Any]:
+def _run_single_variant(replay_context: Any, config: dict[str, Any], alpha_gate: Any | None = None) -> dict[str, Any]:
     """Runs replay on the TRAIN portion (which is trainable_feature_frame)"""
     import evaluate_oos
     from functools import partial
     
-
     # We want to optimize on the TRAIN set, NOT the HOLDOUT.
+
     # evaluate_oos uses replay_context.replay_frame, which is normally the holdout.
     # We must explicitly swap it to use the trainable_feature_frame for the search phase,
     # just like the model training does.
@@ -222,23 +271,32 @@ def _run_single_variant(replay_context: Any, config: dict[str, Any]) -> dict[str
     replay_context.rule_family = rule_family
     replay_context.rule_params = params
 
-    action_index_provider = partial(
-        evaluate_oos._rule_action_provider,
-        rule_family=rule_family,
-        rule_params=params,
-    )
+    # Track how many times the rule logic itself fired
+    signal_counts = {"long": 0, "short": 0}
+    
+    def action_index_provider_with_telemetry(*args, **kwargs):
+        from strategies.rule_logic import compute_rule_direction
+        f_dict = kwargs["feature_row"].to_dict() if hasattr(kwargs["feature_row"], "to_dict") else dict(kwargs["feature_row"])
+        direction = compute_rule_direction(rule_family, f_dict, params)
+        if direction == 1: signal_counts["long"] += 1
+        elif direction == -1: signal_counts["short"] += 1
+        return evaluate_oos._rule_action_provider(*args, **kwargs, rule_family=rule_family, rule_params=params)
 
     try:
         equity_curve, timestamps, trade_log, execution_log, diagnostics = evaluate_oos.run_replay(
             replay_context=replay_context,
-            action_index_provider=action_index_provider,
-            disable_alpha_gate=True,
+            action_index_provider=action_index_provider_with_telemetry,
+            disable_alpha_gate=False if alpha_gate else True,
+            alpha_gate=alpha_gate,
         )
         
         metrics = extract_constrained_metrics(equity_curve, timestamps, trade_log, execution_log, diagnostics)
+        metrics["signal_longs"] = signal_counts["long"]
+        metrics["signal_shorts"] = signal_counts["short"]
         return {"config": config, **metrics}
     except Exception as e:
         return {"config": config, "status": "ERROR", "error": str(e)}
+
 
 
 # ── Report Generation ────────────────────────────────────────────────────────
@@ -263,8 +321,8 @@ def _write_report(results: list[dict], args: argparse.Namespace, sys_hashes: dic
         "**Method:** Exact-runtime evaluation over parameter grid.",
         "",
         "## Passed Candidates (Ranked)",
-        "| Rank | Rule Family | Params | Net PnL | PF | Expectancy | Trades | Win% | MaxDD | Acc.Valid | Rollover | L/S Mix |",
-        "|---|---|---|---:|---:|---:|---:|---:|---:|:---:|---:|---:|"
+        "| Rank | Rule Family | Params | Net PnL | PF | Expectancy | Trades (L/S) | Signal (L/S) | Win% | MaxDD | Acc.Valid | L/S Mix | Confidence |",
+        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|:---:|---:|---:|"
     ]
     
     for i, r in enumerate(passed):
@@ -274,8 +332,10 @@ def _write_report(results: list[dict], args: argparse.Namespace, sys_hashes: dic
         lines.append(
             f"| {i+1} | {r['config']['rule_family']} | `{param_str}` | "
             f"${r['net_pnl']:.2f} | {r['pf']:.2f} | ${r['expectancy']:.2f} | "
-            f"{r['trades']} | {r['win_rate']:.1%} | {r['max_dd']:.1%} | {valid_mark} | {r.get('roll_share', 0):.1%} | {ls_mix} |"
+            f"{r['trades']} ({r.get('long_trades',0)}/{r.get('short_trades',0)}) | "
+            f"{r.get('signal_longs',0)}/{r.get('signal_shorts',0)} | {r['win_rate']:.1%} | {r['max_dd']:.1%} | {valid_mark} | {ls_mix} | {r.get('confidence_band','stable')} |"
         )
+
         
     lines.append("")
     lines.append("## Top 5 Rejected Constraints Example")
@@ -313,6 +373,8 @@ def main():
     parser.add_argument("--dataset-path", help="Override dataset logic")
     parser.add_argument("--ticks-per-bar", type=int, help="Override ticks per bar")
     parser.add_argument("--stage", choices=["train", "validation", "holdout"], default="train", help="Which subset to optimize on")
+    parser.add_argument("--use-alpha-gate", action="store_true", help="Enable self-learning filter")
+    parser.add_argument("--limit", type=int, help="Limit number of variants to evaluate")
     args = parser.parse_args()
 
     symbol = args.symbol.upper()
@@ -344,6 +406,27 @@ def main():
     print(f"Loading base replay context for {symbol}...")
     import evaluate_oos
     base_context = evaluate_oos.load_replay_context(symbol)
+
+    alpha_gate = None
+    if args.use_alpha_gate:
+        print(f"Fitting AlphaGate (Self-Learning Filter) on {symbol} training data...")
+        # Relaxed gate parameters for rule-filtering (Pivot to Profit)
+        alpha_gate = fit_baseline_alpha_gate(
+            symbol=symbol,
+            train_frame=base_context.trainable_feature_frame,
+            feature_cols=FEATURE_COLS,
+            horizon_bars=25, # Match ATR resolution better
+            commission_per_lot=7.0,
+            slippage_pips=0.25,
+            min_edge_pips=0.0,
+            probability_threshold=0.51, # Aggressive profit mode
+            probability_margin=0.01, # Tightened margin for higher density
+            model_preference="logistic_pair",
+        )
+        if alpha_gate:
+            print(f"AlphaGate fitted: PF={alpha_gate.fit_profit_factor:.2f}, Trades={alpha_gate.fit_trade_count}")
+        else:
+            print("AlphaGate fitting failed (insufficient data). Proceeding without gate.")
     
     # Handle Stage subsetting via proper copy
     from dataclasses import replace
@@ -362,25 +445,20 @@ def main():
             replay_frame=base_context.holdout_feature_frame
         )
     
-    print(f"Starting generation over {len(candidates)} candidate configurations [{args.stage.upper()} STAGE]...")
-    results = []
+    print(f"Starting parallel generation over {len(candidates)} candidate configurations [{args.stage.upper()} STAGE]...")
     
-    # Run sequentially for debugging, or multiprocessing if robust
+    # Pack tasks for workers
+    tasks = []
     for i, config in enumerate(candidates):
-        import traceback
-        try:
-            # We copy via replace since it's a dataclass, preventing state leakage.
-            ctx = replace(base_context)
-            res = _run_single_variant(ctx, config)
-            if res.get("status") == "PASSED":
-                print(f"[{i+1}/{len(candidates)}] \033[92mPASSED\033[0m: {config['rule_family']} -> PnL: ${res.get('net_pnl', 0):.2f}")
-            elif res.get("status") == "REJECTED":
-                print(f"[{i+1}/{len(candidates)}] \033[93mREJECTED\033[0m: {config['rule_family']} ({res.get('reject_reason')})")
-            else:
-                print(f"[{i+1}/{len(candidates)}] \033[91mERROR\033[0m: {config['rule_family']} ({res.get('error')})")
-            results.append(res)
-        except Exception:
-            traceback.print_exc()
+        if args.limit and i >= args.limit:
+            break
+        tasks.append((base_context, config, alpha_gate))
+
+    # Run in parallel
+    cpu_count = max(1, multiprocessing.cpu_count() - 1)
+    with multiprocessing.Pool(processes=cpu_count) as pool:
+        raw_results = pool.starmap(_run_worker, tasks)
+        results = [r for r in raw_results if r is not None]
 
     _write_report(results, args, sys_hashes)
 

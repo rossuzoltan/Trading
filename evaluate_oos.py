@@ -13,6 +13,8 @@ from interpreter_guard import ensure_project_venv
 
 ensure_project_venv(project_root=Path(__file__).resolve().parent, script_path=__file__)
 
+import argparse
+from dataclasses import replace
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from strategies.rule_logic import compute_rule_direction
 
@@ -21,7 +23,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from sb3_contrib import MaskablePPO
+try:
+    from sb3_contrib import MaskablePPO
+except ImportError:
+    MaskablePPO = None
 
 from artifact_manifest import (
     dataset_id_for_path as legacy_dataset_id_for_path,
@@ -227,12 +232,18 @@ RUNTIME_BASELINE_PROVIDERS: dict[str, Callable[..., int]] = {
 }
 
 def _rule_action_provider(*, feature_row, position_direction, action_map, rule_family, rule_params, **_: object) -> int:
-    target_direction = compute_rule_direction(rule_family, feature_row, rule_params)
+    # Pre-convert to dict to ensure .get() behavior is predictable across pandas versions
+    f_dict = feature_row.to_dict() if hasattr(feature_row, "to_dict") else dict(feature_row)
+    
+    target_direction = compute_rule_direction(rule_family, f_dict, rule_params)
+    
     return _target_direction_to_action_index(
         action_map=action_map,
         position_direction=int(position_direction or 0),
         target_direction=target_direction,
     )
+
+
 
 
 def _metrics_profitable(metrics: dict[str, Any] | None) -> bool:
@@ -564,10 +575,11 @@ def _load_promoted_manifest_context(symbol: str) -> ReplayContext | None:
         from runtime_common import ActionSpec, ActionType
         action_map = [
             ActionSpec(ActionType.HOLD),
+            ActionSpec(ActionType.CLOSE),
             ActionSpec(ActionType.OPEN, direction=1, sl_value=1.5, tp_value=3.0),
             ActionSpec(ActionType.OPEN, direction=-1, sl_value=1.5, tp_value=3.0),
-            ActionSpec(ActionType.CLOSE),
         ]
+
 
     model = None
     obs_normalizer = None
@@ -842,6 +854,7 @@ def _build_runtime(
     context: ReplayContext,
     use_policy: bool,
     disable_alpha_gate: bool = False,
+    prefitted_alpha_gate: BaselineAlphaGate | None = None,
 ) -> tuple[RuntimeEngine, ReplayBroker]:
     feature_engine = FeatureEngine.from_scaler(context.scaler)
     feature_engine.warm_up(context.warmup_frame)
@@ -851,8 +864,8 @@ def _build_runtime(
     runtime_options = dict(context.runtime_options or {})
     reward_profile = dict(context.reward_profile or {})
     reward_profile.pop("minimal_post_cost_reward", None)
-    alpha_gate = None
-    if bool(runtime_options.get("alpha_gate_enabled", False)) and not disable_alpha_gate:
+    alpha_gate = prefitted_alpha_gate
+    if alpha_gate is None and bool(runtime_options.get("alpha_gate_enabled", False)) and not disable_alpha_gate:
         alpha_gate = fit_baseline_alpha_gate(
             symbol=context.symbol,
             train_frame=context.trainable_feature_frame,
@@ -880,8 +893,8 @@ def _build_runtime(
         minimal_post_cost_reward=bool(runtime_options.get("minimal_post_cost_reward", True)),
         force_fast_window_benchmark=bool(runtime_options.get("force_fast_window_benchmark", False)),
         alpha_gate=alpha_gate,
-        churn_min_hold_bars=int(runtime_options.get("churn_min_hold_bars", 0)),
-        churn_action_cooldown=int(runtime_options.get("churn_action_cooldown", 0)),
+        churn_min_hold_bars=int(runtime_options.get("churn_min_hold_bars", 1)),
+        churn_action_cooldown=int(runtime_options.get("churn_action_cooldown", 1)),
         entry_spread_z_limit=float(runtime_options.get("entry_spread_z_limit", 1.5)),
         **reward_profile,
     )
@@ -928,12 +941,14 @@ def run_replay(
     replay_context: ReplayContext | None = None,
     action_index_provider: Callable[..., int] | None = None,
     disable_alpha_gate: bool = False,
+    alpha_gate: BaselineAlphaGate | None = None,
 ) -> tuple[list[float], list[pd.Timestamp], list[dict[str, Any]], list[dict[str, Any]], dict[str, object]]:
     context = replay_context or load_replay_context(symbol)
     runtime, broker = _build_runtime(
         context=context,
         use_policy=action_index_provider is None,
         disable_alpha_gate=disable_alpha_gate,
+        prefitted_alpha_gate=alpha_gate,
     )
     minimal_post_cost_reward = bool(getattr(runtime, "minimal_post_cost_reward", False))
 
@@ -1182,15 +1197,38 @@ def _build_runtime_parity_verdict(
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="OOS Replay Evaluator")
+    parser.add_argument("--symbol", type=str, help="Symbol to evaluate (overrides EVAL_SYMBOL)")
+    parser.add_argument("--config", type=str, help="JSON config string to override rule/model params")
+    parser.add_argument("--output-dir", type=str, help="Output directory for reports")
+    args = parser.parse_args()
+
     ensure_runtime_dirs()
-    EVAL_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    context = load_replay_context(TARGET_SYM)
+    
+    target_sym = (args.symbol or TARGET_SYM).upper()
+    output_dir = Path(args.output_dir) if args.output_dir else EVAL_OUTPUT_DIR
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    context = load_replay_context(target_sym)
+
+    if args.config:
+        try:
+            cfg = json.loads(args.config)
+            if "rule_family" in cfg:
+                context = replace(context, engine_type="RULE", rule_family=cfg["rule_family"])
+            if "params" in cfg or "rule_params" in cfg:
+                p = cfg.get("params") or cfg.get("rule_params")
+                context = replace(context, rule_params=p)
+        except json.JSONDecodeError as e:
+            print(f"FAILED to parse --config JSON: {e}")
+            return
+
     log_config = configure_run_logging(
         "evaluate_oos",
-        symbol=TARGET_SYM,
+        symbol=target_sym,
         capture_print=True,
     )
-    set_log_context(symbol=TARGET_SYM)
+    set_log_context(symbol=target_sym)
     log.info(
         "Replay evaluation starting",
         extra={
@@ -1245,6 +1283,18 @@ def main() -> None:
     expectancy_pips = float(replay_metrics["expectancy_pips"])
     n_trades = int(replay_metrics["trade_count"])
     avg_holding_bars = float(replay_metrics["avg_holding_bars"])
+    # Print a machine-readable summary line for callers
+    summary = {
+        "symbol": target_sym,
+        "net_pnl_usd": float(replay_metrics["net_pnl_usd"]),
+        "profit_factor": float(replay_metrics["profit_factor"]),
+        "expectancy_usd": float(replay_metrics["expectancy_usd"]),
+        "trade_count": int(replay_metrics["trade_count"]),
+        "win_rate": float(replay_metrics["win_rate"]),
+        "max_drawdown": float(replay_metrics["max_drawdown"]),
+    }
+    print(f"OOS_SUMMARY:{json.dumps(summary)}")
+
     total_return = float(replay_metrics["total_return"])
     report_paths = deployment_paths(TARGET_SYM, model_dir=EVAL_OUTPUT_DIR)
     training_diagnostics = (

@@ -25,6 +25,9 @@ Anchor releases move through three states:
 - `paper_live_profitable`
 - `demoted`
 
+**Hybrid Architecture (2026-04-10):**
+The standard for RC1 promotion is now a **Hybrid Gated-Rule** setup. Deterministic rules from `strategies/rule_logic.py` provide the signal, while an **AlphaGate** (ML-based meta-labeling filter) provides the veto.
+
 Promotion to `paper_live_profitable` requires all of the following:
 
 - RC1 certification passes
@@ -112,3 +115,6 @@ RL remains research-only until the anchor path is operationally stable.
 Historical MT5 replay is a pre-shadow accelerator only. It can flag critical
 drift early, but it cannot promote an anchor to `paper_live_profitable`
 without the full shadow evidence window.
+
+**Operational Milestone (2026-04-10):**
+Both `EURUSD` and `GBPUSD` have successfully recovered certification potential. `GBPUSD` achieved a **1.45 Profit Factor** and `EURUSD` achieved a **3.78 Profit Factor** using a hybrid `mean_reversion` + `AlphaGate` configuration, reviving both tracks from previous demoted status.

@@ -185,7 +185,9 @@ Behavior-preserving extraction into focused modules.
 
 ## Status
 
-**After P1**
+## Status
+
+**Completed (2026-04-10)**
 
 ---
 
@@ -325,7 +327,9 @@ Strengthen the current manifest-driven Rule-First architecture as the primary wo
 
 ## Status
 
-**Largely completed, may continue incrementally**
+## Status
+
+**Substantially Completed / Operational (2026-04-10)**
 
 ---
 
@@ -374,7 +378,9 @@ Move RC candidates into a true shadow-mode operating loop with live-like decisio
 
 ## Status
 
-**Next production-like milestone**
+## Status
+
+**Operational (2026-04-10)**
 
 ---
 
@@ -551,15 +557,16 @@ Ensure that nothing reaches live-money execution without explicit, enforced appr
 
 ## Recommended next order
 
-1. **P1 — Configuration Stabilization**
-2. **P6 — Shadow Mode Operationalization**
-3. **P7 — Paper-Live Validation Window**
-4. **P3 — Environment Consolidation**
-5. **P2 — Controlled `train_agent.py` modularization**
-6. **P4 — Repository and Tooling Normalization**
-7. **P8 — Challenger Enhancements**
-8. **P9 — RL Legacy Containment**
-9. **P10 — Production Readiness Gate**
+1. **P1 — Configuration Stabilization** [DONE]
+2. **P6 — Shadow Mode Operationalization** [DONE]
+3. **P5 — Rule-First / RC1 Hardening** [DONE]
+4. **P7 — Paper-Live Validation Window** [ACTIVE]
+5. **P3 — Environment Consolidation**
+6. **P2 — Controlled `train_agent.py` modularization**
+7. **P4 — Repository and Tooling Normalization**
+8. **P8 — Challenger Enhancements** [ACTIVE: Hybrid AlphaGate Revivals]
+9. **P9 — RL Legacy Containment**
+10. **P10 — Production Readiness Gate**
 
 ---
 

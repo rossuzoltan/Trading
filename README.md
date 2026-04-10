@@ -1,11 +1,12 @@
 # Trading Project
 
-This repo is a Python-based Forex reinforcement-learning pipeline with four main pieces:
+This repo is a Rule-First Forex Trading System with AlphaGate meta-labeling. It focuses on deterministic rule candidates certified against exact-runtime parity, with optional ML filters to improve precision.
 
-- `download_dukascopy.py` downloads raw tick data and can build initial volume-bar datasets.
-- `build_volume_bars.py` consolidates per-pair tick data into the training dataset.
-- `train_agent.py` trains a `MaskablePPO` agent on engineered Forex features.
-- `evaluate_oos.py` and `live_bridge.py` handle out-of-sample validation and live or simulated execution.
+- `tools/optimize_rules.py` generates and validates rule candidates over historical data.
+- `rule_selector.py` is the manifest-driven runtime loop for signals and execution.
+- `runtime/shadow_broker.py` provides pure shadow-mode operation for certification.
+- `evaluate_oos.py` provides authoritative out-of-sample validation.
+- `train_agent.py` (Legacy) remains available for research-only RL exploration.
 
 ## Documentation
 
@@ -26,29 +27,25 @@ This repo is a Python-based Forex reinforcement-learning pipeline with four main
 
 ## Quick Start
 
-1. Activate the repo virtualenv or call it explicitly: `.\.venv\Scripts\python.exe`
-2. Run `.\.venv\Scripts\python.exe .\tools\project_healthcheck.py`
-   - Missing model/scaler artifacts are expected before the first training run; use `--strict-runtime-assets` only when you expect a fully trained workspace.
-3. If needed, repair or recreate `.venv`
-4. Install anything missing from `Requirements.txt` and `requirements.project.txt`
-5. Download data with `.\.venv\Scripts\python.exe .\download_dukascopy.py`
-6. Build the combined dataset with `.\.venv\Scripts\python.exe .\build_volume_bars.py`
-7. Train with `.\.venv\Scripts\python.exe .\train_agent.py`
-8. Evaluate with `.\.venv\Scripts\python.exe .\evaluate_oos.py`
-9. Compare the RL replay against simpler baselines with `.\.venv\Scripts\python.exe .\compare_oos_baselines.py --symbol EURUSD`
+1. Activate the repo virtualenv: `.\.venv\Scripts\python.exe`
+2. Run project healthcheck: `.\.venv\Scripts\python.exe .\tools\project_healthcheck.py --mode rc1`
+3. Generate rule candidates: `.\.venv\Scripts\python.exe .\tools\optimize_rules.py --symbol GBPUSD`
+4. Evaluate candidates OOS: `.\.venv\Scripts\python.exe .\evaluate_oos.py --symbol GBPUSD`
+5. Certify an RC pack: `.\.venv\Scripts\python.exe .\tools\generate_v1_rc.py`
+6. Run shadow certification: `.\tools\run_shadow_simulator.ps1 -ManifestPath models/rc1/gbpusd_10k_v1_mr_rc1/manifest.json`
 
-Core entrypoints (`train_agent.py`, `evaluate_oos.py`, `live_bridge.py`) now re-exec into the
-project `.venv` automatically when launched from the wrong interpreter, but explicit `.venv`
-usage is still the least ambiguous path.
+## Optimization and Certification
 
-## Training Defaults And Guardrails
+The primary research workflow is manifest-driven using `tools/optimize_rules.py`. Rule families are defined in `strategies/rule_logic.py`, and the optimizer performs an exact-runtime sweep to identify candidates that satisfy strict Profit Factor (PF > 1.15) and stability constraints.
 
-- `train_agent.py` now defaults to `TRAIN_ENV_MODE=runtime`. The supported stack is `MaskablePPO + RuntimeGymEnv + volume bars`.
-- `TRAIN_NUM_ENVS=1` and `TRAIN_FORCE_DUMMY_VEC=1` are treated as debug or profiling settings and emit warnings during training.
-- Training now fails closed when a symbol cannot satisfy the minimum train, validation, and holdout bar requirements. Defaults:
-  - `TRAIN_MIN_TRAIN_BARS=5000`
-  - `TRAIN_MIN_VAL_BARS=200`
-  - `TRAIN_MIN_HOLDOUT_BARS=500`
+Certified RC (Release Candidate) packs are built and verified using:
+- `.\.venv\Scripts\python.exe .\tools\generate_v1_rc.py`
+- `.\.venv\Scripts\python.exe .\tools\verify_v1_rc.py`
+
+## Legacy RL Pipeline
+
+The previous reinforcement learning pipeline (`train_agent.py` and `MaskablePPO`) is still available for research purposes but is no longer the primary path for production signals.
+- To monitor legacy training: `.\.venv\Scripts\python.exe .\tools\training_status.py --symbol EURUSD`
 
 ## Bar Spec
 

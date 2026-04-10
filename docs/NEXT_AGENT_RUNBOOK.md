@@ -2,10 +2,36 @@
 
 ## Start Here
 1. Use the project venv, not system Python.
-2. Do **not** re-audit the architecture unless a failing test forces it.
-3. Focus on data repair, per-symbol training, and per-symbol OOS evaluation.
+2. Focus on Rule-First candidate generation and certification.
+3. The RL/PPO track is legacy/research-only.
 
-## Commands
+## Primary Commands (Rule-First)
+
+### 1. Generate Rule Candidates
+```powershell
+.\.venv\Scripts\python.exe .\tools\optimize_rules.py --symbol GBPUSD
+.\.venv\Scripts\python.exe .\tools\optimize_rules.py --symbol EURUSD
+```
+
+### 2. Evaluate Candidates OOS
+```powershell
+.\.venv\Scripts\python.exe .\evaluate_oos.py --symbol GBPUSD
+.\.venv\Scripts\python.exe .\evaluate_oos.py --symbol EURUSD
+```
+
+### 3. Generate and Certify RC1 Packs
+```powershell
+.\.venv\Scripts\python.exe .\tools\generate_v1_rc.py
+.\.venv\Scripts\python.exe .\tools\verify_v1_rc.py
+```
+
+### 4. Run Shadow Certification
+```powershell
+.\tools\run_shadow_simulator.ps1 -ManifestPath models/rc1/gbpusd_10k_v1_mr_rc1/manifest.json
+.\tools\run_shadow_simulator.ps1 -ManifestPath models/rc1/eurusd_5k_v1_mr_rc1/manifest.json
+```
+
+## Secondary Commands (Data)
 
 ### 1. Confirm data counts
 ```powershell
@@ -17,46 +43,13 @@
 .\.venv\Scripts\python.exe download_dukascopy.py --pairs EURUSD GBPUSD --days 1095 --force-refresh-pairs EURUSD GBPUSD --max-workers 16
 ```
 
-### 3. Rebuild consolidated bars
-```powershell
-.\.venv\Scripts\python.exe build_volume_bars.py
-```
+## Legacy Commands (RL Research)
 
-### 4. Train one symbol at a time
+### 1. Train RL Agent
 ```powershell
 $env:TRAIN_SYMBOL='EURUSD'; $env:TRAIN_TOTAL_TIMESTEPS='3000000'; .\.venv\Scripts\python.exe train_agent.py
-$env:TRAIN_SYMBOL='GBPUSD'; $env:TRAIN_TOTAL_TIMESTEPS='3000000'; .\.venv\Scripts\python.exe train_agent.py
-$env:TRAIN_SYMBOL='USDJPY'; $env:TRAIN_TOTAL_TIMESTEPS='3000000'; .\.venv\Scripts\python.exe train_agent.py
 ```
 
-### 5. Evaluate one symbol at a time
-```powershell
-$env:EVAL_SYMBOL='EURUSD'; .\.venv\Scripts\python.exe evaluate_oos.py
-$env:EVAL_SYMBOL='GBPUSD'; .\.venv\Scripts\python.exe evaluate_oos.py
-$env:EVAL_SYMBOL='USDJPY'; .\.venv\Scripts\python.exe evaluate_oos.py
-```
-
-### 6. Regression tests
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover tests
-```
-
-## Decision Rules
-- If EURUSD/GBPUSD tick counts stay near ~2M after refresh, treat the data source step as still broken.
-- Do not declare any symbol paper-ready unless:
-  - tests pass
-  - training artifacts match manifests
-  - symbol-specific replay completes cleanly
-  - OOS metrics are acceptable
-
-## Token-Saving Notes
-- Read only these first:
-  - `docs/NEXT_AGENT_CONTEXT.md`
-  - `docs/NEXT_AGENT_FILE_MAP.md`
-  - `docs/NEXT_AGENT_RUNBOOK.md`
-- Then inspect only:
-  - `train_agent.py`
-  - `evaluate_oos.py`
-  - `download_dukascopy.py`
-  - `build_volume_bars.py`
-- Avoid reopening `event_pipeline.py` unless tests or replay point to a core-runtime regression.
+## Guardrails
+- Do not declare any symbol paper-ready unless certification passes and OOS metrics (PF > 1.15) are stable.
+- Every RC1 pack must have a valid `manifest.json` and `release_notes_rc1.md`.

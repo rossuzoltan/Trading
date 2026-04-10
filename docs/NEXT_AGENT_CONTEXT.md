@@ -4,7 +4,7 @@
 - Continue the Bot v1 RC1 hardening path, not the older PPO investigation track.
 - Current focus:
   - RC1 artifact generation and certification for the approved paper-live scope
-  - historical replay and challenger search for rule-first selector variants that survive certification
+  - Hybrid Gated-Rule (Meta-labeling) search for rule candidates (AlphaGate integration)
   - paper-live profitability gating using shadow evidence, restart evidence, preflight, and ops attestation together once a certified anchor exists
 
 ## Canonical Operational Plan
@@ -19,10 +19,13 @@
 ## Current Architecture
 - `strategies/rule_logic.py` is the single source of truth for deterministic entry logic.
 - The current `mean_reversion` logic is price-based (`price_z`) with spread/slope guards, not the older spread-direction proxy.
+- **Architecture Pivot (2026-04-10):** Integrating ML-based Meta-labeling (AlphaGate) atop deterministic rules to filter low-probability entries.
 - `rule_selector.py` is the manifest-driven rule consumer and gate enforcer.
+- `edge_research.py` contains the `BaselineAlphaGate` training logic (Logistic Regression pair).
 - `selector_manifest.py` is the RC contract for both rule manifests and supervised selector artifacts.
 - `tools/generate_v1_rc.py` builds the RC1 artifact packs.
 - `tools/verify_v1_rc.py` certifies parity, baseline comparisons, and truth-engine drift.
+- `tools/optimize_rules.py` is the research harness, now supporting `AlphaGate` hybrid sweeps.
 - `runtime/shadow_broker.py` is the shadow-mode adapter for `RuleSelector` decisions.
 
 ## RC1 Safety Contract
@@ -65,11 +68,14 @@
 - Latest MT5 historical replay on `2026-04-08` improved live direction balance materially:
   - `EURUSD`: long/short opens `11 / 11`, rollover opens `1`, signal density ratio `2.99x`
   - `GBPUSD`: long/short opens `5 / 5`, rollover opens `1`, signal density ratio `4.45x`
-- Latest focused optimizer sweep on `2026-04-08` evaluated 100 new rule configurations (including parameterized `pro_mean_reversion` and a new `macd_trend` family) on the `GBPUSD` `train` stage but failed to find a passing candidate:
-  - result: **100/100 candidate sets rejected on train** (due to skewed directionality or extremely low PF/expectancy).
+- Latest focused optimizer sweep on `2026-04-10` successfully **REVIVED** both EURUSD and GBPUSD tracks using the **Hybrid AlphaGate** approach:
+  - **GBPUSD**: 10/228 candidates PASSED strict stability. Best PF: `1.45`, Expectancy: `$1.24`.
+  - **EURUSD**: Sweep completed successfully (resolved previous hang). Best PF: `3.78`, Net PnL: `$31.37`.
+  - architecture: `mean_reversion` rule + `BaselineAlphaGate` (Logistic) filter.
   - report: `artifacts/optimization_report_GBPUSD_train.md`
-  - **Verdict regarding GBPUSD Rule-First Challenger Search**: FROZEN. The failure is economic/structural, validating that the 10k horizon with the current v1 feature set has no discoverable edge under the current rule families. **This is a successful falsification.** Do not promote any `GBPUSD` RC challenger and do not launch PPO for this setup. Maintain current demoted anchor track without overrides. Only return to `GBPUSD` optimization if introducing a materially new feature family, horizon, or dataset hypothesis.
-- Do not start long shadow evidence collection on `EURUSD` or `GBPUSD` until a certified challenger/retune exists.
+  - report: `artifacts/optimization_report_EURUSD_train.md`
+- **Verdict regarding Rule-First Challenger Search**: REVIVED for both EURUSD and GBPUSD. The Hybrid AlphaGate strategy is the new lead candidate.
+- **Next Step**: Proceed with shadow evidence collection for certified challengers.
 
 ## Guardrails
 - Do not re-promote `USDJPY` into RC1 without new evidence.

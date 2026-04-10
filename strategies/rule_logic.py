@@ -16,7 +16,8 @@ def compute_mean_reversion_direction(features: Dict[str, Any], params: Dict[str,
     This keeps the direction tied to price dislocation while using spread and slope
     only as authorization filters.
     """
-    threshold = float(params.get("threshold", 1.5))
+    long_threshold = float(params.get("long_threshold", -params.get("threshold", 1.5)))
+    short_threshold = float(params.get("short_threshold", params.get("threshold", 1.5)))
     max_spread_z = float(params.get("max_spread_z", 0.5))
     max_time_delta_z = float(params.get("max_time_delta_z", 2.0))
     max_abs_ma20_slope = float(params.get("max_abs_ma20_slope", 0.15))
@@ -37,9 +38,9 @@ def compute_mean_reversion_direction(features: Dict[str, Any], params: Dict[str,
     if abs(ma50_slope) > max_abs_ma50_slope:
         return 0
 
-    if price_z <= -threshold:
+    if price_z <= long_threshold:
         return 1
-    if price_z >= threshold:
+    if price_z >= short_threshold:
         return -1
     return 0
 
@@ -66,12 +67,13 @@ def compute_price_mean_reversion(features: Dict[str, Any], params: Dict[str, Any
     Z <= -threshold -> LONG (1)
     Z >= +threshold -> SHORT (-1)
     """
-    threshold = float(params.get("threshold", 1.0))
+    long_threshold = float(params.get("long_threshold", -params.get("threshold", 1.0)))
+    short_threshold = float(params.get("short_threshold", params.get("threshold", 1.0)))
     price_z = _feature_value(features, "price_z", 0.0)
 
-    if price_z <= -threshold:
+    if price_z <= long_threshold:
         return 1
-    if price_z >= threshold:
+    if price_z >= short_threshold:
         return -1
     return 0
 
@@ -109,7 +111,8 @@ def compute_pro_mean_reversion(features: Dict[str, Any], params: Dict[str, Any])
     adx_threshold = float(params.get("adx_threshold", 25.0))
     rsi_oversold = float(params.get("rsi_oversold", 35.0))
     rsi_overbought = float(params.get("rsi_overbought", 65.0))
-    price_z_threshold = float(params.get("price_z_threshold", 1.5))
+    long_pz = float(params.get("long_pz", -params.get("price_z_threshold", 1.5)))
+    short_pz = float(params.get("short_pz", params.get("price_z_threshold", 1.5)))
     
     adx = _feature_value(features, "adx", 0.0)
     rsi = _feature_value(features, "rsi_14", 50.0)
@@ -127,11 +130,11 @@ def compute_pro_mean_reversion(features: Dict[str, Any], params: Dict[str, Any])
         return 0
 
     # LONG Condition: Price is very low compared to MA, and RSI is oversold
-    if price_z <= -price_z_threshold and rsi < rsi_oversold:
+    if price_z <= long_pz and rsi < rsi_oversold:
         return 1
     
     # SHORT Condition: Price is very high compared to MA, and RSI is overbought
-    if price_z >= price_z_threshold and rsi > rsi_overbought:
+    if price_z >= short_pz and rsi > rsi_overbought:
         return -1
         
     return 0
@@ -198,6 +201,41 @@ def compute_vol_breakout(features: Dict[str, Any], params: Dict[str, Any]) -> in
     return -direction if mean_revert else direction
 
 
+def compute_microstructure_bounce(features: Dict[str, Any], params: Dict[str, Any]) -> int:
+    """
+    Microstructure Bounce Hypothesis
+    Trigger: Extreme low time_delta_z (high-speed volume bars representing liquidity vacuums) 
+             + Price Extension (price_z).
+    Spread is used strictly as a cost filter.
+    """
+    td_threshold = float(params.get("td_threshold", -2.0))
+    long_pz = float(params.get("long_pz", -params.get("price_z_threshold", 1.5)))
+    short_pz = float(params.get("short_pz", params.get("price_z_threshold", 1.5)))
+    spread_max_z = float(params.get("spread_max_z", 1.0))
+    
+    time_delta_z = _feature_value(features, "time_delta_z", 0.0)
+    price_z = _feature_value(features, "price_z", 0.0)
+    spread_z = _feature_value(features, "spread_z", 0.0)
+    
+    # Needs to be a high-speed event (time_delta_z must be smaller/more negative than threshold)
+    if time_delta_z > td_threshold:
+        return 0
+        
+    # Cost filtering
+    if spread_z > spread_max_z:
+        return 0
+
+    # Exhaustion LONG: price stretched DOWNwards
+    if price_z <= long_pz:
+        return 1
+        
+    # Exhaustion SHORT: price stretched UPwards
+    if price_z >= short_pz:
+        return -1
+        
+    return 0
+
+
 # Registry of available rule families
 RULE_REGISTRY = {
     "mean_reversion": compute_mean_reversion_direction,
@@ -209,6 +247,7 @@ RULE_REGISTRY = {
     "pro_mean_reversion": compute_pro_mean_reversion,
     "macd_trend": compute_macd_trend,
     "volatility_breakout": compute_vol_breakout,
+    "microstructure_bounce": compute_microstructure_bounce,
 }
 
 def compute_rule_direction(rule_family: str, features: Dict[str, Any], params: Dict[str, Any]) -> int:
