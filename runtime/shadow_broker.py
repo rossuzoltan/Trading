@@ -141,6 +141,13 @@ class ShadowBroker:
         is_session_open: bool,
         portfolio_state: dict[str, Any] | None = None,
     ) -> ShadowAuditRecord:
+        bar_ts_utc = pd.Timestamp(bar_ts)
+        if bar_ts_utc.tzinfo is None:
+            bar_ts_utc = bar_ts_utc.tz_localize("UTC")
+        else:
+            bar_ts_utc = bar_ts_utc.tz_convert("UTC")
+        current_hour_utc = int(bar_ts_utc.hour)
+
         effective_state = dict(self._current_portfolio_state())
         if portfolio_state:
             effective_state.update(portfolio_state)
@@ -151,12 +158,14 @@ class ShadowBroker:
             current_spread_pips=current_spread_pips,
             is_session_open=is_session_open,
             portfolio_state=effective_state,
+            current_hour_utc=current_hour_utc,
         )
         gate_status = self.selector.gate_status(
             signal=decision.signal,
             current_spread_pips=current_spread_pips,
             is_session_open=is_session_open,
             portfolio_state=effective_state,
+            current_hour_utc=current_hour_utc,
         )
 
         normalized_signal = 1 if decision.signal > 0 else -1 if decision.signal < 0 else 0
@@ -248,7 +257,12 @@ def run_mt5_shadow_loop(
     poll_interval_ms: int = 250,
     max_bars: int | None = None,
 ) -> int:
-    manifest = load_selector_manifest(manifest_path, verify_manifest_hash=True)
+    manifest = load_selector_manifest(
+        manifest_path,
+        verify_manifest_hash=True,
+        strict_manifest_hash=True,
+        require_component_hashes=True,
+    )
     
     # 1. Startup Safety Assertions
     if manifest.release_stage != "paper_live_candidate":

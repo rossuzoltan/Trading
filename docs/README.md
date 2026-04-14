@@ -1,8 +1,8 @@
 # Documentation Guide
 
-This folder contains the canonical repo documentation. The supported stack is
-`MaskablePPO + RuntimeGymEnv + volume bars`; older H1-only and `RecurrentPPO`
-handover notes were removed because they no longer matched the codebase.
+This folder contains the canonical repo documentation. The supported production
+path is `Rule-First + AlphaGate + manifest-driven shadow gating`.
+Legacy PPO/RL docs are kept only for research continuity.
 
 ## Read In This Order
 

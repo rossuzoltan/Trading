@@ -1,0 +1,66 @@
+{
+  "symbol": "EURUSD",
+  "stage": "train",
+  "models": [
+    {
+      "model": "logistic_pair",
+      "evaluated": 120,
+      "passed": 28,
+      "rejected": 92,
+      "errors": 0,
+      "best_net_pnl": 17.3362042434087,
+      "best_pf": 1.9553026567624423,
+      "best_expectancy": 1.9262449159343003,
+      "best_trades": 9,
+      "best_rule_family": "mean_reversion",
+      "best_params": {
+        "long_threshold": -0.5,
+        "short_threshold": 0.5,
+        "max_spread_z": 0.75,
+        "max_time_delta_z": 2.5,
+        "max_abs_ma20_slope": 0.25,
+        "max_abs_ma50_slope": 0.15
+      }
+    },
+    {
+      "model": "xgboost_pair",
+      "evaluated": 120,
+      "passed": 39,
+      "rejected": 81,
+      "errors": 0,
+      "best_net_pnl": 275.73140492396396,
+      "best_pf": 1.3965362324678405,
+      "best_expectancy": 1.2533245678362,
+      "best_trades": 220,
+      "best_rule_family": "mean_reversion",
+      "best_params": {
+        "long_threshold": -0.5,
+        "short_threshold": 0.5,
+        "max_spread_z": 1.25,
+        "max_time_delta_z": 2.5,
+        "max_abs_ma20_slope": 0.25,
+        "max_abs_ma50_slope": 0.15
+      }
+    },
+    {
+      "model": "lightgbm_pair",
+      "evaluated": 120,
+      "passed": 58,
+      "rejected": 62,
+      "errors": 0,
+      "best_net_pnl": 482.6174282092529,
+      "best_pf": 1.3970320870060804,
+      "best_expectancy": 1.1916479708870442,
+      "best_trades": 405,
+      "best_rule_family": "mean_reversion",
+      "best_params": {
+        "long_threshold": -0.75,
+        "short_threshold": 1.5,
+        "max_spread_z": 1.25,
+        "max_time_delta_z": 2.5,
+        "max_abs_ma20_slope": 0.5,
+        "max_abs_ma50_slope": 0.3
+      }
+    }
+  ]
+}

@@ -48,6 +48,16 @@ class RuntimeConstraints:
 
 
 @dataclass(frozen=True)
+class AlphaGateSpec:
+    enabled: bool = False
+    model_path: str | None = None
+    model_sha256: str | None = None
+    probability_threshold: float | None = None
+    probability_margin: float | None = None
+    min_edge_pips: float | None = None
+
+
+@dataclass(frozen=True)
 class SelectorManifest:
     manifest_version: str
     strategy_symbol: str
@@ -76,6 +86,7 @@ class SelectorManifest:
     threshold_policy: dict[str, Any] = field(default_factory=dict)
     runtime_constraints: dict[str, Any] = field(default_factory=dict)
     rule_params: dict[str, Any] = field(default_factory=dict)
+    alpha_gate: dict[str, Any] = field(default_factory=dict)
     manifest_hash: str = ""
     startup_truth_snapshot: dict[str, Any] = field(default_factory=dict)
     replay_parity_reference: str = ""
@@ -124,6 +135,7 @@ def _normalize_manifest_payload(raw: dict[str, Any]) -> dict[str, Any]:
         "threshold_policy",
         "runtime_constraints",
         "rule_params",
+        "alpha_gate",
         "startup_truth_snapshot",
     ):
         payload[key] = _normalize_mapping(payload.get(key))
@@ -182,6 +194,26 @@ def validate_selector_manifest(
             raise RuntimeError("ML selector manifest is missing model_sha256.")
     if manifest.engine_type == "RULE" and not manifest.rule_family:
         raise RuntimeError("RULE selector manifest is missing rule_family.")
+    alpha_gate = dict(manifest.alpha_gate or {})
+    alpha_gate_enabled = bool(alpha_gate.get("enabled", False))
+    if alpha_gate_enabled:
+        model_path = str(alpha_gate.get("model_path") or "").strip()
+        if not model_path:
+            raise RuntimeError("Selector manifest alpha_gate.enabled=true but model_path is missing.")
+        model_sha = str(alpha_gate.get("model_sha256") or "").strip()
+        if not model_sha:
+            raise RuntimeError("Selector manifest alpha_gate.enabled=true but model_sha256 is missing.")
+        threshold = alpha_gate.get("probability_threshold")
+        if threshold is not None:
+            threshold_f = float(threshold)
+            if not 0.0 <= threshold_f <= 1.0:
+                raise RuntimeError("Selector manifest alpha_gate.probability_threshold must be in [0, 1].")
+        margin = alpha_gate.get("probability_margin")
+        if margin is not None and float(margin) < 0.0:
+            raise RuntimeError("Selector manifest alpha_gate.probability_margin must be >= 0.")
+        min_edge = alpha_gate.get("min_edge_pips")
+        if min_edge is not None and float(min_edge) < 0.0:
+            raise RuntimeError("Selector manifest alpha_gate.min_edge_pips must be >= 0.")
     if require_component_hashes:
         if not manifest.evaluator_hash:
             raise RuntimeError("Selector manifest is missing evaluator_hash.")
@@ -225,13 +257,25 @@ def save_selector_manifest(manifest: SelectorManifest, path: str | Path) -> Path
     return out_path
 
 
-def load_selector_manifest(path: str | Path, *, verify_manifest_hash: bool = False) -> SelectorManifest:
+def load_selector_manifest(
+    path: str | Path,
+    *,
+    verify_manifest_hash: bool = False,
+    strict_manifest_hash: bool = False,
+    require_component_hashes: bool = False,
+) -> SelectorManifest:
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
     payload = _normalize_manifest_payload(raw)
+    if strict_manifest_hash and not str(payload.get("manifest_hash") or "").strip():
+        raise RuntimeError("Selector manifest is missing manifest_hash in strict mode.")
     if not payload.get("manifest_hash"):
         payload["manifest_hash"] = compute_selector_manifest_hash(payload)
     manifest = SelectorManifest(**payload)
-    validate_selector_manifest(manifest, verify_manifest_hash=verify_manifest_hash)
+    validate_selector_manifest(
+        manifest,
+        verify_manifest_hash=verify_manifest_hash,
+        require_component_hashes=require_component_hashes,
+    )
     return manifest
 
 
@@ -330,6 +374,7 @@ def create_rule_manifest(
     cost_model: CostModel | dict[str, Any],
     threshold_policy: ThresholdPolicy | dict[str, Any],
     runtime_constraints: RuntimeConstraints | dict[str, Any],
+    alpha_gate: AlphaGateSpec | dict[str, Any] | None = None,
     git_commit: str = "unknown",
     release_stage: ReleaseStage = "research",
     evaluator_hash: str = "",
@@ -374,6 +419,7 @@ def create_rule_manifest(
         threshold_policy=_normalize_mapping(threshold_policy),
         runtime_constraints=_normalize_mapping(runtime_constraints),
         rule_params=dict(rule_params),
+        alpha_gate=_normalize_mapping(alpha_gate),
         startup_truth_snapshot=truth_snapshot,
         replay_parity_reference=replay_parity_reference,
     )

@@ -11,11 +11,14 @@ not a positive replay in isolation.
 - `GBPUSD` at `10000` ticks/bar
 - `USDJPY` remains challenger-only until new evidence exists
 
-Operational note on `2026-04-08`:
+Operational note on `2026-04-10`:
 
-- both approved-scope anchors are currently `demoted`
-- historical replay balance improved after the price-based mean-reversion correction
-- no symbol is currently eligible for long shadow evidence collection until certification recovers
+- RC packs were regenerated and strict manifest-hash verification now passes.
+- Neither approved anchor is currently test-ready under the new fail-fast gate.
+- `EURUSD` regenerated RC replay: `6` trades, net `+$1.89`, still blocked.
+- `GBPUSD` regenerated RC replay: `4` trades, net `+$5.14`, still blocked.
+- Both anchors are blocked by critical MT5 replay drift and stale historical replay evidence hashes.
+- Exact-runtime EURUSD bakeoff currently favors `rule_only`; `xgboost_pair` is the best refit AlphaGate challenger, but it does not beat the ungated rule on current holdout net PnL.
 
 ## Gate Model
 
@@ -31,11 +34,16 @@ The standard for RC1 promotion is now a **Hybrid Gated-Rule** setup. Determinist
 Promotion to `paper_live_profitable` requires all of the following:
 
 - RC1 certification passes
+- fail-fast `pre_test_gate.py` passes
 - mandatory baseline comparison passes
 - raw anchor baseline comparison passes
 - at least `20` trading days of shadow evidence
 - at least `30` actionable shadow events
 - no critical replay-vs-shadow drift on the aggregated window
+- no stale historical replay evidence hash mismatch
+- no Asia-session opens in historical replay
+- no Rollover opens in historical replay
+- no one-sided replay if there are at least `10` replay trades
 - restart drill passes
 - preflight passes
 - ops attestation passes
@@ -86,6 +94,19 @@ Generate and certify RC1 packs:
 .\.venv\Scripts\python.exe .\tools\verify_v1_rc.py
 ```
 
+Run the fail-fast pre-test gate:
+
+```powershell
+.\.venv\Scripts\python.exe .\tools\pre_test_gate.py --manifest-path .\models\rc1\eurusd_5k_v1_mr_rc1\manifest.json
+.\.venv\Scripts\python.exe .\tools\pre_test_gate.py --manifest-path .\models\rc1\gbpusd_10k_v1_mr_rc1\manifest.json
+```
+
+Run exact-runtime AlphaGate challenger bakeoff:
+
+```powershell
+.\.venv\Scripts\python.exe .\tools\alpha_gate_bakeoff.py --manifest-path .\models\rc1\eurusd_5k_v1_mr_rc1\manifest.json
+```
+
 Run the shadow simulator:
 
 ```powershell
@@ -104,6 +125,12 @@ Build the paper-live gate verdict:
 .\.venv\Scripts\python.exe .\tools\paper_live_gate.py --manifest-path .\models\rc1\eurusd_5k_v1_mr_rc1\manifest.json
 ```
 
+Summarize all gate verdict artifacts and generate a compact dashboard:
+
+```powershell
+.\.venv\Scripts\python.exe .\tools\summarize_gate_reports.py
+```
+
 ## Challenger Rule
 
 Do not start new challengers if anchor shadow evidence collection or daily
@@ -112,9 +139,13 @@ monitoring would be degraded.
 `GBPJPY` and `XAUUSD` are explicitly out of the first profitabilitiy wave.
 RL remains research-only until the anchor path is operationally stable.
 
+Regime guards are optional but recommended for challengers:
+`min_vol_norm_atr`, `max_abs_log_return`, `max_abs_body_size`, `max_candle_range`.
+Keep them manifest-explicit and evidence-driven.
+
 Historical MT5 replay is a pre-shadow accelerator only. It can flag critical
 drift early, but it cannot promote an anchor to `paper_live_profitable`
 without the full shadow evidence window.
 
 **Operational Milestone (2026-04-10):**
-Both `EURUSD` and `GBPUSD` have successfully recovered certification potential. `GBPUSD` achieved a **1.45 Profit Factor** and `EURUSD` achieved a **3.78 Profit Factor** using a hybrid `mean_reversion` + `AlphaGate` configuration, reviving both tracks from previous demoted status.
+The repo now has strict manifest/component hardening, an exact-runtime AlphaGate bakeoff tool, and a fail-fast pre-test gate. That makes false-positive profitability materially harder to ship, but it also means the current EURUSD and GBPUSD anchors remain blocked until historical replay is regenerated and replay density improves.

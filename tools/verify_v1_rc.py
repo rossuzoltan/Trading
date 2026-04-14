@@ -18,11 +18,11 @@ from evaluate_oos import (
     RUNTIME_BASELINE_PROVIDERS,
     _evaluate_policy,
     _load_promoted_manifest_context,
-    _rule_action_provider,
+    _selector_action_provider,
     build_evaluation_accounting,
-    run_replay,
 )
 from selector_manifest import _file_sha256, load_selector_manifest
+from rule_selector import RuleSelector
 
 log = logging.getLogger("verify_v1_rc")
 DEFAULT_BASELINES = (
@@ -74,7 +74,12 @@ def verify_component_hashes(payload: dict[str, Any]) -> dict[str, str]:
 
 
 def validate_manifest_truth_requirements(manifest_path: Path) -> dict[str, str]:
-    manifest = load_selector_manifest(manifest_path, verify_manifest_hash=True)
+    manifest = load_selector_manifest(
+        manifest_path,
+        verify_manifest_hash=True,
+        strict_manifest_hash=True,
+        require_component_hashes=True,
+    )
     if manifest.release_stage != "paper_live_candidate":
         raise RuntimeError(
             f"RC1 certification requires release_stage='paper_live_candidate', got {manifest.release_stage!r}."
@@ -122,28 +127,41 @@ def _certification_failures(
 
 
 def _main_replay_metrics(manifest_path: Path) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], Any]:
-    manifest = load_selector_manifest(manifest_path)
+    manifest = load_selector_manifest(
+        manifest_path,
+        verify_manifest_hash=True,
+        strict_manifest_hash=True,
+        require_component_hashes=True,
+    )
     os.environ["EVAL_MANIFEST_PATH"] = str(manifest_path)
     context = _load_promoted_manifest_context(manifest.strategy_symbol)
     if context is None:
         raise RuntimeError(f"Failed to load replay context from {manifest_path}")
     action_index_provider = None
     if context.engine_type == "RULE" and context.rule_family:
-        action_index_provider = partial(
-            _rule_action_provider,
-            rule_family=context.rule_family,
-            rule_params=context.rule_params,
-        )
-    _, _, trade_log, execution_log, _ = run_replay(
+        selector = RuleSelector(manifest_path)
+        action_index_provider = partial(_selector_action_provider, selector=selector)
+    payload = _evaluate_policy(
         replay_context=context,
         action_index_provider=action_index_provider,
+        disable_alpha_gate=False,
     )
-    return get_detailed_metrics(trade_log, execution_log), trade_log, execution_log, context
+    metrics = get_detailed_metrics(payload["trade_log"], payload["execution_log"])
+    replay_bars = int(len(context.replay_frame))
+    metrics["replay_bars"] = replay_bars
+    metrics["trades_per_bar"] = float(metrics["trade_count"] / replay_bars) if replay_bars > 0 else 0.0
+    metrics["validation_passed"] = bool(((payload.get("metrics", {}) or {}).get("validation_status", {}) or {}).get("passed", False))
+    return metrics, payload["trade_log"], payload["execution_log"], context
 
 
 def certify_manifest(manifest_path: Path) -> dict[str, Any]:
     hash_evidence = validate_manifest_truth_requirements(manifest_path)
-    manifest = load_selector_manifest(manifest_path)
+    manifest = load_selector_manifest(
+        manifest_path,
+        verify_manifest_hash=True,
+        strict_manifest_hash=True,
+        require_component_hashes=True,
+    )
     rc_metrics, _, _, context = _main_replay_metrics(manifest_path)
 
     baselines: dict[str, Any] = {}
@@ -154,6 +172,18 @@ def certify_manifest(manifest_path: Path) -> dict[str, Any]:
             disable_alpha_gate=True,
         )
         baselines[baseline_name] = get_detailed_metrics(payload["trade_log"], payload["execution_log"])
+
+    failures = _certification_failures(
+        manifest=manifest,
+        component_hashes={
+            "evaluator_hash_current": hash_evidence["evaluator_hash"],
+            "logic_hash_current": hash_evidence["logic_hash"],
+        },
+        rc_metrics=rc_metrics,
+        baselines=baselines,
+    )
+    if failures:
+        raise RuntimeError("RC1 certification failed: " + "; ".join(failures))
 
     return {
         "name": manifest_path.parent.name,
@@ -167,6 +197,7 @@ def certify_manifest(manifest_path: Path) -> dict[str, Any]:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "rc_candidate": rc_metrics,
         "baselines": baselines,
+        "certification_failures": failures,
     }
 
 

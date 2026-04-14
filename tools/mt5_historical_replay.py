@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -116,18 +117,26 @@ def run_rule_on_bars(bars: list[dict[str, Any]], manifest_path: Path) -> list[di
     if len(bars) < WARMUP_BARS + 10:
         raise RuntimeError(f"Need at least {WARMUP_BARS + 10} bars; only got {len(bars)}")
 
-    warmup_rows = [
-        {
-            "Open": bar["open"],
-            "High": bar["high"],
-            "Low": bar["low"],
-            "Close": bar["close"],
-            "Volume": float(bar["tick_count"]),
-            "avg_spread": bar["avg_spread"],
-            "time_delta_s": 300.0,
-        }
-        for bar in bars[:WARMUP_BARS]
-    ]
+    warmup_rows: list[dict[str, Any]] = []
+    prev_ts: datetime | None = None
+    for bar in bars[:WARMUP_BARS]:
+        current_ts = bar["timestamp"]
+        if prev_ts is None:
+            time_delta_s = 300.0
+        else:
+            time_delta_s = max((current_ts - prev_ts).total_seconds(), 1.0)
+        warmup_rows.append(
+            {
+                "Open": bar["open"],
+                "High": bar["high"],
+                "Low": bar["low"],
+                "Close": bar["close"],
+                "Volume": float(bar["tick_count"]),
+                "avg_spread": bar["avg_spread"],
+                "time_delta_s": float(time_delta_s),
+            }
+        )
+        prev_ts = current_ts
     warmup_df = pd.DataFrame(warmup_rows)
     warmup_df.index = pd.DatetimeIndex([bar["timestamp"] for bar in bars[:WARMUP_BARS]])
     warmup_df.index.name = "Gmt time"
@@ -137,6 +146,11 @@ def run_rule_on_bars(bars: list[dict[str, Any]], manifest_path: Path) -> list[di
     position_direction = 0
 
     for bar in bars[WARMUP_BARS:]:
+        current_ts = bar["timestamp"]
+        if prev_ts is None:
+            time_delta_s = 300.0
+        else:
+            time_delta_s = max((current_ts - prev_ts).total_seconds(), 1.0)
         series = pd.Series(
             {
                 "Open": bar["open"],
@@ -145,9 +159,9 @@ def run_rule_on_bars(bars: list[dict[str, Any]], manifest_path: Path) -> list[di
                 "Close": bar["close"],
                 "Volume": float(bar["tick_count"]),
                 "avg_spread": bar["avg_spread"],
-                "time_delta_s": 300.0,
+                "time_delta_s": float(time_delta_s),
             },
-            name=bar["timestamp"],
+            name=current_ts,
         )
         feature_engine.push(series)
         if feature_engine._buffer is None or feature_engine._buffer.empty:
@@ -161,17 +175,18 @@ def run_rule_on_bars(bars: list[dict[str, Any]], manifest_path: Path) -> list[di
             "position_direction": position_direction,
             "daily_pnl_usd": 0.0,
         }
-        hour = int(bar["timestamp"].hour)
+        hour = int(current_ts.hour)
         is_session = not (
-            bar["timestamp"].weekday() == 5
-            or (bar["timestamp"].weekday() == 6 and hour < 22)
-            or (bar["timestamp"].weekday() == 4 and hour >= 22)
+            current_ts.weekday() == 5
+            or (current_ts.weekday() == 6 and hour < 22)
+            or (current_ts.weekday() == 4 and hour >= 22)
         )
         decision = selector.decide(
             features=features,
             current_spread_pips=spread_pips,
             portfolio_state=portfolio_state,
             is_session_open=is_session,
+            current_hour_utc=hour,
         )
 
         signal = 1 if decision.signal > 0 else -1 if decision.signal < 0 else 0
@@ -202,11 +217,68 @@ def run_rule_on_bars(bars: list[dict[str, Any]], manifest_path: Path) -> list[di
                 "active_state": active_state,
             }
         )
+        prev_ts = current_ts
 
     return records
 
 
-def build_summary(records: list[dict[str, Any]], *, symbol: str, days: int, spread_backtest_pips: float) -> dict[str, Any]:
+def _resolve_replay_reference_metrics(
+    *,
+    manifest_path: Path,
+    symbol: str,
+) -> tuple[float, int, int]:
+    scoreboard_candidates = [
+        manifest_path.parent / "baseline_scoreboard_rc1.json",
+    ]
+    for candidate in scoreboard_candidates:
+        if not candidate.exists():
+            continue
+        try:
+            payload = json.loads(candidate.read_text(encoding="utf-8"))
+            rc_candidate = dict(payload.get("rc_candidate") or {})
+            replay_bars = int(rc_candidate.get("replay_bars", 0) or 0)
+            replay_trade_count = int(rc_candidate.get("trade_count", 0) or 0)
+            if replay_bars > 0:
+                return float(replay_trade_count / replay_bars), replay_trade_count, replay_bars
+        except Exception:
+            continue
+
+    # Fallback: compute exact replay reference on the current evaluator/runtime path.
+    try:
+        from functools import partial
+        from evaluate_oos import _load_promoted_manifest_context, _selector_action_provider, run_replay
+        from rule_selector import RuleSelector
+
+        os.environ["EVAL_MANIFEST_PATH"] = str(manifest_path)
+        context = _load_promoted_manifest_context(symbol.upper())
+        if context is None:
+            return 0.0, 0, 0
+        selector = RuleSelector(manifest_path)
+        provider = partial(_selector_action_provider, selector=selector)
+        _, _, trade_log, _, _ = run_replay(
+            replay_context=context,
+            action_index_provider=provider,
+            disable_alpha_gate=False,
+        )
+        replay_bars = int(len(context.replay_frame))
+        replay_trade_count = int(len(trade_log))
+        if replay_bars <= 0:
+            return 0.0, replay_trade_count, replay_bars
+        return float(replay_trade_count / replay_bars), replay_trade_count, replay_bars
+    except Exception:
+        return 0.0, 0, 0
+
+
+def build_summary(
+    records: list[dict[str, Any]],
+    *,
+    symbol: str,
+    days: int,
+    spread_backtest_pips: float,
+    replay_trades_per_bar: float,
+    replay_trade_count: int,
+    replay_bars: int,
+) -> dict[str, Any]:
     if not records:
         return {
             "symbol": symbol.upper(),
@@ -225,18 +297,25 @@ def build_summary(records: list[dict[str, Any]], *, symbol: str, days: int, spre
     longs = int(frame[(frame["would_open"]) & (frame["signal"] > 0)].shape[0])
     shorts = int(frame[(frame["would_open"]) & (frame["signal"] < 0)].shape[0])
     live_trades_per_bar = opens / max(total, 1)
-    replay_trades_per_bar = 27 / 2024 if "EURUSD" in symbol.upper() else 21 / 2123
-    signal_density_ratio = live_trades_per_bar / max(replay_trades_per_bar, 1e-6)
+    signal_density_ratio = (
+        live_trades_per_bar / max(float(replay_trades_per_bar), 1e-6)
+        if replay_trades_per_bar > 0.0
+        else 0.0
+    )
     live_avg_spread_pips = float(frame["spread_pips"].mean())
     spread_ratio = live_avg_spread_pips / max(spread_backtest_pips, 1e-6)
     long_short_ratio = longs / max(shorts, 1)
-    worst = max(abs(v - 1.0) for v in (signal_density_ratio, spread_ratio, long_short_ratio))
-    overall_verdict = _verdict(1.0 + worst)
+    if replay_trades_per_bar <= 0.0:
+        overall_verdict = "NO_REFERENCE"
+    else:
+        worst = max(abs(v - 1.0) for v in (signal_density_ratio, spread_ratio, long_short_ratio))
+        overall_verdict = _verdict(1.0 + worst)
     labels = {
         "OK": "OK - Live behaviour matches backtest expectations",
         "WATCH": "WATCH - Minor deviations, monitor closely",
         "DRIFT_WARNING": "DRIFT_WARNING - Notable deviation from backtest",
         "DRIFT_CRITICAL": "DRIFT_CRITICAL - Significant live vs backtest divergence",
+        "NO_REFERENCE": "NO_REFERENCE - Replay reference metrics unavailable",
     }
     return {
         "symbol": symbol.upper(),
@@ -256,6 +335,8 @@ def build_summary(records: list[dict[str, Any]], *, symbol: str, days: int, spre
         "short_open_count": shorts,
         "live_trades_per_bar": float(live_trades_per_bar),
         "replay_trades_per_bar": float(replay_trades_per_bar),
+        "replay_trade_count": int(replay_trade_count),
+        "replay_bars": int(replay_bars),
         "signal_density_ratio": float(signal_density_ratio),
         "live_avg_spread_pips": float(live_avg_spread_pips),
         "backtest_spread_pips": float(spread_backtest_pips),
@@ -272,8 +353,24 @@ def build_summary(records: list[dict[str, Any]], *, symbol: str, days: int, spre
     }
 
 
-def render_report(records: list[dict[str, Any]], symbol: str, days: int, spread_backtest_pips: float) -> str:
-    summary = build_summary(records, symbol=symbol, days=days, spread_backtest_pips=spread_backtest_pips)
+def render_report(
+    records: list[dict[str, Any]],
+    symbol: str,
+    days: int,
+    spread_backtest_pips: float,
+    replay_trades_per_bar: float,
+    replay_trade_count: int,
+    replay_bars: int,
+) -> str:
+    summary = build_summary(
+        records,
+        symbol=symbol,
+        days=days,
+        spread_backtest_pips=spread_backtest_pips,
+        replay_trades_per_bar=replay_trades_per_bar,
+        replay_trade_count=replay_trade_count,
+        replay_bars=replay_bars,
+    )
     if not summary["bars_processed"]:
         return "# MT5 Historical Replay\nNo bars processed."
 
@@ -291,8 +388,12 @@ def render_report(records: list[dict[str, Any]], symbol: str, days: int, spread_
         f"| Would-Open count | {summary['would_open_count']} |",
         f"| Bars processed | {summary['bars_processed']} |",
         f"| Live trades/bar | {summary['live_trades_per_bar']:.5f} |",
-        f"| Replay trades/bar | {summary['replay_trades_per_bar']:.5f} |",
-        f"| Ratio | {summary['signal_density_ratio']:.2f}x  {_verdict(summary['signal_density_ratio'])} |",
+        f"| Replay trades/bar | {summary['replay_trades_per_bar']:.5f} ({summary['replay_trade_count']} / {summary['replay_bars']}) |",
+        (
+            f"| Ratio | {summary['signal_density_ratio']:.2f}x  {_verdict(summary['signal_density_ratio'])} |"
+            if summary["replay_trades_per_bar"] > 0.0
+            else "| Ratio | n/a (no replay reference) |"
+        ),
         "",
         "## B. Spread Reality Check",
         "| Metric | Value |",
@@ -380,7 +481,12 @@ def main() -> None:
     if not ticks:
         raise SystemExit("No ticks returned from MT5. Is the terminal running and the symbol selected?")
 
-    manifest = load_selector_manifest(manifest_path)
+    manifest = load_selector_manifest(
+        manifest_path,
+        verify_manifest_hash=True,
+        strict_manifest_hash=True,
+        require_component_hashes=True,
+    )
     ticks_per_bar = int(manifest.ticks_per_bar or manifest.bar_construction_ticks_per_bar or 5000)
     bars = build_volume_bars(ticks, ticks_per_bar)
 
@@ -398,7 +504,19 @@ def main() -> None:
             handle.write(json.dumps(record) + "\n")
     log.info("Audit trace saved -> %s", audit_path)
 
-    summary = build_summary(records, symbol=symbol, days=args.days, spread_backtest_pips=args.spread_backtest_pips)
+    replay_trades_per_bar, replay_trade_count, replay_bars = _resolve_replay_reference_metrics(
+        manifest_path=manifest_path,
+        symbol=symbol,
+    )
+    summary = build_summary(
+        records,
+        symbol=symbol,
+        days=args.days,
+        spread_backtest_pips=args.spread_backtest_pips,
+        replay_trades_per_bar=replay_trades_per_bar,
+        replay_trade_count=replay_trade_count,
+        replay_bars=replay_bars,
+    )
     summary.update(
         {
             "manifest_path": str(manifest_path),
@@ -410,7 +528,15 @@ def main() -> None:
             "raw_bars_path": str(raw_bars_path),
         }
     )
-    report = render_report(records, symbol, args.days, args.spread_backtest_pips)
+    report = render_report(
+        records,
+        symbol,
+        args.days,
+        args.spread_backtest_pips,
+        replay_trades_per_bar,
+        replay_trade_count,
+        replay_bars,
+    )
     out_path.write_text(report, encoding="utf-8")
     json_out_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
 

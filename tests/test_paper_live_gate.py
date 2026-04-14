@@ -59,14 +59,14 @@ class PaperLiveGateTests(unittest.TestCase):
                 "profit_factor": 1.8,
                 "expectancy_usd": 4.0,
                 "trade_count": 30,
-                "long_count": 0,
-                "short_count": 30,
+                "long_count": 15,
+                "short_count": 15,
             },
             "baselines": {
                 "runtime_flat": {"net_pnl_usd": 0.0, "profit_factor": 0.0, "expectancy_usd": 0.0, "trade_count": 0, "long_count": 0, "short_count": 0},
                 "runtime_always_short": {"net_pnl_usd": -10.0, "profit_factor": 0.8, "expectancy_usd": -1.0, "trade_count": 5, "long_count": 0, "short_count": 5},
                 "runtime_trend": {"net_pnl_usd": -12.0, "profit_factor": 0.7, "expectancy_usd": -1.2, "trade_count": 6, "long_count": 0, "short_count": 6},
-                "runtime_mean_reversion": {"net_pnl_usd": 120.0, "profit_factor": 1.8, "expectancy_usd": 4.0, "trade_count": 30, "long_count": 0, "short_count": 30},
+                "runtime_mean_reversion": {"net_pnl_usd": 110.0, "profit_factor": 1.5, "expectancy_usd": 3.5, "trade_count": 28, "long_count": 14, "short_count": 14},
             },
         }
         (pack_dir / "baseline_scoreboard_rc1.json").write_text(json.dumps(scoreboard), encoding="utf-8")
@@ -80,9 +80,13 @@ class PaperLiveGateTests(unittest.TestCase):
         events_path = shadow_dir / "events.jsonl"
         lines: list[str] = []
         base_ts = datetime(2026, 4, 1, 9, 0, tzinfo=timezone.utc)
+        open_directions: list[int] = []
         for index in range(days):
             ts = base_ts + timedelta(days=index)
             is_actionable_open = index < actionable_events
+            signal_direction = 1 if index % 2 == 0 else -1
+            if is_actionable_open:
+                open_directions.append(signal_direction)
             record = {
                 "timestamp_utc": ts.isoformat(),
                 "symbol": "EURUSD",
@@ -90,7 +94,7 @@ class PaperLiveGateTests(unittest.TestCase):
                 "manifest_hash": manifest_hash,
                 "logic_hash": "logic-hash",
                 "evaluator_hash": "eval-hash",
-                "signal_direction": -1 if is_actionable_open else 0,
+                "signal_direction": signal_direction if is_actionable_open else 0,
                 "action_state": "open" if is_actionable_open else "flat",
                 "would_open": is_actionable_open,
                 "would_close": False,
@@ -100,12 +104,13 @@ class PaperLiveGateTests(unittest.TestCase):
                 "session_filter_pass": True,
                 "risk_filter_pass": True,
                 "spread_ok": True,
-                "position_state": "flat",
+                "position_state": ("long" if signal_direction > 0 else "short") if is_actionable_open else "flat",
             }
             lines.append(json.dumps(record))
         extra_close_events = max(0, actionable_events - days)
         for index in range(extra_close_events):
             ts = base_ts + timedelta(days=index, hours=1)
+            prior_direction = open_directions[index] if index < len(open_directions) else -1
             lines.append(
                 json.dumps(
                     {
@@ -125,7 +130,7 @@ class PaperLiveGateTests(unittest.TestCase):
                         "session_filter_pass": True,
                         "risk_filter_pass": True,
                         "spread_ok": True,
-                        "position_state": "short",
+                        "position_state": "long" if prior_direction > 0 else "short",
                     }
                 )
             )

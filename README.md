@@ -8,6 +8,17 @@ This repo is a Rule-First Forex Trading System with AlphaGate meta-labeling. It 
 - `evaluate_oos.py` provides authoritative out-of-sample validation.
 - `train_agent.py` (Legacy) remains available for research-only RL exploration.
 
+## Current Status
+
+As of `2026-04-10`:
+
+- RC packs were regenerated and now pass strict manifest-hash verification.
+- `tools/verify_v1_rc.py` currently certifies structurally, but both anchors still fail the new fail-fast pre-test gate.
+- `EURUSD` RC replay is positive but too thin for testing: `6` trades, net `+$1.89`.
+- `GBPUSD` RC replay is also too thin: `4` trades, net `+$5.14`.
+- Both anchors are blocked by stale historical replay evidence plus critical replay/live drift from the last MT5 replay artifacts.
+- Exact-runtime EURUSD bakeoff currently says the best holdout result is still `rule_only`; `xgboost_pair` is the strongest refit challenger, but it does not beat the ungated rule on current holdout.
+
 ## Documentation
 
 - [docs/README.md](docs/README.md) is the current documentation index.
@@ -19,11 +30,11 @@ This repo is a Rule-First Forex Trading System with AlphaGate meta-labeling. It 
 
 ## Current Architecture
 
-- Supported training environment: `RuntimeGymEnv` on volume bars
-- Compatibility fallback: legacy `trading_env.py` path for older experiments only
-- Features: engineered in `feature_engine.py`
-- Model: `sb3-contrib` `MaskablePPO`
-- Primary data format: volume bars, with compatibility fallback to `FOREX_MULTI_SET.csv`
+- Primary signal engine: deterministic rule families in `strategies/rule_logic.py`
+- Optional veto layer: `BaselineAlphaGate` (`logistic_pair`, `xgboost_pair`, `lightgbm_pair`, `ridge_signed_target`)
+- Runtime contract: manifest-driven `rule_selector.py` with exact-runtime replay parity checks
+- Safety path: `runtime/shadow_broker.py` + `tools/paper_live_gate.py` before any live-money discussion
+- Legacy RL remains available for research continuity only (`train_agent.py`, `RuntimeGymEnv`)
 
 ## Quick Start
 
@@ -32,7 +43,10 @@ This repo is a Rule-First Forex Trading System with AlphaGate meta-labeling. It 
 3. Generate rule candidates: `.\.venv\Scripts\python.exe .\tools\optimize_rules.py --symbol GBPUSD`
 4. Evaluate candidates OOS: `.\.venv\Scripts\python.exe .\evaluate_oos.py --symbol GBPUSD`
 5. Certify an RC pack: `.\.venv\Scripts\python.exe .\tools\generate_v1_rc.py`
-6. Run shadow certification: `.\tools\run_shadow_simulator.ps1 -ManifestPath models/rc1/gbpusd_10k_v1_mr_rc1/manifest.json`
+6. Re-run strict certification: `.\.venv\Scripts\python.exe .\tools\verify_v1_rc.py`
+7. Run fail-fast pre-test gate: `.\.venv\Scripts\python.exe .\tools\pre_test_gate.py --manifest-path .\models\rc1\eurusd_5k_v1_mr_rc1\manifest.json`
+8. Compare AlphaGate challengers exact-runtime: `.\.venv\Scripts\python.exe .\tools\alpha_gate_bakeoff.py --manifest-path .\models\rc1\eurusd_5k_v1_mr_rc1\manifest.json`
+9. Run shadow certification only after pre-test passes: `.\tools\run_shadow_simulator.ps1 -ManifestPath models/rc1/gbpusd_10k_v1_mr_rc1/manifest.json`
 
 ## Optimization and Certification
 
@@ -41,6 +55,16 @@ The primary research workflow is manifest-driven using `tools/optimize_rules.py`
 Certified RC (Release Candidate) packs are built and verified using:
 - `.\.venv\Scripts\python.exe .\tools\generate_v1_rc.py`
 - `.\.venv\Scripts\python.exe .\tools\verify_v1_rc.py`
+- `.\.venv\Scripts\python.exe .\tools\pre_test_gate.py --manifest-path .\models\rc1\eurusd_5k_v1_mr_rc1\manifest.json`
+
+Exact-runtime AlphaGate challenger bakeoff:
+- `.\.venv\Scripts\python.exe .\tools\alpha_gate_bakeoff.py --manifest-path .\models\rc1\eurusd_5k_v1_mr_rc1\manifest.json`
+
+Optional hybrid sweeps:
+- `.\.venv\Scripts\python.exe .\tools\optimize_rules.py --symbol EURUSD --use-alpha-gate --alpha-gate-model logistic_pair`
+- `.\.venv\Scripts\python.exe .\tools\optimize_rules.py --symbol EURUSD --use-alpha-gate --alpha-gate-model xgboost_pair`
+- `.\.venv\Scripts\python.exe .\tools\optimize_rules.py --symbol EURUSD --use-alpha-gate --alpha-gate-model lightgbm_pair`
+- Add `--enable-regime-guard-sweep` to evaluate optional low-volatility/news-spike filters.
 
 ## Legacy RL Pipeline
 

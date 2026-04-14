@@ -10,6 +10,36 @@ from typing import Any, Dict
 def _feature_value(features: Dict[str, Any], key: str, default: float = 0.0) -> float:
     return float(features.get(key, default) or default)
 
+
+def _regime_filter_passes(features: Dict[str, Any], params: Dict[str, Any]) -> bool:
+    """
+    Optional regime guardrails.
+    All thresholds are disabled when set to 0 (default), so existing behavior
+    is preserved unless a manifest explicitly opts in.
+    """
+    min_vol_norm_atr = float(params.get("min_vol_norm_atr", 0.0) or 0.0)
+    max_vol_norm_atr = float(params.get("max_vol_norm_atr", 0.0) or 0.0)
+    max_abs_log_return = float(params.get("max_abs_log_return", 0.0) or 0.0)
+    max_abs_body_size = float(params.get("max_abs_body_size", 0.0) or 0.0)
+    max_candle_range = float(params.get("max_candle_range", 0.0) or 0.0)
+
+    vol_norm_atr = abs(_feature_value(features, "vol_norm_atr", 0.0))
+    log_return = abs(_feature_value(features, "log_return", 0.0))
+    body_size = abs(_feature_value(features, "body_size", 0.0))
+    candle_range = abs(_feature_value(features, "candle_range", 0.0))
+
+    if min_vol_norm_atr > 0.0 and vol_norm_atr < min_vol_norm_atr:
+        return False
+    if max_vol_norm_atr > 0.0 and vol_norm_atr > max_vol_norm_atr:
+        return False
+    if max_abs_log_return > 0.0 and log_return > max_abs_log_return:
+        return False
+    if max_abs_body_size > 0.0 and body_size > max_abs_body_size:
+        return False
+    if max_candle_range > 0.0 and candle_range > max_candle_range:
+        return False
+    return True
+
 def compute_mean_reversion_direction(features: Dict[str, Any], params: Dict[str, Any]) -> int:
     """
     Computes desired direction using price extension with cost/regime guards.
@@ -28,6 +58,9 @@ def compute_mean_reversion_direction(features: Dict[str, Any], params: Dict[str,
     time_delta_z = _feature_value(features, "time_delta_z", 0.0)
     ma20_slope = _feature_value(features, "ma20_slope", 0.0)
     ma50_slope = _feature_value(features, "ma50_slope", 0.0)
+
+    if not _regime_filter_passes(features, params):
+        return 0
 
     if spread_z > max_spread_z:
         return 0
@@ -118,6 +151,9 @@ def compute_pro_mean_reversion(features: Dict[str, Any], params: Dict[str, Any])
     rsi = _feature_value(features, "rsi_14", 50.0)
     price_z = _feature_value(features, "price_z", 0.0)
 
+    if not _regime_filter_passes(features, params):
+        return 0
+
     # Optional hurst filter
     hurst_filter = bool(params.get("hurst_filter", False))
     if hurst_filter:
@@ -149,6 +185,9 @@ def compute_macd_trend(features: Dict[str, Any], params: Dict[str, Any]) -> int:
     macdh = _feature_value(features, "macdh", 0.0)
     ma20_slope = _feature_value(features, "ma20_slope", 0.0)
     ma50_slope = _feature_value(features, "ma50_slope", 0.0)
+
+    if not _regime_filter_passes(features, params):
+        return 0
     
     # Optional adx trend filter
     adx_trend_threshold = float(params.get("adx_trend_threshold", 0.0))
@@ -191,6 +230,9 @@ def compute_vol_breakout(features: Dict[str, Any], params: Dict[str, Any]) -> in
     mean_revert = bool(params.get("mean_revert", False))
     threshold_up = float(params.get("threshold_up", 1.0))
     threshold_down = float(params.get("threshold_down", 0.0))
+
+    if not _regime_filter_passes(features, params):
+        return 0
     
     direction = 0
     if bb_pct >= threshold_up:
@@ -216,6 +258,9 @@ def compute_microstructure_bounce(features: Dict[str, Any], params: Dict[str, An
     time_delta_z = _feature_value(features, "time_delta_z", 0.0)
     price_z = _feature_value(features, "price_z", 0.0)
     spread_z = _feature_value(features, "spread_z", 0.0)
+
+    if not _regime_filter_passes(features, params):
+        return 0
     
     # Needs to be a high-speed event (time_delta_z must be smaller/more negative than threshold)
     if time_delta_z > td_threshold:

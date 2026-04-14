@@ -12,8 +12,8 @@
 - `roadmap.md` is historical context, not the daily source of truth.
 
 ## Approved RC1 Scope
-- `EURUSD` at `5000` ticks/bar remains approved scope, but the latest RC1 pack is currently `demoted`.
-- `GBPUSD` at `10000` ticks/bar remains approved scope, but the latest RC1 pack is currently `demoted`.
+- `EURUSD` at `5000` ticks/bar remains approved scope, but the latest RC1 pack is not yet test-ready.
+- `GBPUSD` at `10000` ticks/bar remains approved scope, but the latest RC1 pack is not yet test-ready.
 - `USDJPY` is explicitly demoted back to challenger status.
 
 ## Current Architecture
@@ -21,10 +21,12 @@
 - The current `mean_reversion` logic is price-based (`price_z`) with spread/slope guards, not the older spread-direction proxy.
 - **Architecture Pivot (2026-04-10):** Integrating ML-based Meta-labeling (AlphaGate) atop deterministic rules to filter low-probability entries.
 - `rule_selector.py` is the manifest-driven rule consumer and gate enforcer.
-- `edge_research.py` contains the `BaselineAlphaGate` training logic (Logistic Regression pair).
+- `edge_research.py` contains the `BaselineAlphaGate` training logic (`logistic_pair`, `xgboost_pair`, `lightgbm_pair`, `ridge_signed_target`).
 - `selector_manifest.py` is the RC contract for both rule manifests and supervised selector artifacts.
 - `tools/generate_v1_rc.py` builds the RC1 artifact packs.
 - `tools/verify_v1_rc.py` certifies parity, baseline comparisons, and truth-engine drift.
+- `tools/pre_test_gate.py` is the fail-fast operator gate before new shadow runs.
+- `tools/alpha_gate_bakeoff.py` compares `rule_only`, manifest gate, and AlphaGate challengers exact-runtime on the current holdout.
 - `tools/optimize_rules.py` is the research harness, now supporting `AlphaGate` hybrid sweeps.
 - `runtime/shadow_broker.py` is the shadow-mode adapter for `RuleSelector` decisions.
 
@@ -43,6 +45,10 @@
   - `.\.venv\Scripts\python.exe .\tools\generate_v1_rc.py`
 - Re-run RC1 certification only:
   - `.\.venv\Scripts\python.exe .\tools\verify_v1_rc.py`
+- Run fail-fast pre-test gate:
+  - `.\.venv\Scripts\python.exe .\tools\pre_test_gate.py --manifest-path .\models\rc1\eurusd_5k_v1_mr_rc1\manifest.json`
+- Run exact-runtime AlphaGate bakeoff:
+  - `.\.venv\Scripts\python.exe .\tools\alpha_gate_bakeoff.py --manifest-path .\models\rc1\eurusd_5k_v1_mr_rc1\manifest.json`
 - Run targeted RC/shadow tests:
   - `.\.venv\Scripts\python.exe -m unittest tests.test_rc1_shadow`
 - Run the shadow simulator:
@@ -62,23 +68,23 @@
   - `artifacts/gates/<SYMBOL>/<MANIFEST_HASH>/paper_live_gate.json`
   - `artifacts/gates/<SYMBOL>/<MANIFEST_HASH>/paper_live_gate.md`
 - `tools/verify_v1_rc.py` must fail if `evaluate_oos.py` or `strategies/rule_logic.py` drift from the manifest hashes.
-- Latest verified RC1 regeneration on `2026-04-08` produced structurally valid packs, but both candidate verdicts are still negative on certification:
-  - `eurusd_5k_v1_mr_rc1`: net `-$50.38`, `17` trades, gate `demoted`
-  - `gbpusd_10k_v1_mr_rc1`: net `-$27.55`, `18` trades, gate `demoted`
-- Latest MT5 historical replay on `2026-04-08` improved live direction balance materially:
-  - `EURUSD`: long/short opens `11 / 11`, rollover opens `1`, signal density ratio `2.99x`
-  - `GBPUSD`: long/short opens `5 / 5`, rollover opens `1`, signal density ratio `4.45x`
-- Latest focused optimizer sweep on `2026-04-10` successfully **REVIVED** both EURUSD and GBPUSD tracks using the **Hybrid AlphaGate** approach:
-  - **GBPUSD**: 10/228 candidates PASSED strict stability. Best PF: `1.45`, Expectancy: `$1.24`.
-  - **EURUSD**: Sweep completed successfully (resolved previous hang). Best PF: `3.78`, Net PnL: `$31.37`.
-  - architecture: `mean_reversion` rule + `BaselineAlphaGate` (Logistic) filter.
-  - report: `artifacts/optimization_report_GBPUSD_train.md`
-  - report: `artifacts/optimization_report_EURUSD_train.md`
-- **Verdict regarding Rule-First Challenger Search**: REVIVED for both EURUSD and GBPUSD. The Hybrid AlphaGate strategy is the new lead candidate.
-- **Next Step**: Proceed with shadow evidence collection for certified challengers.
+- Latest verified RC1 regeneration on `2026-04-10` produced structurally valid packs with strict manifest/component hashes:
+  - `eurusd_5k_v1_mr_rc1`: net `+$1.89`, `6` trades, `PF 1.186`
+  - `gbpusd_10k_v1_mr_rc1`: net `+$5.14`, `4` trades, `PF 9.766`
+- Latest pre-test gate on `2026-04-10` blocks both anchors:
+  - `EURUSD`: thin replay (`6` trades), stale historical replay hash evidence, `DRIFT_CRITICAL`, Asia opens `1`, Rollover opens `1`, density ratio `2.993x`
+  - `GBPUSD`: thin replay (`4` trades), stale historical replay hash evidence, `DRIFT_CRITICAL`, Rollover opens `1`, density ratio `4.454x`
+- Latest exact-runtime EURUSD bakeoff on `2026-04-10`:
+  - `rule_only`: best current holdout result, net `+$39.47`, `110` trades, `PF 1.172`
+  - `manifest_gate`: net `+$24.84`, `44` trades, `PF 1.256`
+  - `xgboost_pair`: best refit AlphaGate challenger, net `+$12.57`, `14` trades, `PF 1.483`
+  - `lightgbm_pair`: net `+$5.86`, `35` trades, `PF 1.062`
+  - `logistic_pair`: collapsed to `0` trades on current holdout
+- **Operational verdict**: do not start a new shadow campaign until MT5 historical replay is regenerated against the current manifest hashes and replay density improves.
 
 ## Guardrails
 - Do not re-promote `USDJPY` into RC1 without new evidence.
 - Do not relax `live_trading_approved: false` in the RC manifest path.
 - Do not treat static release notes as truth when the generated scoreboards disagree; the generated scoreboards are the certification artifacts.
 - Do not treat a positive replay as enough; the anchor path is `candidate` until the paper-live gate is satisfied.
+- Do not trust historical replay artifacts whose `manifest_hash`, `logic_hash`, or `evaluator_hash` do not match the current RC manifest.

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import logging
 import multiprocessing
@@ -54,8 +55,17 @@ def _hash_file(filepath: Path) -> str:
 
 # ── Configuration Grid ───────────────────────────────────────────────────────
 
-def build_parameter_grid() -> list[dict[str, Any]]:
+def build_parameter_grid(*, include_regime_guard_variants: bool = False) -> list[dict[str, Any]]:
     candidates = []
+    regime_profiles = [dict()]
+    if include_regime_guard_variants:
+        regime_profiles.append(
+            {
+                "min_vol_norm_atr": 0.00005,
+                "max_abs_log_return": 0.0035,
+                "max_abs_body_size": 3.0,
+            }
+        )
 
     # 1. mean_reversion (Standard & Aggressive)
     # Testing everything from 'tight' (0.5) to 'deep' (2.0)
@@ -63,17 +73,20 @@ def build_parameter_grid() -> list[dict[str, Any]]:
         for short_threshold in [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]:
             for max_spread_z in [0.75, 1.25]:
                 for max_abs_ma20_slope, max_abs_ma50_slope in [(0.15, 0.08), (0.25, 0.15), (0.5, 0.3)]:
-                    candidates.append({
-                        "rule_family": "mean_reversion",
-                        "params": {
+                    for regime_profile in regime_profiles:
+                        params = {
                             "long_threshold": long_threshold,
                             "short_threshold": short_threshold,
                             "max_spread_z": max_spread_z,
                             "max_time_delta_z": 2.5,
                             "max_abs_ma20_slope": max_abs_ma20_slope,
                             "max_abs_ma50_slope": max_abs_ma50_slope,
-                        },
-                    })
+                        }
+                        params.update(regime_profile)
+                        candidates.append({
+                            "rule_family": "mean_reversion",
+                            "params": params,
+                        })
 
     # 2. pro_mean_reversion (RSI/ADX based)
     for adx_threshold in [20.0, 30.0, 45.0]:
@@ -374,11 +387,22 @@ def main():
     parser.add_argument("--ticks-per-bar", type=int, help="Override ticks per bar")
     parser.add_argument("--stage", choices=["train", "validation", "holdout"], default="train", help="Which subset to optimize on")
     parser.add_argument("--use-alpha-gate", action="store_true", help="Enable self-learning filter")
+    parser.add_argument(
+        "--alpha-gate-model",
+        choices=["auto", "logistic_pair", "xgboost_pair", "lightgbm_pair", "ridge_signed_target", "ridge"],
+        default="logistic_pair",
+        help="AlphaGate model backend preference.",
+    )
+    parser.add_argument(
+        "--enable-regime-guard-sweep",
+        action="store_true",
+        help="Include mean-reversion variants with optional regime guard thresholds.",
+    )
     parser.add_argument("--limit", type=int, help="Limit number of variants to evaluate")
     args = parser.parse_args()
 
     symbol = args.symbol.upper()
-    candidates = build_parameter_grid()
+    candidates = build_parameter_grid(include_regime_guard_variants=bool(args.enable_regime_guard_sweep))
     
     if args.manifest_path:
         manifest_path = Path(args.manifest_path)
@@ -409,6 +433,11 @@ def main():
 
     alpha_gate = None
     if args.use_alpha_gate:
+        requested_alpha_model = str(args.alpha_gate_model)
+        if requested_alpha_model == "xgboost_pair" and importlib.util.find_spec("xgboost") is None:
+            print("Requested alpha_gate_model=xgboost_pair, but xgboost is not installed. Proceeding without AlphaGate.")
+        elif requested_alpha_model == "lightgbm_pair" and importlib.util.find_spec("lightgbm") is None:
+            print("Requested alpha_gate_model=lightgbm_pair, but lightgbm is not installed. Proceeding without AlphaGate.")
         print(f"Fitting AlphaGate (Self-Learning Filter) on {symbol} training data...")
         # Relaxed gate parameters for rule-filtering (Pivot to Profit)
         alpha_gate = fit_baseline_alpha_gate(
@@ -421,10 +450,13 @@ def main():
             min_edge_pips=0.0,
             probability_threshold=0.51, # Aggressive profit mode
             probability_margin=0.01, # Tightened margin for higher density
-            model_preference="logistic_pair",
+            model_preference=requested_alpha_model,
         )
         if alpha_gate:
-            print(f"AlphaGate fitted: PF={alpha_gate.fit_profit_factor:.2f}, Trades={alpha_gate.fit_trade_count}")
+            print(
+                f"AlphaGate fitted: model={alpha_gate.model_kind}, "
+                f"PF={alpha_gate.fit_profit_factor:.2f}, Trades={alpha_gate.fit_trade_count}"
+            )
         else:
             print("AlphaGate fitting failed (insufficient data). Proceeding without gate.")
     

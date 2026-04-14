@@ -35,15 +35,16 @@ from artifact_manifest import (
     load_validated_scaler,
     load_validated_vecnormalize,
 )
-from selector_manifest import load_selector_manifest, dataset_id_for_path as v3_dataset_id_for_path
+from selector_manifest import _file_sha256, load_selector_manifest, dataset_id_for_path as v3_dataset_id_for_path
 from dataset_validation import validate_symbol_bar_spec
 from execution.replay_broker import ReplayBroker
 from risk.risk_engine import RiskEngine, RiskLimits
 from runtime.runtime_engine import ModelPolicy, RuntimeEngine, RuntimeSnapshot
 
-from edge_research import fit_baseline_alpha_gate
+from edge_research import fit_baseline_alpha_gate, load_baseline_alpha_gate
 from feature_engine import FEATURE_COLS, FeatureEngine, WARMUP_BARS, _compute_raw
 from project_paths import ensure_runtime_dirs, resolve_dataset_path, resolve_manifest_path, validate_dataset_bar_spec
+from rule_selector import RuleSelector
 from run_logging import configure_run_logging, set_log_context
 from runtime_common import (
     STATE_FEATURE_COUNT,
@@ -75,6 +76,7 @@ from train_agent import (
     purged_walk_forward_splits,
 )
 from validation_metrics import build_deployment_gate, load_json_report, save_json_report
+from symbol_utils import price_to_pips
 
 
 TARGET_SYM = os.environ.get("EVAL_SYMBOL", "EURUSD").strip().upper() or "EURUSD"
@@ -243,6 +245,58 @@ def _rule_action_provider(*, feature_row, position_direction, action_map, rule_f
         target_direction=target_direction,
     )
 
+
+def _is_forex_session_open(timestamp: Any) -> bool:
+    ts = pd.Timestamp(timestamp)
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    else:
+        ts = ts.tz_convert("UTC")
+    weekday = int(ts.weekday())
+    hour_fraction = float(ts.hour) + (float(ts.minute) / 60.0)
+    if weekday == 5:
+        return False
+    if weekday == 6 and hour_fraction < 22.0:
+        return False
+    if weekday == 4 and hour_fraction >= 22.0:
+        return False
+    return True
+
+
+def _selector_action_provider(
+    *,
+    bar,
+    feature_row,
+    position_direction,
+    action_map,
+    selector: RuleSelector,
+    **_: object,
+) -> int:
+    feature_map = feature_row.to_dict() if hasattr(feature_row, "to_dict") else dict(feature_row)
+    spread_pips = abs(float(price_to_pips(selector.manifest.strategy_symbol, float(getattr(bar, "avg_spread", 0.0)))))
+    bar_ts = pd.Timestamp(getattr(bar, "timestamp"))
+    if bar_ts.tzinfo is None:
+        bar_ts = bar_ts.tz_localize("UTC")
+    else:
+        bar_ts = bar_ts.tz_convert("UTC")
+    decision = selector.decide(
+        features=feature_map,
+        current_spread_pips=spread_pips,
+        is_session_open=_is_forex_session_open(bar_ts),
+        portfolio_state={
+            "current_positions": 1 if int(position_direction or 0) != 0 else 0,
+            "current_direction": int(position_direction or 0),
+            "position_direction": int(position_direction or 0),
+            "daily_pnl_usd": 0.0,
+        },
+        current_hour_utc=int(bar_ts.hour),
+    )
+    target_direction = int(decision.signal) if bool(decision.allow_execution) else 0
+    return _target_direction_to_action_index(
+        action_map=action_map,
+        position_direction=int(position_direction or 0),
+        target_direction=target_direction,
+    )
 
 
 
@@ -420,6 +474,8 @@ def _load_research_baseline_summary(training_diagnostics: dict[str, Any] | None)
 
 def _resolve_execution_cost_profile(manifest) -> dict[str, float]:
     profile = dict(getattr(manifest, "execution_cost_profile", None) or {})
+    if not profile:
+        profile = dict(getattr(manifest, "cost_model", None) or {})
     return {
         "commission_per_lot": float(profile.get("commission_per_lot", 7.0)),
         "slippage_pips": float(profile.get("slippage_pips", 0.25)),
@@ -495,39 +551,34 @@ def _load_symbol_raw_frame(
 
 def _load_promoted_manifest_context(symbol: str) -> ReplayContext | None:
     manifest_path_env = os.environ.get("EVAL_MANIFEST_PATH")
-    print(f"DEBUG: Loading promoted manifest context for {symbol}. EVAL_MANIFEST_PATH={manifest_path_env}")
     try:
         manifest_path = resolve_manifest_path(symbol=symbol, preferred=manifest_path_env)
-        print(f"DEBUG: Found manifest path: {manifest_path}")
     except FileNotFoundError:
-        print(f"DEBUG: Manifest path not found for {symbol}")
         return None
-    
+
     # Try loading as SelectorManifest (V3+) first, then fallback to Legacy (V1)
     is_v3 = False
     try:
-        with open(manifest_path, "r") as f:
-            raw_m = json.load(f)
-            print(f"DEBUG: Loaded raw manifest JSON. Version: {raw_m.get('manifest_version')}")
+        with manifest_path.open("r", encoding="utf-8") as handle:
+            raw_m = json.load(handle)
             if raw_m.get("manifest_version") in ["2", "3", "4"]:
                 is_v3 = True
-    except Exception as e:
-        print(f"DEBUG: Failed to parse manifest JSON as v3/v4: {e}")
-        pass
+    except Exception:
+        is_v3 = False
 
     if is_v3:
-        manifest = load_selector_manifest(manifest_path)
-        print(f"DEBUG: Successfully loaded SelectorManifest (v3/v4)")
+        manifest = load_selector_manifest(
+            manifest_path,
+            verify_manifest_hash=True,
+            strict_manifest_hash=True,
+            require_component_hashes=True,
+        )
     else:
         manifest = load_legacy_manifest(manifest_path)
-        print(f"DEBUG: Loaded legacy manifest")
 
-    print(f"DEBUG: Resolving dataset for {symbol} (ticks_per_bar={getattr(manifest, 'ticks_per_bar', None)})")
     try:
         dataset_path = resolve_dataset_path(ticks_per_bar=getattr(manifest, "ticks_per_bar", None))
-        print(f"DEBUG: Resolved dataset path: {dataset_path}")
-    except Exception as e:
-        print(f"DEBUG: Dataset resolution failed: {e}")
+    except Exception:
         return None
     manifest_ticks = manifest.bar_construction_ticks_per_bar or manifest.ticks_per_bar
     raw = _load_symbol_raw_frame(symbol=symbol, dataset_path=dataset_path, expected_ticks_per_bar=manifest_ticks)
@@ -570,14 +621,16 @@ def _load_promoted_manifest_context(symbol: str) -> ReplayContext | None:
         from runtime_common import deserialize_action_map
         action_map = deserialize_action_map(manifest.action_map)
     else:
-        # For V3/RULE, we might use a standard map if not present
-        # In this task we standardize on 1.5/3.0 for RC1
+        # For V3/RULE, derive execution action values from manifest rule params.
         from runtime_common import ActionSpec, ActionType
+        rule_params = dict(getattr(manifest, "rule_params", {}) or {})
+        sl_value = float(rule_params.get("sl_value", 1.5))
+        tp_value = float(rule_params.get("tp_value", 3.0))
         action_map = [
             ActionSpec(ActionType.HOLD),
             ActionSpec(ActionType.CLOSE),
-            ActionSpec(ActionType.OPEN, direction=1, sl_value=1.5, tp_value=3.0),
-            ActionSpec(ActionType.OPEN, direction=-1, sl_value=1.5, tp_value=3.0),
+            ActionSpec(ActionType.OPEN, direction=1, sl_value=sl_value, tp_value=tp_value),
+            ActionSpec(ActionType.OPEN, direction=-1, sl_value=sl_value, tp_value=tp_value),
         ]
 
 
@@ -586,6 +639,14 @@ def _load_promoted_manifest_context(symbol: str) -> ReplayContext | None:
     scaler = None
     diagnostics_path = Path(manifest.training_diagnostics_path) if getattr(manifest, "training_diagnostics_path", None) else None
     runtime_options = _load_training_runtime_options(diagnostics_path)
+    if is_v3:
+        runtime_options.setdefault("alpha_gate_enabled", bool((manifest.alpha_gate or {}).get("enabled", False)))
+        if (manifest.alpha_gate or {}).get("probability_threshold") is not None:
+            runtime_options["alpha_gate_probability_threshold"] = float(manifest.alpha_gate["probability_threshold"])
+        if (manifest.alpha_gate or {}).get("probability_margin") is not None:
+            runtime_options["alpha_gate_probability_margin"] = float(manifest.alpha_gate["probability_margin"])
+        if (manifest.alpha_gate or {}).get("min_edge_pips") is not None:
+            runtime_options["alpha_gate_min_edge_pips"] = float(manifest.alpha_gate["min_edge_pips"])
     
     if not is_v3 or manifest.engine_type == "ML":
         expected_observation_shape = list(getattr(manifest, "observation_shape", None) or [])
@@ -865,6 +926,33 @@ def _build_runtime(
     reward_profile = dict(context.reward_profile or {})
     reward_profile.pop("minimal_post_cost_reward", None)
     alpha_gate = prefitted_alpha_gate
+    if alpha_gate is None and not disable_alpha_gate and context.manifest_path is not None:
+        alpha_cfg: dict[str, Any] = {}
+        try:
+            manifest = load_selector_manifest(
+                context.manifest_path,
+                verify_manifest_hash=True,
+                strict_manifest_hash=True,
+            )
+            alpha_cfg = dict(getattr(manifest, "alpha_gate", {}) or {})
+            if bool(alpha_cfg.get("enabled", False)):
+                model_path = Path(str(alpha_cfg.get("model_path") or "").strip())
+                if not model_path.exists():
+                    raise RuntimeError(f"AlphaGate model_path does not exist: {model_path}")
+                expected_sha = str(alpha_cfg.get("model_sha256") or "").strip()
+                if expected_sha and _file_sha256(model_path) != expected_sha:
+                    raise RuntimeError("AlphaGate checksum mismatch in promoted manifest.")
+                loaded_gate = load_baseline_alpha_gate(model_path)
+                if str(loaded_gate.symbol).upper() != context.symbol.upper():
+                    raise RuntimeError(
+                        f"AlphaGate symbol mismatch: gate={loaded_gate.symbol} context={context.symbol}"
+                    )
+                alpha_gate = loaded_gate
+        except Exception as exc:
+            if bool(alpha_cfg.get("enabled", False)):
+                raise
+            log.warning("Failed to load static AlphaGate from manifest: %s", exc)
+            alpha_gate = None
     if alpha_gate is None and bool(runtime_options.get("alpha_gate_enabled", False)) and not disable_alpha_gate:
         alpha_gate = fit_baseline_alpha_gate(
             symbol=context.symbol,
@@ -1242,11 +1330,18 @@ def main() -> None:
     action_index_provider = None
     if context.engine_type == "RULE" and context.rule_family:
         from functools import partial
-        action_index_provider = partial(
-            _rule_action_provider,
-            rule_family=context.rule_family,
-            rule_params=context.rule_params
-        )
+        if context.manifest_path is not None and Path(context.manifest_path).exists():
+            selector = RuleSelector(context.manifest_path)
+            action_index_provider = partial(
+                _selector_action_provider,
+                selector=selector,
+            )
+        else:
+            action_index_provider = partial(
+                _rule_action_provider,
+                rule_family=context.rule_family,
+                rule_params=context.rule_params,
+            )
 
     equity_curve, timestamps, trade_log, execution_log, diagnostics = run_replay(
         replay_context=context,

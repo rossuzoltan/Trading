@@ -138,13 +138,13 @@ class Rc1ShadowTests(unittest.TestCase):
             broker = ShadowBroker(manifest_path, audit_path=audit_path)
             open_record = broker.evaluate(
                 bar_ts=datetime(2026, 4, 8, 9, 0, tzinfo=timezone.utc),
-                features={"spread_z": -1.5},
+                features={"spread_z": -1.5, "price_z": -1.5},
                 current_spread_pips=0.5,
                 is_session_open=True,
             )
             close_record = broker.evaluate(
                 bar_ts=datetime(2026, 4, 8, 9, 5, tzinfo=timezone.utc),
-                features={"spread_z": 0.0},
+                features={"spread_z": 0.0, "price_z": 0.0},
                 current_spread_pips=0.4,
                 is_session_open=True,
             )

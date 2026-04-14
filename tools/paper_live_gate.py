@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,10 @@ from paper_live_metrics import (
 from selector_manifest import load_selector_manifest, validate_paper_live_candidate_manifest
 from trading_config import deployment_paths
 from validation_metrics import load_json_report
+from run_logging import configure_run_logging, set_log_context
+
+
+log = logging.getLogger("paper_live_gate")
 
 
 def _load_json(path: Path | None) -> dict[str, Any] | None:
@@ -145,17 +150,46 @@ def _status_payload(path: Path | None, *, ok_field: str | None = None) -> dict[s
     return {"present": True, "ok": ok, "path": str(path), "payload": payload}
 
 
-def _historical_replay_status(path: Path | None) -> dict[str, Any]:
+def _historical_replay_status(
+    path: Path | None,
+    *,
+    expected_manifest_hash: str | None = None,
+    expected_logic_hash: str | None = None,
+    expected_evaluator_hash: str | None = None,
+) -> dict[str, Any]:
     payload = _load_json(path)
     if payload is None:
         return {"present": False, "ok": False, "path": str(path) if path is not None else None}
     verdict = str(payload.get("overall_verdict", "") or "").upper()
-    ok = verdict not in {"DRIFT_CRITICAL", "NO_DATA", ""}
+    session_opens = dict(payload.get("session_opens", {}) or {})
+    asia_opens = int(session_opens.get("Asia", 0) or 0)
+    rollover_opens = int(session_opens.get("Rollover", 0) or 0)
+    signal_density_ratio = payload.get("signal_density_ratio")
+    blockers: list[str] = []
+    if verdict in {"DRIFT_CRITICAL", "NO_DATA", ""}:
+        blockers.append(f"overall_verdict={verdict or 'missing'}")
+    if asia_opens > 0:
+        blockers.append(f"asia_session_opens={asia_opens}")
+    if rollover_opens > 0:
+        blockers.append(f"rollover_session_opens={rollover_opens}")
+    if signal_density_ratio is not None and float(signal_density_ratio) > 1.40:
+        blockers.append(f"signal_density_ratio={float(signal_density_ratio):.3f}")
+    report_manifest_hash = str(payload.get("manifest_hash", "") or "").strip()
+    if expected_manifest_hash and report_manifest_hash != expected_manifest_hash:
+        blockers.append(f"manifest_hash_mismatch:{report_manifest_hash or 'missing'}!={expected_manifest_hash}")
+    report_logic_hash = str(payload.get("logic_hash", "") or "").strip()
+    if expected_logic_hash and report_logic_hash and report_logic_hash != expected_logic_hash:
+        blockers.append(f"logic_hash_mismatch:{report_logic_hash}!={expected_logic_hash}")
+    report_evaluator_hash = str(payload.get("evaluator_hash", "") or "").strip()
+    if expected_evaluator_hash and report_evaluator_hash and report_evaluator_hash != expected_evaluator_hash:
+        blockers.append(f"evaluator_hash_mismatch:{report_evaluator_hash}!={expected_evaluator_hash}")
+    ok = not blockers
     return {
         "present": True,
         "ok": ok,
         "path": str(path),
         "overall_verdict": verdict,
+        "blockers": blockers,
         "payload": payload,
     }
 
@@ -173,6 +207,15 @@ def build_paper_live_gate(
     resolved_manifest_path = Path(manifest_path)
     manifest = load_selector_manifest(resolved_manifest_path, verify_manifest_hash=True)
     validate_paper_live_candidate_manifest(manifest)
+    set_log_context(symbol=manifest.strategy_symbol, event="paper_live_gate")
+    log.info(
+        "Building paper-live gate.",
+        extra={
+            "manifest_path": str(resolved_manifest_path),
+            "manifest_hash": manifest.manifest_hash,
+            "release_stage": manifest.release_stage,
+        },
+    )
 
     scoreboard = _load_json(_scoreboard_path(resolved_manifest_path))
     if not scoreboard:
@@ -218,14 +261,24 @@ def build_paper_live_gate(
         Path(ops_attestation_path) if ops_attestation_path is not None else deployment.ops_attestation_path,
         ok_field="approved",
     )
-    historical_replay_status = _historical_replay_status(_historical_replay_path(resolved_manifest_path))
+    historical_replay_status = _historical_replay_status(
+        _historical_replay_path(resolved_manifest_path),
+        expected_manifest_hash=manifest.manifest_hash,
+        expected_logic_hash=manifest.logic_hash,
+        expected_evaluator_hash=manifest.evaluator_hash,
+    )
 
     reasons: list[str] = []
     rc_certification_pass = bool(scoreboard.get("rc_candidate"))
+    replay_trade_count = int(payload.get("trade_count", 0) or 0) if (payload := dict(scoreboard.get("rc_candidate", {}) or {})) else 0
+    replay_long_count = int(payload.get("long_count", 0) or 0) if payload else 0
+    replay_short_count = int(payload.get("short_count", 0) or 0) if payload else 0
     if not baseline_comparison["mandatory_baseline_pass"]:
         reasons.append("deployed anchor underperformed a mandatory baseline")
     if not baseline_comparison["raw_anchor_baseline_pass"]:
         reasons.append("deployed anchor underperformed the raw anchor baseline on PF or expectancy")
+    if replay_trade_count >= 10 and (replay_long_count == 0 or replay_short_count == 0):
+        reasons.append("deployed anchor is one-sided on replay")
     if not shadow_summary.get("evidence_sufficient", False):
         reasons.append(
             f"shadow evidence below threshold: need {MIN_PROMOTION_TRADING_DAYS} trading days and {MIN_PROMOTION_ACTIONABLE_EVENTS} actionable events"
@@ -247,6 +300,7 @@ def build_paper_live_gate(
         rc_certification_pass
         and baseline_comparison["mandatory_baseline_pass"]
         and baseline_comparison["raw_anchor_baseline_pass"]
+        and not (replay_trade_count >= 10 and (replay_long_count == 0 or replay_short_count == 0))
         and sufficient_shadow_window
         and not drift_metrics.get("critical", False)
         and not has_two_consecutive_critical_reviews(weekly_reviews)
@@ -257,6 +311,7 @@ def build_paper_live_gate(
     demotion_triggered = bool(
         not baseline_comparison["mandatory_baseline_pass"]
         or not baseline_comparison["raw_anchor_baseline_pass"]
+        or (replay_trade_count >= 10 and (replay_long_count == 0 or replay_short_count == 0))
         or (sufficient_shadow_window and drift_metrics.get("critical", False))
         or has_two_consecutive_critical_reviews(weekly_reviews)
         or not restart_status.get("ok", False)
@@ -300,6 +355,17 @@ def build_paper_live_gate(
         "weekly_reviews": weekly_reviews,
         "replay_reference": replay_reference,
     }
+    log.info(
+        "Paper-live gate verdict computed.",
+        extra={
+            "final_verdict": final_verdict,
+            "anchor_status": anchor_status,
+            "verdict_reason": verdict_reason,
+            "shadow_evidence_sufficient": bool(shadow_summary.get("evidence_sufficient", False)),
+            "drift_verdict": drift_metrics.get("verdict"),
+            "historical_replay_ok": bool(historical_replay_status.get("ok", False)),
+        },
+    )
 
     gate_paths = resolve_paper_live_gate_paths(
         symbol=manifest.strategy_symbol,
@@ -378,6 +444,8 @@ def main() -> int:
     parser.add_argument("--ops-attestation-path", default=None)
     parser.add_argument("--output-dir", default=None, help="Optional gate artifact root override.")
     args = parser.parse_args()
+    run_id = Path(args.manifest_path).resolve().parent.name
+    configure_run_logging(component="paper_live_gate", symbol=None, run_id=run_id, logger_name="paper_live_gate")
 
     payload = build_paper_live_gate(
         manifest_path=args.manifest_path,
