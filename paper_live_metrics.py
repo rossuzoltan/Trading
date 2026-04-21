@@ -134,6 +134,14 @@ def _normalize_event(row: dict[str, Any]) -> dict[str, Any]:
     active_position_state = str(
         row.get("position_state", row.get("active_position_state", "flat")) or "flat"
     ).strip().lower()
+    context_day_type = row.get("context_day_type")
+    context_event_risk = row.get("context_event_risk")
+    context_in_blackout = _safe_bool(row.get("context_in_blackout", False))
+    context_blackout_kind = row.get("context_blackout_kind")
+    context_active_event_id = row.get("context_active_event_id")
+    context_aggressiveness_mode = row.get("context_aggressiveness_mode")
+    context_block_policy = row.get("context_block_policy")
+    context_reason_codes = row.get("context_reason_codes")
     return {
         "timestamp_utc": timestamp.isoformat(),
         "timestamp": timestamp,
@@ -154,6 +162,14 @@ def _normalize_event(row: dict[str, Any]) -> dict[str, Any]:
         "risk_filter_pass": _safe_bool(row.get("risk_filter_pass", row.get("risk_ok"))),
         "spread_ok": _safe_bool(row.get("spread_ok", True)),
         "position_state": active_position_state,
+        "context_day_type": str(context_day_type) if context_day_type is not None else None,
+        "context_event_risk": str(context_event_risk) if context_event_risk is not None else None,
+        "context_in_blackout": bool(context_in_blackout),
+        "context_blackout_kind": str(context_blackout_kind) if context_blackout_kind is not None else None,
+        "context_active_event_id": str(context_active_event_id) if context_active_event_id is not None else None,
+        "context_aggressiveness_mode": str(context_aggressiveness_mode) if context_aggressiveness_mode is not None else None,
+        "context_block_policy": str(context_block_policy) if context_block_policy is not None else None,
+        "context_reason_codes": list(context_reason_codes) if isinstance(context_reason_codes, list) else None,
     }
 
 
@@ -190,6 +206,13 @@ def summarize_shadow_events(
     session_rejection_count = sum(1 for row in normalized if not row["session_filter_pass"])
     risk_rejection_count = sum(1 for row in normalized if not row["risk_filter_pass"])
     actionable_event_count = would_open_count + would_close_count
+
+    context_macro_day_count = sum(1 for row in normalized if row.get("context_day_type") == "macro_day")
+    context_blackout_count = sum(1 for row in normalized if bool(row.get("context_in_blackout", False)))
+    context_block_entry_count = sum(1 for row in normalized if row.get("context_block_policy") == "block_entry")
+    context_close_only_reversal_count = sum(
+        1 for row in normalized if row.get("context_block_policy") == "close_only_on_reversal"
+    )
 
     no_trade_reason_counts: dict[str, int] = {}
     occupancy_counts = {"flat": 0, "long": 0, "short": 0}
@@ -229,6 +252,10 @@ def summarize_shadow_events(
             "spread_rejection_count": spread_rejection_count,
             "session_rejection_count": session_rejection_count,
             "risk_rejection_count": risk_rejection_count,
+            "context_macro_day_count": context_macro_day_count,
+            "context_blackout_count": context_blackout_count,
+            "context_block_entry_count": context_block_entry_count,
+            "context_close_only_reversal_count": context_close_only_reversal_count,
         },
         "rates": {
             "signal_density": float(signal_count / event_count),
@@ -237,6 +264,7 @@ def summarize_shadow_events(
             "session_rejection_pct": float(session_rejection_count * 100.0 / event_count),
             "risk_rejection_pct": float(risk_rejection_count * 100.0 / event_count),
             "long_open_share": float(long_open_count / would_open_count) if would_open_count else 0.0,
+            "context_blackout_pct": float(context_blackout_count * 100.0 / event_count),
         },
         "directional_occupancy": occupancy,
         "no_trade_reason_counts": no_trade_reason_counts,
