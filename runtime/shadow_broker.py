@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import argparse
 import json
 import logging
@@ -9,6 +10,14 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from interpreter_guard import ensure_project_venv
+
+ensure_project_venv(project_root=ROOT, script_path=__file__)
 
 import pandas as pd
 

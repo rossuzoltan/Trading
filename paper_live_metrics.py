@@ -130,6 +130,7 @@ def _normalize_event(row: dict[str, Any]) -> dict[str, Any]:
     action_state = str(row.get("action_state", "") or "").strip().lower()
     would_open = _safe_bool(row.get("would_open"))
     would_close = _safe_bool(row.get("would_close"))
+    would_hold = _safe_bool(row.get("would_hold", row.get("would_hold_position", False)))
     no_trade_reason = str(row.get("no_trade_reason", row.get("reason", "")) or "")
     active_position_state = str(
         row.get("position_state", row.get("active_position_state", "flat")) or "flat"
@@ -155,6 +156,7 @@ def _normalize_event(row: dict[str, Any]) -> dict[str, Any]:
         "action_state": action_state,
         "would_open": would_open,
         "would_close": would_close,
+        "would_hold": would_hold,
         "would_hold": _safe_bool(row.get("would_hold", row.get("would_hold_position"))),
         "no_trade_reason": no_trade_reason,
         "spread_pips": _safe_float(row.get("spread_pips", row.get("spread", 0.0))),
@@ -197,6 +199,7 @@ def summarize_shadow_events(
     trading_days = sorted({ts.date().isoformat() for ts in timestamps})
     would_open_count = sum(1 for row in normalized if row["would_open"])
     would_close_count = sum(1 for row in normalized if row["would_close"])
+    would_hold_count = sum(1 for row in normalized if row["would_hold"])
     signal_count = sum(1 for row in normalized if row["signal_present"])
     long_signal_count = sum(1 for row in normalized if row["signal_direction"] > 0)
     short_signal_count = sum(1 for row in normalized if row["signal_direction"] < 0)
@@ -245,6 +248,7 @@ def summarize_shadow_events(
             "signal_count": signal_count,
             "would_open_count": would_open_count,
             "would_close_count": would_close_count,
+            "would_hold_count": would_hold_count,
             "long_signal_count": long_signal_count,
             "short_signal_count": short_signal_count,
             "long_open_count": long_open_count,
@@ -272,6 +276,10 @@ def summarize_shadow_events(
         "evidence_requirements": {
             "min_trading_days": int(min_trading_days),
             "min_actionable_events": int(min_actionable_events),
+        },
+        "evidence_shortfall": {
+            "trading_days_remaining": int(max(int(min_trading_days) - len(trading_days), 0)),
+            "actionable_events_remaining": int(max(int(min_actionable_events) - actionable_event_count, 0)),
         },
     }
     return summary
@@ -443,6 +451,20 @@ def render_shadow_summary_markdown(summary: dict[str, Any]) -> str:
     counts = dict(summary.get("counts", {}) or {})
     rates = dict(summary.get("rates", {}) or {})
     occupancy = dict(summary.get("directional_occupancy", {}) or {})
+    requirements = dict(summary.get("evidence_requirements", {}) or {})
+    shortfall = dict(summary.get("evidence_shortfall", {}) or {})
+
+    min_days = int(requirements.get("min_trading_days", MIN_PROMOTION_TRADING_DAYS) or MIN_PROMOTION_TRADING_DAYS)
+    min_actionable = int(
+        requirements.get("min_actionable_events", MIN_PROMOTION_ACTIONABLE_EVENTS) or MIN_PROMOTION_ACTIONABLE_EVENTS
+    )
+    have_days = int(summary.get("trading_days", 0) or 0)
+    have_actionable = int(summary.get("actionable_event_count", 0) or 0)
+    remaining_days = int(shortfall.get("trading_days_remaining", max(min_days - have_days, 0)) or 0)
+    remaining_actionable = int(shortfall.get("actionable_events_remaining", max(min_actionable - have_actionable, 0)) or 0)
+
+    evidence_sufficient = bool(summary.get("evidence_sufficient", False))
+    evidence_label = "SUFFICIENT" if evidence_sufficient else "TOO_SMALL"
     lines = [
         f"# Shadow Summary - {summary.get('symbol', 'UNKNOWN')}",
         "",
@@ -450,16 +472,23 @@ def render_shadow_summary_markdown(summary: dict[str, Any]) -> str:
         f"* Window: `{summary.get('shadow_window_start')}` -> `{summary.get('shadow_window_end')}`",
         f"* Trading days: `{summary.get('trading_days', 0)}`",
         f"* Actionable events: `{summary.get('actionable_event_count', 0)}`",
-        f"* Evidence sufficient: `{bool(summary.get('evidence_sufficient', False))}`",
+        f"* Evidence status: `{evidence_label}` (need `{min_days}` days + `{min_actionable}` actionable; remaining `{remaining_days}` days / `{remaining_actionable}` actionable)",
         "",
         "## Counts",
         f"* Events: `{summary.get('event_count', 0)}`",
         f"* Signals: `{counts.get('signal_count', 0)}`",
         f"* Opens: `{counts.get('would_open_count', 0)}`",
         f"* Closes: `{counts.get('would_close_count', 0)}`",
+        f"* Holds: `{counts.get('would_hold_count', 0)}`",
         f"* Spread rejects: `{counts.get('spread_rejection_count', 0)}`",
         f"* Session rejects: `{counts.get('session_rejection_count', 0)}`",
         f"* Risk rejects: `{counts.get('risk_rejection_count', 0)}`",
+        "",
+        "## Context",
+        f"* Macro-day bars: `{counts.get('context_macro_day_count', 0)}`",
+        f"* Blackout bars: `{counts.get('context_blackout_count', 0)}` (`{rates.get('context_blackout_pct', 0.0):.2f}%`)",
+        f"* Blocked entries: `{counts.get('context_block_entry_count', 0)}`",
+        f"* Close-only reversals: `{counts.get('context_close_only_reversal_count', 0)}`",
         "",
         "## Rates",
         f"* Signal density: `{rates.get('signal_density', 0.0):.4f}`",
@@ -476,7 +505,7 @@ def render_shadow_summary_markdown(summary: dict[str, Any]) -> str:
     reason_counts = dict(summary.get("no_trade_reason_counts", {}) or {})
     if reason_counts:
         lines.extend(["", "## No-Trade Reasons"])
-        for reason, count in sorted(reason_counts.items()):
+        for reason, count in sorted(reason_counts.items(), key=lambda item: (-int(item[1]), str(item[0]))):
             lines.append(f"* `{reason}`: `{count}`")
     return "\n".join(lines) + "\n"
 

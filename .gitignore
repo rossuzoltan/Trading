@@ -41,3 +41,7 @@ err*.txt
 out*.txt
 ppo_train_source.txt
 run_error.txt
+
+# Shadow / gate evidence artifacts (operator-local, regenerated often)
+artifacts/shadow/
+artifacts/gates/
