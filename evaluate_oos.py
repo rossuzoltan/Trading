@@ -348,6 +348,7 @@ def _selector_action_provider(
             "daily_pnl_usd": 0.0,
         },
         current_hour_utc=int(bar_ts.hour),
+        bar_ts_utc=bar_ts,
     )
     target_direction = int(decision.signal) if bool(decision.allow_execution) else 0
     return _target_direction_to_action_index(

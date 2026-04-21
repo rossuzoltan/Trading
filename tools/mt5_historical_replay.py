@@ -239,7 +239,10 @@ def run_rule_on_bars(bars: list[dict[str, Any]], manifest_path: Path) -> list[di
             portfolio_state=portfolio_state,
             is_session_open=is_session,
             current_hour_utc=hour,
+            bar_ts_utc=current_ts,
         )
+        context_daily = dict((decision.context or {}).get("daily", {}) or {}) if isinstance(decision.context, dict) else {}
+        context_slice = dict((decision.context or {}).get("slice", {}) or {}) if isinstance(decision.context, dict) else {}
 
         signal = 1 if decision.signal > 0 else -1 if decision.signal < 0 else 0
         would_open = bool(decision.allow_execution and signal != 0 and (position_direction == 0 or signal != position_direction))
@@ -274,6 +277,14 @@ def run_rule_on_bars(bars: list[dict[str, Any]], manifest_path: Path) -> list[di
                 "would_hold": would_hold,
                 "would_flat": would_flat,
                 "active_state": active_state,
+                "context_day_type": context_daily.get("day_type"),
+                "context_event_risk": context_daily.get("event_risk"),
+                "context_in_blackout": context_slice.get("in_blackout"),
+                "context_blackout_kind": context_slice.get("blackout_kind"),
+                "context_active_event_id": context_slice.get("active_event_id"),
+                "context_aggressiveness_mode": context_slice.get("effective_aggressiveness_mode"),
+                "context_block_policy": context_slice.get("effective_block_policy"),
+                "context_reason_codes": list(context_slice.get("reason_codes", []) or []),
             }
         )
         prev_ts = current_ts

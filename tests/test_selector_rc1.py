@@ -300,6 +300,112 @@ class SelectorRc1Tests(unittest.TestCase):
             self.assertFalse(decision.allow_execution)
             self.assertEqual("session blocked", decision.reason)
 
+    def test_context_tier1_blackout_blocks_entry_and_downgrades_reversal_to_close_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            dataset_path = root / "dataset.csv"
+            dataset_path.write_text("x\n1\n", encoding="utf-8")
+
+            calendar_path = root / "macro_calendar.json"
+            calendar_payload = {
+                "schema_version": 1,
+                "source": "unit_test",
+                "generated_at_utc": None,
+                "events": [
+                    {
+                        "event_id": "USD_TIER1_TEST",
+                        "timestamp_utc": "2026-04-08T09:30:00+00:00",
+                        "currency": "USD",
+                        "tier": 1,
+                        "title": "Tier-1 Unit Test Event",
+                        "kind": "test",
+                    }
+                ],
+            }
+            calendar_path.write_text(json.dumps(calendar_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            calendar_sha256 = _file_sha256(calendar_path)
+
+            runtime_constraints = {
+                "session_filter_active": True,
+                "spread_sanity_max_pips": 2.0,
+                "max_concurrent_positions": 1,
+                "daily_loss_stop_usd": 100.0,
+                "rollover_block_utc_hours": [],
+                "allowed_sessions": ["London"],
+                "context": {
+                    "enabled": True,
+                    "calendar_path": str(calendar_path.name),
+                    "calendar_sha256": calendar_sha256,
+                    "tier1_blackout_minutes_before": 30,
+                    "tier1_blackout_minutes_after": 30,
+                    "macro_day_blocked_setups": [],
+                    "fail_closed_on_calendar_error": True,
+                },
+            }
+
+            manifest = create_rule_manifest(
+                strategy_symbol="EURUSD",
+                rule_family="mean_reversion",
+                rule_params={"threshold": 1.0},
+                dataset_path=dataset_path,
+                ticks_per_bar=5000,
+                cost_model=CostModel(commission_per_lot=7.0, slippage_pips=0.25),
+                threshold_policy=ThresholdPolicy(min_edge_pips=0.0, reject_ambiguous=True),
+                runtime_constraints=runtime_constraints,
+                release_stage="paper_live_candidate",
+                evaluator_hash="eval",
+                logic_hash="logic",
+            )
+            manifest_path = root / "manifest.json"
+            save_selector_manifest(manifest, manifest_path)
+
+            selector = RuleSelector(manifest_path)
+
+            # 09:10 is within the 30m pre-blackout window for a 09:30 tier-1 event.
+            bar_ts = "2026-04-08T09:10:00+00:00"
+            entry_attempt = selector.decide(
+                features={"price_z": -2.0, "spread_z": 0.0, "ma20_slope": 0.0, "ma50_slope": 0.0},
+                current_spread_pips=0.5,
+                is_session_open=True,
+                portfolio_state={"current_positions": 0, "current_direction": 0, "daily_pnl_usd": 0.0},
+                current_hour_utc=9,
+                bar_ts_utc=bar_ts,
+            )
+            self.assertEqual(0, entry_attempt.signal)
+            self.assertFalse(entry_attempt.allow_execution)
+            self.assertEqual("context blocked entry", entry_attempt.reason)
+            self.assertTrue(bool(entry_attempt.context.get("slice", {}).get("in_blackout", False)))
+            self.assertEqual("macro_day", entry_attempt.context.get("daily", {}).get("day_type"))
+
+            # Reversal during blackout must be close-only: signal is downgraded to 0.
+            reversal_attempt = selector.decide(
+                features={"price_z": 2.0, "spread_z": 0.0, "ma20_slope": 0.0, "ma50_slope": 0.0},
+                current_spread_pips=0.5,
+                is_session_open=True,
+                portfolio_state={"current_positions": 1, "current_direction": 1, "daily_pnl_usd": 0.0},
+                current_hour_utc=9,
+                bar_ts_utc=bar_ts,
+            )
+            self.assertEqual(0, reversal_attempt.signal)
+            self.assertTrue(reversal_attempt.allow_execution)
+            self.assertEqual("context close-only reversal", reversal_attempt.reason)
+            self.assertEqual(
+                "close_only_on_reversal",
+                reversal_attempt.context.get("slice", {}).get("effective_block_policy"),
+            )
+
+            # Holding during blackout is allowed; no forced liquidation is introduced.
+            hold_attempt = selector.decide(
+                features={"price_z": -2.0, "spread_z": 0.0, "ma20_slope": 0.0, "ma50_slope": 0.0},
+                current_spread_pips=0.5,
+                is_session_open=True,
+                portfolio_state={"current_positions": 1, "current_direction": 1, "daily_pnl_usd": 0.0},
+                current_hour_utc=9,
+                bar_ts_utc=bar_ts,
+            )
+            self.assertEqual(1, hold_attempt.signal)
+            self.assertTrue(hold_attempt.allow_execution)
+
     def test_rule_selector_authorizes_exit_even_when_entry_guards_fail(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

@@ -23,6 +23,7 @@ from paper_live_metrics import (
     summarize_shadow_events,
     weekly_shadow_reviews,
 )
+from context.macro_calendar import load_macro_calendar
 from selector_manifest import load_selector_manifest, validate_paper_live_candidate_manifest
 from trading_config import deployment_paths
 from validation_metrics import load_json_report
@@ -108,6 +109,53 @@ def _long_share_from_metrics(metrics: dict[str, Any]) -> float | None:
     if total <= 0:
         return 0.0
     return float(long_count) / total
+
+
+def _symbol_currencies(symbol: str) -> tuple[str, ...]:
+    sym = str(symbol or "").strip().upper()
+    if len(sym) >= 6:
+        base = sym[:3]
+        quote = sym[3:6]
+        if base.isalpha() and quote.isalpha():
+            return (base, quote)
+    return tuple()
+
+
+def _context_coverage(*, manifest_path: Path, manifest: Any) -> dict[str, Any]:
+    runtime_constraints = dict(getattr(manifest, "runtime_constraints", {}) or {})
+    cfg = dict(runtime_constraints.get("context") or {})
+    enabled = bool(cfg.get("enabled", False))
+    if not enabled:
+        return {"enabled": False}
+
+    calendar_path_raw = str(cfg.get("calendar_path", "") or "").strip()
+    expected_sha = str(cfg.get("calendar_sha256", "") or "").strip() or None
+    resolved_path = (manifest_path.parent / calendar_path_raw) if calendar_path_raw else None
+    if resolved_path is None:
+        return {"enabled": True, "ok": False, "error": "missing_calendar_path"}
+
+    result = load_macro_calendar(resolved_path, expected_sha256=expected_sha)
+    currencies = _symbol_currencies(str(getattr(manifest, "strategy_symbol", "") or ""))
+    relevant_total = 0
+    relevant_tier1 = 0
+    if result.calendar is not None and currencies:
+        for ev in result.calendar.events:
+            if ev.currency.upper() not in set(currencies):
+                continue
+            relevant_total += 1
+            if int(ev.tier) == 1:
+                relevant_tier1 += 1
+
+    return {
+        "enabled": True,
+        "ok": result.error is None,
+        "calendar_path": str(resolved_path),
+        "expected_sha256": expected_sha,
+        "actual_sha256": result.sha256,
+        "error": result.error,
+        "relevant_event_count": int(relevant_total),
+        "relevant_tier1_event_count": int(relevant_tier1),
+    }
 
 
 def _build_baseline_comparison(scoreboard: dict[str, Any]) -> dict[str, Any]:
@@ -221,6 +269,7 @@ def build_paper_live_gate(
     if not scoreboard:
         raise FileNotFoundError(f"Missing RC1 scoreboard: {_scoreboard_path(resolved_manifest_path)}")
 
+    context_coverage = _context_coverage(manifest_path=resolved_manifest_path, manifest=manifest)
     baseline_comparison = _build_baseline_comparison(scoreboard)
     shadow_paths = resolve_shadow_evidence_paths(
         symbol=manifest.strategy_symbol,
@@ -342,6 +391,7 @@ def build_paper_live_gate(
         "anchor_status": anchor_status,
         "replay_metrics": dict(scoreboard.get("rc_candidate", {}) or {}),
         "baseline_comparison": baseline_comparison,
+        "context_coverage": context_coverage,
         "shadow_window_start": shadow_summary.get("shadow_window_start"),
         "shadow_window_end": shadow_summary.get("shadow_window_end"),
         "shadow_summary_stats": shadow_summary,
@@ -385,6 +435,7 @@ def build_paper_live_gate(
 def render_paper_live_gate_markdown(payload: dict[str, Any]) -> str:
     replay_metrics = dict(payload.get("replay_metrics", {}) or {})
     baseline = dict(payload.get("baseline_comparison", {}) or {})
+    context_coverage = dict(payload.get("context_coverage", {}) or {})
     drift = dict(payload.get("drift_metrics", {}) or {})
     lines = [
         f"# Paper-Live Gate - {payload.get('symbol', 'UNKNOWN')}",
@@ -404,6 +455,15 @@ def render_paper_live_gate_markdown(payload: dict[str, Any]) -> str:
         f"* Mandatory baseline pass: `{baseline.get('mandatory_baseline_pass')}`",
         f"* Raw anchor baseline pass: `{baseline.get('raw_anchor_baseline_pass')}`",
         f"* Same logic as raw anchor: `{baseline.get('same_logic_as_raw_anchor')}`",
+        "",
+        "## Context",
+        f"* Enabled: `{context_coverage.get('enabled')}`",
+        f"* OK: `{context_coverage.get('ok')}`",
+        f"* Calendar path: `{context_coverage.get('calendar_path')}`",
+        f"* Expected SHA256: `{context_coverage.get('expected_sha256')}`",
+        f"* Actual SHA256: `{context_coverage.get('actual_sha256')}`",
+        f"* Error: `{context_coverage.get('error')}`",
+        f"* Relevant tier-1 events: `{context_coverage.get('relevant_tier1_event_count')}`",
         "",
         "## Shadow Window",
         f"* Start: `{payload.get('shadow_window_start')}`",

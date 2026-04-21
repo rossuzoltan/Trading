@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from context.daily_context import ContextGate
 from edge_research import BaselineAlphaGate, load_baseline_alpha_gate
 from selector_manifest import _file_sha256, load_selector_manifest, validate_selector_manifest
 from strategies.rule_logic import compute_rule_direction
@@ -35,6 +36,7 @@ class SelectorDecision:
     reason: str
     manifest_id: str
     timestamp_utc: str
+    context: dict[str, Any] = field(default_factory=dict)
 
 
 class RuleSelector:
@@ -53,8 +55,26 @@ class RuleSelector:
         self.alpha_gate: BaselineAlphaGate | None = None
         self.alpha_gate_threshold_override: float | None = None
         self.alpha_gate_margin_override: float | None = None
+        self._context_gate = ContextGate(
+            symbol=str(self.manifest.strategy_symbol or ""),
+            rule_family=str(self.manifest.rule_family or ""),
+            manifest_dir=self.manifest_path.parent,
+            runtime_constraints=dict(self.manifest.runtime_constraints or {}),
+        )
         self._validate_manifest()
         self._load_alpha_gate()
+
+    def _coerce_bar_time_utc(self, bar_ts_utc: Any | None) -> datetime:
+        if bar_ts_utc is None:
+            return datetime.now(timezone.utc)
+        if isinstance(bar_ts_utc, datetime):
+            ts = bar_ts_utc
+        else:
+            raw = str(bar_ts_utc or "").strip().replace("Z", "+00:00")
+            ts = datetime.fromisoformat(raw)
+        if ts.tzinfo is None:
+            return ts.replace(tzinfo=timezone.utc)
+        return ts.astimezone(timezone.utc)
 
     def _validate_manifest(self) -> None:
         validate_selector_manifest(
@@ -188,8 +208,12 @@ class RuleSelector:
         is_session_open: bool,
         portfolio_state: dict[str, Any],
         current_hour_utc: int | None = None,
+        bar_ts_utc: Any | None = None,
     ) -> SelectorDecision:
-        ts = datetime.now(timezone.utc).isoformat()
+        bar_time_utc = self._coerce_bar_time_utc(bar_ts_utc)
+        ts = bar_time_utc.isoformat() if bar_ts_utc is not None else datetime.now(timezone.utc).isoformat()
+        if current_hour_utc is None:
+            current_hour_utc = int(bar_time_utc.hour)
         signal = compute_rule_direction(self.manifest.rule_family, features, self.manifest.rule_params)
         alpha_veto_reason = ""
         if signal != 0 and self.alpha_gate is not None:
@@ -205,6 +229,33 @@ class RuleSelector:
                 alpha_veto_reason = "alpha gate veto short"
                 signal = 0
 
+        context_reason_override: str | None = None
+        context_payload: dict[str, Any] = {}
+        try:
+            current_direction = int(portfolio_state.get("current_direction", 0) or 0)
+        except Exception:
+            current_direction = 0
+        try:
+            verdict = self._context_gate.evaluate(
+                bar_time_utc=bar_time_utc,
+                signal=int(signal or 0),
+                current_direction=int(current_direction or 0),
+            )
+            signal = int(verdict.transformed_signal)
+            context_reason_override = verdict.reason_override
+            context_payload = {
+                "daily": verdict.daily.to_dict(),
+                "slice": verdict.slice.to_dict(),
+            }
+        except Exception as exc:
+            # Fail closed for entries if the context engine fails unexpectedly.
+            context_payload = {
+                "error": f"context_engine_error:{type(exc).__name__}",
+            }
+            if current_direction == 0 and int(signal or 0) != 0:
+                signal = 0
+                context_reason_override = "context blocked entry"
+
         gate_status = self.gate_status(
             signal=signal,
             current_spread_pips=current_spread_pips,
@@ -212,13 +263,14 @@ class RuleSelector:
             portfolio_state=portfolio_state,
             current_hour_utc=current_hour_utc,
         )
-        reason = alpha_veto_reason or str(gate_status["reason"])
+        reason = alpha_veto_reason or context_reason_override or str(gate_status["reason"])
         return SelectorDecision(
             signal=int(signal),
             allow_execution=bool(gate_status["allow_execution"]),
             reason=reason,
             manifest_id=self.manifest.manifest_hash,
             timestamp_utc=ts,
+            context=context_payload,
         )
 
 

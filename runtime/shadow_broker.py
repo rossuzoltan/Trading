@@ -92,6 +92,14 @@ class ShadowAuditRecord:
     release_stage: str
     core_features: dict[str, Any]
     full_features: dict[str, Any] | None
+    context_day_type: str | None = None
+    context_event_risk: str | None = None
+    context_in_blackout: bool | None = None
+    context_blackout_kind: str | None = None
+    context_active_event_id: str | None = None
+    context_aggressiveness_mode: str | None = None
+    context_block_policy: str | None = None
+    context_reason_codes: list[str] | None = None
 
 
 class ShadowBroker:
@@ -162,6 +170,7 @@ class ShadowBroker:
             is_session_open=is_session_open,
             portfolio_state=effective_state,
             current_hour_utc=current_hour_utc,
+            bar_ts_utc=bar_ts_utc,
         )
         # Always capture a small, stable feature subset for debugging and metrics.
         core_feature_keys = (
@@ -185,6 +194,8 @@ class ShadowBroker:
             portfolio_state=effective_state,
             current_hour_utc=current_hour_utc,
         )
+        context_daily = dict((decision.context or {}).get("daily", {}) or {}) if isinstance(decision.context, dict) else {}
+        context_slice = dict((decision.context or {}).get("slice", {}) or {}) if isinstance(decision.context, dict) else {}
 
         normalized_signal = 1 if decision.signal > 0 else -1 if decision.signal < 0 else 0
         would_open = bool(
@@ -257,6 +268,14 @@ class ShadowBroker:
             release_stage=self.release_stage,
             core_features=core_features,
             full_features=full_features,
+            context_day_type=context_daily.get("day_type"),
+            context_event_risk=context_daily.get("event_risk"),
+            context_in_blackout=context_slice.get("in_blackout"),
+            context_blackout_kind=context_slice.get("blackout_kind"),
+            context_active_event_id=context_slice.get("active_event_id"),
+            context_aggressiveness_mode=context_slice.get("effective_aggressiveness_mode"),
+            context_block_policy=context_slice.get("effective_block_policy"),
+            context_reason_codes=list(context_slice.get("reason_codes", []) or []),
         )
         _append_jsonl(self.audit_path, asdict(record))
         write_shadow_summary(

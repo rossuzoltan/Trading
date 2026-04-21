@@ -248,14 +248,16 @@ def _summary_markdown(results: list[dict[str, Any]]) -> str:
     lines = [
         "# Global Parity Report - Bot v1 RC1",
         "",
-        "| Pack | Symbol | Horizon | Net PnL | Trades | Stage |",
-        "| :--- | :--- | ---: | ---: | ---: | :--- |",
+        "| Pack | Symbol | Horizon | Status | Net PnL | Trades | Stage |",
+        "| :--- | :--- | ---: | :--- | ---: | ---: | :--- |",
     ]
     for result in results:
-        candidate = result["rc_candidate"]
+        candidate = result.get("rc_candidate") or {}
+        ok = bool(not (result.get("certification_failures") or []))
+        status = "OK" if ok else "FAILED"
         lines.append(
-            f"| {result['name']} | {result['symbol']} | {result['ticks_per_bar']} | "
-            f"${candidate['net_pnl_usd']:.2f} | {candidate['trade_count']} | {result['release_stage']} |"
+            f"| {result.get('name')} | {result.get('symbol')} | {result.get('ticks_per_bar')} | {status} | "
+            f"${float(candidate.get('net_pnl_usd', 0.0) or 0.0):.2f} | {int(candidate.get('trade_count', 0) or 0)} | {result.get('release_stage')} |"
         )
     return "\n".join(lines) + "\n"
 
@@ -281,22 +283,93 @@ def main() -> int:
         return 1
 
     results: list[dict[str, Any]] = []
+    had_failures = False
     for manifest_path in manifest_paths:
         log.info("Certifying %s", manifest_path)
-        result = certify_manifest(manifest_path)
-        generate_reports(result, manifest_path.parent)
-        results.append(result)
-        log.info(
-            "  -> %s net=$%.2f trades=%d",
-            result["name"],
-            result["rc_candidate"]["net_pnl_usd"],
-            result["rc_candidate"]["trade_count"],
-        )
+        try:
+            result = certify_manifest(manifest_path)
+            generate_reports(result, manifest_path.parent)
+            results.append(result)
+            log.info(
+                "  -> %s net=$%.2f trades=%d",
+                result["name"],
+                result["rc_candidate"]["net_pnl_usd"],
+                result["rc_candidate"]["trade_count"],
+            )
+        except Exception as exc:
+            had_failures = True
+            try:
+                manifest = load_selector_manifest(
+                    manifest_path,
+                    verify_manifest_hash=True,
+                    strict_manifest_hash=True,
+                    require_component_hashes=True,
+                )
+                symbol = manifest.strategy_symbol
+                ticks_per_bar = int(manifest.ticks_per_bar or manifest.bar_construction_ticks_per_bar or 0)
+                release_stage = manifest.release_stage
+                manifest_hash = manifest.manifest_hash
+                evaluator_hash = manifest.evaluator_hash
+                logic_hash = manifest.logic_hash
+            except Exception:
+                symbol = "UNKNOWN"
+                ticks_per_bar = 0
+                release_stage = "unknown"
+                manifest_hash = ""
+                evaluator_hash = ""
+                logic_hash = ""
+
+            error_msg = f"{type(exc).__name__}: {exc}"
+            failure_payload = {
+                "name": manifest_path.parent.name,
+                "symbol": symbol,
+                "ticks_per_bar": ticks_per_bar,
+                "release_stage": release_stage,
+                "live_trading_approved": False,
+                "manifest_hash": manifest_hash,
+                "evaluator_hash": evaluator_hash,
+                "logic_hash": logic_hash,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "rc_candidate": None,
+                "baselines": {},
+                "certification_failures": [error_msg],
+                "certification_error": error_msg,
+            }
+            try:
+                (manifest_path.parent / "baseline_scoreboard_rc1.json").write_text(
+                    json.dumps(failure_payload, indent=2) + "\n", encoding="utf-8"
+                )
+                (manifest_path.parent / "baseline_scoreboard_rc1.md").write_text(
+                    "\n".join(
+                        [
+                            f"# Baseline Scoreboard - {failure_payload['name']}",
+                            "",
+                            f"* **Symbol**: {failure_payload['symbol']}",
+                            f"* **Horizon**: {failure_payload['ticks_per_bar']} ticks",
+                            f"* **Stage**: `{failure_payload['release_stage']}`",
+                            f"* **Manifest Hash**: `{failure_payload['manifest_hash']}`",
+                            f"* **Evaluator Hash**: `{failure_payload['evaluator_hash']}`",
+                            f"* **Logic Hash**: `{failure_payload['logic_hash']}`",
+                            "",
+                            "## Certification Failure",
+                            f"* `{error_msg}`",
+                            "",
+                            "*Generated by tools/verify_v1_rc.py*",
+                            "",
+                        ]
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+            except Exception:
+                pass
+            results.append(failure_payload)
+            log.error("  -> %s FAILED: %s", manifest_path.parent.name, error_msg)
 
     artifacts_dir = ROOT / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     (artifacts_dir / "parity_report_rc1.md").write_text(_summary_markdown(results), encoding="utf-8")
-    return 0
+    return 2 if had_failures else 0
 
 
 if __name__ == "__main__":

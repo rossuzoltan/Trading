@@ -15,12 +15,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from edge_research import fit_baseline_alpha_gate, save_baseline_alpha_gate
+from context.macro_calendar import render_default_calendar_template
 from feature_engine import FEATURE_COLS, WARMUP_BARS, _compute_raw
 from project_paths import resolve_dataset_path
 from selector_manifest import (
     AlphaGateSpec,
     CostModel,
-    RuntimeConstraints,
     ThresholdPolicy,
     _file_sha256,
     create_rule_manifest,
@@ -198,6 +198,7 @@ def generate_rc_notes(manifest: dict[str, Any]) -> str:
     runtime_constraints = dict(manifest.get("runtime_constraints") or {})
     rule_params = dict(manifest.get("rule_params") or {})
     alpha_gate = dict(manifest.get("alpha_gate") or {})
+    context_cfg = dict(runtime_constraints.get("context") or {})
     return (
         f"# Release Notes: {manifest['strategy_symbol']} {manifest['ticks_per_bar']} Tick RC1\n\n"
         "## Summary\n"
@@ -215,6 +216,11 @@ def generate_rc_notes(manifest: dict[str, Any]) -> str:
         f"* **Rollover Block (UTC)**: `{runtime_constraints.get('rollover_block_utc_hours')}`\n"
         f"* **Daily Loss Stop**: `${runtime_constraints.get('daily_loss_stop_usd')}`\n"
         f"* **Rule Params**: `{json.dumps(rule_params, sort_keys=True)}`\n\n"
+        "## Context Layer\n"
+        f"* **Enabled**: `{bool(context_cfg.get('enabled', False))}`\n"
+        f"* **Calendar Path**: `{context_cfg.get('calendar_path')}`\n"
+        f"* **Calendar SHA256**: `{context_cfg.get('calendar_sha256')}`\n"
+        f"* **Tier-1 Blackout (min)**: `{context_cfg.get('tier1_blackout_minutes_before', 30)}` / `{context_cfg.get('tier1_blackout_minutes_after', 30)}`\n\n"
         "## AlphaGate Contract\n"
         f"* **Enabled**: `{bool(alpha_gate.get('enabled', False))}`\n"
         f"* **Model Path**: `{alpha_gate.get('model_path')}`\n"
@@ -231,6 +237,10 @@ def build_manifest(config: dict[str, Any], *, git_commit: str, evaluator_hash: s
     dataset_path = resolve_dataset_path(ticks_per_bar=int(config["ticks_per_bar"]))
     out_dir = RC_ROOT / config["name"]
     out_dir.mkdir(parents=True, exist_ok=True)
+    calendar_path = out_dir / "macro_calendar.json"
+    if not calendar_path.exists():
+        calendar_path.write_text(render_default_calendar_template(generated_at_utc=None), encoding="utf-8")
+    calendar_sha256 = _file_sha256(calendar_path)
     featured = _load_symbol_feature_frame(dataset_path, symbol=str(config["symbol"]).upper())
     holdout_start_utc = _compute_holdout_start_utc(featured)
     alpha_gate_payload = _fit_and_store_alpha_gate(
@@ -239,14 +249,24 @@ def build_manifest(config: dict[str, Any], *, git_commit: str, evaluator_hash: s
         holdout_start_utc=holdout_start_utc,
         out_dir=out_dir,
     )
-    runtime_constraints = RuntimeConstraints(
-        session_filter_active=True,
-        spread_sanity_max_pips=float(config["spread_limit_pips"]),
-        max_concurrent_positions=1,
-        daily_loss_stop_usd=100.0,
-        rollover_block_utc_hours=list(config.get("rollover_block_utc_hours", [21, 22, 23, 0])),
-        allowed_sessions=list(config.get("allowed_sessions", [])),
-    )
+    runtime_constraints: dict[str, Any] = {
+        "session_filter_active": True,
+        "spread_sanity_max_pips": float(config["spread_limit_pips"]),
+        "max_concurrent_positions": 1,
+        "daily_loss_stop_usd": 100.0,
+        "rollover_block_utc_hours": list(config.get("rollover_block_utc_hours", [21, 22, 23, 0])),
+        "allowed_sessions": list(config.get("allowed_sessions", [])),
+        # Deterministic context layer configuration (AI-free).
+        "context": {
+            "enabled": True,
+            "calendar_path": str(calendar_path.name),
+            "calendar_sha256": str(calendar_sha256),
+            "tier1_blackout_minutes_before": 30,
+            "tier1_blackout_minutes_after": 30,
+            "macro_day_blocked_setups": [],
+            "fail_closed_on_calendar_error": True,
+        },
+    }
     manifest = create_rule_manifest(
         strategy_symbol=config["symbol"],
         rule_family=config["rule_family"],
