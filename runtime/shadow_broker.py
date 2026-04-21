@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -89,6 +90,8 @@ class ShadowAuditRecord:
     position_after: int
     manifest_fingerprint: str
     release_stage: str
+    core_features: dict[str, Any]
+    full_features: dict[str, Any] | None
 
 
 class ShadowBroker:
@@ -160,6 +163,21 @@ class ShadowBroker:
             portfolio_state=effective_state,
             current_hour_utc=current_hour_utc,
         )
+        # Always capture a small, stable feature subset for debugging and metrics.
+        core_feature_keys = (
+            "price_z",
+            "spread_z",
+            "time_delta_z",
+            "ma20",
+            "ma50",
+            "ma20_slope",
+            "ma50_slope",
+            "vol_norm_atr",
+        )
+        core_features: dict[str, Any] = {key: features.get(key) for key in core_feature_keys if key in features}
+        # Full feature dumps are opt-in: they can be large but are invaluable during RC hardening.
+        log_full_features = os.environ.get("SHADOW_LOG_FULL_FEATURES", "0").strip() == "1"
+        full_features = dict(features) if log_full_features else None
         gate_status = self.selector.gate_status(
             signal=decision.signal,
             current_spread_pips=current_spread_pips,
@@ -237,6 +255,8 @@ class ShadowBroker:
             position_after=int(self.position_direction),
             manifest_fingerprint=self.manifest_fingerprint or decision.manifest_id,
             release_stage=self.release_stage,
+            core_features=core_features,
+            full_features=full_features,
         )
         _append_jsonl(self.audit_path, asdict(record))
         write_shadow_summary(
@@ -385,12 +405,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--audit-dir", help="Where to write the shadow audit JSONL daily files.")
     parser.add_argument("--poll-interval-ms", type=int, default=250)
     parser.add_argument("--max-bars", type=int, help="Optional max emitted bars before exit.")
+    parser.add_argument(
+        "--log-full-features",
+        action="store_true",
+        help="Include full feature snapshots in each shadow JSONL record (large; best for early RC debugging).",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    if bool(args.log_full_features):
+        os.environ["SHADOW_LOG_FULL_FEATURES"] = "1"
     run_mt5_shadow_loop(
         manifest_path=args.manifest,
         symbol=args.symbol,

@@ -18,7 +18,8 @@ except ImportError:  # pragma: no cover
 
 from artifact_manifest import load_manifest
 from mt5_broker_caps import describe_trade_mode, read_symbol_caps, trade_mode_allows_open
-from project_paths import resolve_manifest_path
+from project_paths import resolve_manifest_path, resolve_selector_manifest_path
+from selector_manifest import load_selector_manifest, validate_paper_live_candidate_manifest
 from summarize_execution_audit import build_summary
 from trading_config import deployment_paths, resolve_bar_construction_ticks_per_bar
 from validation_metrics import load_json_report
@@ -57,7 +58,60 @@ def _connect_mt5(mt5_module: Any) -> tuple[bool, str | None]:
     return True, None
 
 
-def build_report(symbol: str, ticks_per_bar: int) -> dict[str, Any]:
+def _load_live_manifest(
+    *,
+    symbol: str,
+    preferred_path: str | Path | None = None,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    diagnostics: list[str] = []
+    selector_path = resolve_selector_manifest_path(symbol=symbol, preferred=preferred_path, required=False)
+    if selector_path is not None:
+        try:
+            selector_manifest = load_selector_manifest(
+                selector_path,
+                verify_manifest_hash=True,
+                strict_manifest_hash=True,
+                require_component_hashes=True,
+            )
+            validate_paper_live_candidate_manifest(selector_manifest)
+            return (
+                {
+                    "path": str(selector_path),
+                    "engine_type": str(selector_manifest.engine_type),
+                    "release_stage": str(selector_manifest.release_stage),
+                    "manifest_hash": str(selector_manifest.manifest_hash),
+                    "strategy_symbol": str(selector_manifest.strategy_symbol),
+                    "ticks_per_bar": selector_manifest.bar_construction_ticks_per_bar or selector_manifest.ticks_per_bar,
+                    "manifest": selector_manifest,
+                    "source": "selector_manifest",
+                },
+                diagnostics,
+            )
+        except Exception as exc:
+            diagnostics.append(f"Selector manifest load failed at {selector_path}: {exc}")
+
+    try:
+        artifact_path = resolve_manifest_path(symbol=symbol, preferred=preferred_path)
+        artifact_manifest = load_manifest(artifact_path)
+        return (
+            {
+                "path": str(artifact_path),
+                "engine_type": "RL",
+                "release_stage": "legacy",
+                "manifest_hash": None,
+                "strategy_symbol": str(artifact_manifest.strategy_symbol),
+                "ticks_per_bar": artifact_manifest.bar_construction_ticks_per_bar or artifact_manifest.ticks_per_bar,
+                "manifest": artifact_manifest,
+                "source": "artifact_manifest",
+            },
+            diagnostics,
+        )
+    except Exception as exc:
+        diagnostics.append(f"Artifact manifest load failed: {exc}")
+        return None, diagnostics
+
+
+def build_report(symbol: str, ticks_per_bar: int, *, manifest_path: str | Path | None = None) -> dict[str, Any]:
     symbol = symbol.upper()
     paths = deployment_paths(symbol)
     blockers: list[str] = []
@@ -68,17 +122,27 @@ def build_report(symbol: str, ticks_per_bar: int) -> dict[str, Any]:
 
     gate = load_json_report(paths.gate_path) if paths.gate_path.exists() else None
     ops_attestation = load_json_report(paths.ops_attestation_path) if paths.ops_attestation_path.exists() else None
-    manifest = load_manifest(resolve_manifest_path(symbol=symbol))
+    manifest_bundle, manifest_diagnostics = _load_live_manifest(symbol=symbol, preferred_path=manifest_path)
     execution_audit = build_summary(symbol)
+    manifest = None if manifest_bundle is None else manifest_bundle["manifest"]
+    resolved_manifest_path = None if manifest_bundle is None else str(manifest_bundle["path"])
+    manifest_ticks = None if manifest_bundle is None else manifest_bundle["ticks_per_bar"]
 
-    _append_blocker(blockers, gate is None, f"Deployment gate missing: {paths.gate_path}")
-    if gate is not None:
-        _append_blocker(blockers, not bool(gate.get("approved_for_live", False)), "Deployment gate is not approved for live trading.")
+    # Preflight is a *technical* readiness check (MT5 connectivity, account mode,
+    # symbol caps, isolation). Profitability gates and ops sign-offs are separate
+    # artifacts and should not be prerequisites for preflight success.
+    if gate is None:
+        warnings.append(f"Deployment gate missing: {paths.gate_path}")
+    else:
+        if not bool(gate.get("approved_for_live", False)):
+            warnings.append("Deployment gate is not approved for live trading.")
         for blocker in gate.get("blockers", []):
-            blockers.append(f"Gate blocker: {blocker}")
+            warnings.append(f"Gate blocker: {blocker}")
 
-    manifest_ticks = manifest.bar_construction_ticks_per_bar or manifest.ticks_per_bar
-    if manifest_ticks is None:
+    if manifest_bundle is None:
+        blockers.append("No live manifest could be loaded for the requested symbol.")
+        blockers.extend(f"Manifest diagnostic: {entry}" for entry in manifest_diagnostics)
+    elif manifest_ticks is None:
         blockers.append("Artifact manifest does not declare bar_construction_ticks_per_bar; live bar-spec parity is unproven.")
     elif int(manifest_ticks) != int(ticks_per_bar):
         blockers.append(
@@ -182,10 +246,10 @@ def build_report(symbol: str, ticks_per_bar: int) -> dict[str, Any]:
             mt5.shutdown()
 
     if ops_attestation is None:
-        blockers.append(f"Ops attestation missing: {paths.ops_attestation_path}")
+        warnings.append(f"Ops attestation missing: {paths.ops_attestation_path}")
     min_audit_fills = int(os.environ.get("LIVE_MIN_AUDIT_FILLS", "20"))
     if int(execution_audit.get("accepted_count", 0) or 0) < min_audit_fills:
-        blockers.append(
+        warnings.append(
             f"Execution audit has only {execution_audit.get('accepted_count', 0)} accepted fills; "
             f"need at least {min_audit_fills} to assess live-vs-replay drift."
         )
@@ -199,10 +263,18 @@ def build_report(symbol: str, ticks_per_bar: int) -> dict[str, Any]:
         "warnings": warnings,
         "gate_path": str(paths.gate_path),
         "ops_attestation_path": str(paths.ops_attestation_path),
-        "manifest_path": str(resolve_manifest_path(symbol=symbol)),
+        "manifest_path": resolved_manifest_path,
+        "manifest_source": None if manifest_bundle is None else manifest_bundle["source"],
+        "manifest_engine_type": None if manifest_bundle is None else manifest_bundle["engine_type"],
+        "manifest_release_stage": None if manifest_bundle is None else manifest_bundle["release_stage"],
+        "manifest_hash": None if manifest_bundle is None else manifest_bundle["manifest_hash"],
+        "manifest_strategy_symbol": None if manifest_bundle is None else manifest_bundle["strategy_symbol"],
+        "manifest_diagnostics": manifest_diagnostics,
         "manifest_bar_construction_ticks_per_bar": manifest_ticks,
-        "manifest_ticks_per_bar": manifest.ticks_per_bar,
+        "manifest_ticks_per_bar": manifest_ticks,
         "execution_audit_summary": execution_audit,
+        "deployment_gate": None if gate is None else {"approved_for_live": bool(gate.get("approved_for_live", False)), "path": str(paths.gate_path)},
+        "ops_attestation": None if ops_attestation is None else {"approved": bool(ops_attestation.get("approved", False)), "path": str(paths.ops_attestation_path)},
         "order_magic": order_magic,
         "account_margin_mode": None if account_info is None else getattr(account_info, "margin_mode", None),
         "account_mode_supported": bool(account_mode_supported),
@@ -233,14 +305,28 @@ def build_report(symbol: str, ticks_per_bar: int) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Preflight MT5 live deployment readiness.")
     parser.add_argument("--symbol", default=os.environ.get("TRADING_SYMBOL", "EURUSD"))
+    parser.add_argument("--manifest-path", default=None)
     parser.add_argument(
         "--ticks-per-bar",
         type=int,
-        default=resolve_bar_construction_ticks_per_bar("BAR_SPEC_TICKS_PER_BAR", "TRADING_TICKS_PER_BAR"),
+        default=None,
     )
     args = parser.parse_args()
+    ticks_per_bar = args.ticks_per_bar
+    if ticks_per_bar is None:
+        manifest_path = args.manifest_path or resolve_selector_manifest_path(symbol=args.symbol, required=False)
+        if manifest_path is not None:
+            try:
+                selector_manifest = load_selector_manifest(manifest_path, verify_manifest_hash=False)
+                ticks_per_bar = int(
+                    selector_manifest.ticks_per_bar or selector_manifest.bar_construction_ticks_per_bar or 0
+                ) or None
+            except Exception:
+                ticks_per_bar = None
+        if ticks_per_bar is None:
+            ticks_per_bar = resolve_bar_construction_ticks_per_bar("BAR_SPEC_TICKS_PER_BAR", "TRADING_TICKS_PER_BAR")
 
-    report = build_report(args.symbol, args.ticks_per_bar)
+    report = build_report(args.symbol, int(ticks_per_bar), manifest_path=args.manifest_path)
     print("=" * 80)
     print(f"MT5 Live Preflight - {report['symbol']}")
     print("=" * 80)

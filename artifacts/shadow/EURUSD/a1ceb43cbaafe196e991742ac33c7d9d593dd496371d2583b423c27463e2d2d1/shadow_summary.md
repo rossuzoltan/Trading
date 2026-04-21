@@ -1,13 +1,13 @@
 # Shadow Summary - EURUSD
 
 * Manifest hash: `a1ceb43cbaafe196e991742ac33c7d9d593dd496371d2583b423c27463e2d2d1`
-* Window: `2026-04-14T08:14:14.062000+00:00` -> `2026-04-14T11:15:57.773000+00:00`
-* Trading days: `1`
+* Window: `2026-04-14T08:14:14.062000+00:00` -> `2026-04-21T13:59:08.077000+00:00`
+* Trading days: `2`
 * Actionable events: `0`
 * Evidence sufficient: `False`
 
 ## Counts
-* Events: `4`
+* Events: `15`
 * Signals: `0`
 * Opens: `0`
 * Closes: `0`
@@ -28,4 +28,4 @@
 * Short: `0.00%`
 
 ## No-Trade Reasons
-* `no signal`: `4`
+* `no signal`: `15`

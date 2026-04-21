@@ -15,6 +15,7 @@ MIN_PROMOTION_TRADING_DAYS = 20
 MIN_PROMOTION_ACTIONABLE_EVENTS = 30
 MIN_WEEKLY_REVIEW_TRADING_DAYS = 5
 MIN_WEEKLY_REVIEW_ACTIONABLE_EVENTS = 10
+MIN_DRIFT_EVENT_COUNT = 50
 
 NORMAL_SIGNAL_DENSITY_RATIO_RANGE = (0.75, 1.25)
 CRITICAL_SIGNAL_DENSITY_RATIO_RANGE = (0.60, 1.40)
@@ -261,6 +262,13 @@ def compute_drift_metrics(
     *,
     replay_reference: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    # Drift checks are not meaningful on tiny shadow samples; keep the verdict explicit
+    # so operators don't chase noise from a handful of bars.
+    has_event_count = "event_count" in summary
+    event_count = _safe_int(summary.get("event_count"), 0) if has_event_count else None
+    insufficient_samples = bool(has_event_count and event_count is not None and 0 < event_count < MIN_DRIFT_EVENT_COUNT)
+    no_data = bool(has_event_count and (event_count is None or event_count <= 0))
+
     replay_reference = dict(replay_reference or {})
     shadow_rates = dict(summary.get("rates", {}) or {})
     shadow_occupancy = dict(summary.get("directional_occupancy", {}) or {})
@@ -311,9 +319,18 @@ def compute_drift_metrics(
 
     is_critical = bool(critical_failures or len(set(normal_failures)) >= 2)
     verdict = "critical" if is_critical else "watch" if normal_failures else "aligned"
+    if no_data:
+        verdict = "no_data"
+        is_critical = False
+    elif insufficient_samples:
+        verdict = "insufficient"
+        is_critical = False
 
     return {
         "reference_source": replay_reference.get("reference_source", "shadow_only"),
+        "event_count": event_count,
+        "min_event_count": int(MIN_DRIFT_EVENT_COUNT) if has_event_count else None,
+        "insufficient_samples": insufficient_samples if has_event_count else None,
         "signal_density_ratio": signal_density_ratio,
         "would_open_density_ratio": would_open_density_ratio,
         "spread_rejection_delta_pp": spread_rejection_delta_pp,

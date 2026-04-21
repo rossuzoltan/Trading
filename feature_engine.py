@@ -647,6 +647,12 @@ class FeatureEngine:
             "avg_spread": valid_raw['avg_spread'],
             "time_delta_s": valid_raw['time_delta_s']
         }, index=pd.DatetimeIndex(valid_ts, tz='UTC'))
+
+        # Guard against rare timestamp duplication in the numpy ring-buffer path.
+        # pandas_ta indicator helpers will raise if the index contains duplicates.
+        if not df.index.is_unique:
+            df = df.loc[~df.index.duplicated(keep="last")].copy()
+            df = df.sort_index()
         
         raw = _compute_raw(df, latest_only_hurst=True, fast_mode=True)
         self._buffer = self._drop_invalid_feature_rows(raw)

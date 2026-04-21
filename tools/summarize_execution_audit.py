@@ -36,7 +36,39 @@ def build_summary(symbol: str) -> dict[str, Any]:
     rows = _load_jsonl(paths.execution_audit_path)
     accepted = [row for row in rows if bool(row.get("accepted"))]
     rejected = [row for row in rows if not bool(row.get("accepted"))]
-    deltas = np.asarray([float(row.get("fill_delta_pips", 0.0) or 0.0) for row in accepted], dtype=np.float64)
+    # Prefer recomputing drift from raw prices when available.
+    # Historical rows may have inflated/incorrect fill_delta_pips; sent_price vs fill_price is the cleanest basis.
+    recomputed: list[float] = []
+    recomputed_requested: list[float] = []
+    stored: list[float] = []
+    for row in accepted:
+        try:
+            fill_price = float(row.get("fill_price", 0.0) or 0.0)
+            sent_price = float(row.get("sent_price", 0.0) or 0.0)
+            requested_price = float(row.get("requested_price", 0.0) or 0.0)
+            pip_size = float(row.get("pip_size", 0.0) or 0.0)
+        except Exception:
+            fill_price = 0.0
+            sent_price = 0.0
+            requested_price = 0.0
+            pip_size = 0.0
+
+        # pip_size is not currently logged; infer from symbol where possible.
+        if pip_size <= 0.0:
+            from symbol_utils import pip_size_for_symbol
+
+            pip_size = float(pip_size_for_symbol(str(row.get("symbol", symbol)) or symbol) or 0.0)
+
+        if fill_price and sent_price and pip_size:
+            recomputed.append((fill_price - sent_price) / pip_size)
+        elif row.get("fill_delta_pips") is not None:
+            stored.append(float(row.get("fill_delta_pips", 0.0) or 0.0))
+
+        if fill_price and requested_price and pip_size:
+            recomputed_requested.append((fill_price - requested_price) / pip_size)
+
+    deltas = np.asarray(recomputed or stored, dtype=np.float64)
+    requested_deltas = np.asarray(recomputed_requested, dtype=np.float64)
     retcodes = Counter(str(row.get("retcode")) for row in rows)
     summary = {
         "symbol": symbol.upper(),
@@ -47,6 +79,11 @@ def build_summary(symbol: str) -> dict[str, Any]:
         "mean_fill_delta_pips": float(np.mean(deltas)) if len(deltas) else None,
         "mean_abs_fill_delta_pips": float(np.mean(np.abs(deltas))) if len(deltas) else None,
         "p95_abs_fill_delta_pips": float(np.percentile(np.abs(deltas), 95)) if len(deltas) else None,
+        "drift_basis": "sent_price" if recomputed else "stored_fill_delta_pips",
+        "recomputed_from_prices": bool(recomputed),
+        "recomputed_count": int(len(recomputed)),
+        "stored_count": int(len(stored)),
+        "mean_abs_fill_delta_pips_requested": float(np.mean(np.abs(requested_deltas))) if len(requested_deltas) else None,
     }
     return summary
 

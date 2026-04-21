@@ -3,7 +3,7 @@
 * Manifest hash: `a1ceb43cbaafe196e991742ac33c7d9d593dd496371d2583b423c27463e2d2d1`
 * Verdict: `demoted`
 * Anchor status: `demoted`
-* Reason: shadow evidence below threshold: need 20 trading days and 30 actionable events; restart drill failed or missing; preflight failed or missing; ops attestation failed or missing
+* Reason: shadow evidence below threshold: need 20 trading days and 30 actionable events; ops attestation failed or missing; historical MT5 replay shows critical drift
 
 ## Replay
 * Net PnL USD: `39.46980566077127`
@@ -18,14 +18,14 @@
 
 ## Shadow Window
 * Start: `2026-04-14T08:14:14.062000+00:00`
-* End: `2026-04-14T11:15:57.773000+00:00`
+* End: `2026-04-21T12:43:13.656000+00:00`
 * Evidence sufficient: `False`
-* Trading days: `1`
+* Trading days: `2`
 * Actionable events: `0`
 
 ## Drift
-* Verdict: `critical`
-* Critical: `True`
+* Verdict: `insufficient`
+* Critical: `False`
 * Signal density ratio: `0.0`
 * Would-open density ratio: `0.0`
 * Spread rejection delta pp: `0.0`
@@ -34,10 +34,10 @@
 
 ## Historical Replay
 * Present: `True`
-* Verdict: `WATCH`
-* OK: `True`
+* Verdict: `DRIFT_CRITICAL`
+* OK: `False`
 
 ## Ops Gates
-* Restart: `False`
-* Preflight: `False`
+* Restart: `True`
+* Preflight: `True`
 * Ops attestation: `False`

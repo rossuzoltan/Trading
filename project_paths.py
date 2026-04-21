@@ -43,6 +43,7 @@ DEFAULT_MANIFEST_CANDIDATES = (
     MODELS_DIR / "artifact_manifest.json",
     MODELS_DIR / "artifact_manifest_EURUSD.json",
 )
+DEFAULT_SELECTOR_MANIFEST_GLOB = "rc1/*/manifest.json"
 
 
 def ensure_runtime_dirs() -> None:
@@ -91,6 +92,18 @@ def list_scaler_paths() -> list[Path]:
 
 def list_manifest_paths() -> list[Path]:
     ordered_candidates = [MODELS_DIR / "artifact_manifest.json", *sorted(MODELS_DIR.glob(DEFAULT_SYMBOL_MANIFEST_GLOB))]
+    seen: set[Path] = set()
+    discovered: list[Path] = []
+    for path in ordered_candidates:
+        if not path.exists() or path in seen:
+            continue
+        seen.add(path)
+        discovered.append(path)
+    return discovered
+
+
+def list_selector_manifest_paths() -> list[Path]:
+    ordered_candidates = sorted(MODELS_DIR.glob(DEFAULT_SELECTOR_MANIFEST_GLOB))
     seen: set[Path] = set()
     discovered: list[Path] = []
     for path in ordered_candidates:
@@ -413,4 +426,45 @@ def resolve_manifest_path(
     names = ", ".join(path.name for path in candidates if path.name)
     raise FileNotFoundError(
         f"No artifact manifest found. Expected one of: {names}. Run train_agent.py first."
+    )
+
+
+def resolve_selector_manifest_path(
+    symbol: str | None = None,
+    preferred: str | Path | None = None,
+    *,
+    required: bool = True,
+) -> Path | None:
+    candidates: list[Path] = []
+    if preferred is not None:
+        candidates.append(Path(preferred))
+    candidates.extend(list_selector_manifest_paths())
+
+    expected_symbol = symbol.strip().upper() if symbol is not None else ""
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        try:
+            raw = json.loads(candidate.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        manifest_symbol = str(raw.get("strategy_symbol", "")).strip().upper()
+        if expected_symbol and manifest_symbol != expected_symbol:
+            continue
+        if str(raw.get("engine_type", "")).strip().upper() not in {"RULE", "ML"}:
+            continue
+        if raw.get("manifest_version") is None:
+            continue
+        return candidate
+
+    if not required:
+        return None
+
+    names = ", ".join(dict.fromkeys(path.name for path in candidates if path.name))
+    if expected_symbol:
+        raise FileNotFoundError(
+            f"No selector manifest found for {expected_symbol}. Expected one of: {names or 'models/rc1/*/manifest.json'}."
+        )
+    raise FileNotFoundError(
+        f"No selector manifest found. Expected one of: {names or 'models/rc1/*/manifest.json'}."
     )

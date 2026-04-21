@@ -200,6 +200,43 @@ class ProjectPathsTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
+    def test_resolve_selector_manifest_path_discovers_rc1_manifest_for_symbol(self):
+        tmpdir = make_test_dir("project_paths_selector_manifest")
+        try:
+            models_dir = tmpdir / "models"
+            pack_dir = models_dir / "rc1" / "eurusd_pack"
+            pack_dir.mkdir(parents=True, exist_ok=True)
+            dataset_path = tmpdir / "data" / "DATA_CLEAN_VOLUME_5000.csv"
+            dataset_path.parent.mkdir(parents=True, exist_ok=True)
+            dataset_path.write_text("stub dataset", encoding="utf-8")
+            manifest = create_rule_manifest(
+                strategy_symbol="EURUSD",
+                rule_family="mean_reversion",
+                rule_params={"threshold": 1.0},
+                dataset_path=dataset_path,
+                ticks_per_bar=5000,
+                cost_model=CostModel(commission_per_lot=7.0, slippage_pips=0.25),
+                threshold_policy=ThresholdPolicy(min_edge_pips=0.0, reject_ambiguous=True),
+                runtime_constraints=RuntimeConstraints(
+                    session_filter_active=True,
+                    spread_sanity_max_pips=1.5,
+                    max_concurrent_positions=1,
+                    daily_loss_stop_usd=100.0,
+                ),
+                release_stage="paper_live_candidate",
+                evaluator_hash="eval",
+                logic_hash="logic",
+            )
+            manifest_path = pack_dir / "manifest.json"
+            save_selector_manifest(manifest, manifest_path)
+
+            with patch.object(project_paths, "MODELS_DIR", models_dir):
+                resolved = project_paths.resolve_selector_manifest_path(symbol="EURUSD")
+
+            self.assertEqual(manifest_path, resolved)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

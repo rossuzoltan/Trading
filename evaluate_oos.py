@@ -92,6 +92,26 @@ def _eval_manifest_path_env() -> str | None:
     return raw or None
 
 
+def _find_rc_manifest_path(symbol: str) -> Path | None:
+    rc_root = Path("models") / "rc1"
+    if not rc_root.exists():
+        return None
+    expected_symbol = str(symbol or "").strip().upper()
+    candidates: list[Path] = []
+    for candidate in rc_root.glob("*/manifest.json"):
+        try:
+            payload = json.loads(candidate.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if str(payload.get("strategy_symbol", "")).strip().upper() != expected_symbol:
+            continue
+        candidates.append(candidate)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    return candidates[0]
+
+
 def _eval_output_dir() -> Path:
     raw = os.environ.get("EVAL_OUTPUT_DIR", "").strip()
     if raw:
@@ -592,7 +612,9 @@ def _load_promoted_manifest_context(symbol: str) -> ReplayContext | None:
     try:
         manifest_path = resolve_manifest_path(symbol=symbol, preferred=manifest_path_env)
     except FileNotFoundError:
-        return None
+        manifest_path = _find_rc_manifest_path(symbol)
+        if manifest_path is None:
+            return None
 
     # Try loading as SelectorManifest (V3+) first, then fallback to Legacy (V1)
     is_v3 = False

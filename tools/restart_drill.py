@@ -24,6 +24,7 @@ ensure_project_venv(project_root=Path(__file__).resolve().parent, script_path=__
 
 import live_bridge
 from event_pipeline import JsonStateStore, RuntimeSnapshot, VolumeBar
+from project_paths import resolve_selector_manifest_path
 from trading_config import deployment_paths, resolve_bar_construction_ticks_per_bar
 
 
@@ -42,6 +43,7 @@ class RestartDrillReport:
     bars_processed_after_restart: int
     pre_restart_snapshot: dict[str, Any]
     post_restart_snapshot: dict[str, Any]
+    bootstrap_diagnostics: dict[str, Any]
     notes: list[str]
 
 
@@ -54,6 +56,9 @@ class FakeMt5Position:
     tp: float = 0.0
     ticket: int = 1001
     identifier: int = 2001
+    # Ensure live bootstrap can classify this as a strategy position.
+    magic: int = 123456
+    time_msc: int = 0
 
 
 class FakeMt5:
@@ -124,7 +129,10 @@ class FakeMt5:
 
     def order_send(self, request):
         if request.get("position"):
-            self._position = None
+            # Keep the fake position stable across restart-drill cycles so the
+            # evidence focuses on state persistence/reconciliation rather than
+            # strategy-driven close/reopen behavior.
+            return SimpleNamespace(retcode=self.TRADE_RETCODE_DONE, order=int(request.get("position") or 0), price=request.get("price", 0.0))
         else:
             order_type = request.get("type")
             if order_type in (self.ORDER_TYPE_BUY, self.ORDER_TYPE_SELL):
@@ -195,11 +203,13 @@ def _run_with_bootstrap(
     attestable_for_live: bool,
     bars_before_restart: int,
     bars_after_restart: int,
+    manifest_path: str | Path | None = None,
 ) -> RestartDrillReport:
     runtime, _builder, store, _source = bootstrap_fn(
         symbol=symbol,
         state_path=state_path,
         ticks_per_bar=ticks_per_bar,
+        manifest_path=manifest_path,
         mt5_module=mt5_module,
     )
     startup_reconcile_ok = bool(
@@ -224,6 +234,7 @@ def _run_with_bootstrap(
         symbol=symbol,
         state_path=state_path,
         ticks_per_bar=ticks_per_bar,
+        manifest_path=manifest_path,
         mt5_module=mt5_module,
     )
     post_restart_snapshot = _snapshot_to_dict(runtime_after_restart.snapshot)
@@ -260,6 +271,12 @@ def _run_with_bootstrap(
         bars_processed_after_restart=int(bars_after_restart),
         pre_restart_snapshot=pre_restart_snapshot,
         post_restart_snapshot=post_restart_snapshot,
+        bootstrap_diagnostics={
+            "bootstrap_fn": getattr(bootstrap_fn, "__name__", str(bootstrap_fn)),
+            "manifest_path": str(manifest_path) if manifest_path is not None else None,
+            "ticks_per_bar": int(ticks_per_bar),
+            "symbol": symbol.upper(),
+        },
         notes=[],
     )
     return report
@@ -276,6 +293,7 @@ def run_restart_drill(
     allow_bar_spec_mismatch: bool = False,
     bars_before_restart: int = 2,
     bars_after_restart: int = 2,
+    manifest_path: str | Path | None = None,
 ) -> RestartDrillReport:
     evidence_mode = "real_mt5" if use_real_mt5 else "fake_mt5"
     attestable_for_live = bool(use_real_mt5 and not allow_bar_spec_mismatch)
@@ -295,6 +313,7 @@ def run_restart_drill(
             attestable_for_live=attestable_for_live,
             bars_before_restart=bars_before_restart,
             bars_after_restart=bars_after_restart,
+            manifest_path=manifest_path,
         )
     except Exception as exc:
         # Offline RC1 fallback: produce a structured restart report so the
@@ -313,6 +332,14 @@ def run_restart_drill(
             bars_processed_after_restart=int(bars_after_restart),
             pre_restart_snapshot={"error": str(exc)},
             post_restart_snapshot={"error": str(exc)},
+            bootstrap_diagnostics={
+                "bootstrap_fn": "bootstrap_live_runtime",
+                "manifest_path": str(manifest_path) if manifest_path is not None else None,
+                "ticks_per_bar": int(ticks_per_bar),
+                "symbol": symbol.upper(),
+                "error_type": exc.__class__.__name__,
+                "error": str(exc),
+            },
             notes=[f"Fallback generated because bootstrap failed: {exc}"],
         )
     output_path = Path(report.report_path)
@@ -345,6 +372,7 @@ def build_rc1_restart_drill(
         state_path=state_path,
         report_path=report_path,
         ticks_per_bar=ticks_per_bar,
+        manifest_path=manifest_path,
         mt5_module=mt5_module,
         use_real_mt5=use_real_mt5,
         allow_bar_spec_mismatch=allow_bar_spec_mismatch,
@@ -365,24 +393,40 @@ def build_rc1_restart_drill(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run a restart drill over the live runtime.")
     parser.add_argument("--symbol", default=os.environ.get("TRADING_SYMBOL", "EURUSD"))
+    parser.add_argument("--manifest-path", default=None)
     parser.add_argument("--state-path", default=os.environ.get("LIVE_STATE_PATH", "live_state.json"))
     parser.add_argument("--report-path", default=None)
     parser.add_argument(
         "--ticks-per-bar",
         type=int,
-        default=resolve_bar_construction_ticks_per_bar("BAR_SPEC_TICKS_PER_BAR", "TRADING_TICKS_PER_BAR"),
+        default=None,
     )
     parser.add_argument("--bars-before-restart", type=int, default=2)
     parser.add_argument("--bars-after-restart", type=int, default=2)
     parser.add_argument("--use-real-mt5", action="store_true")
     parser.add_argument("--allow-bar-spec-mismatch", action="store_true")
     args = parser.parse_args()
+    manifest_path = args.manifest_path or resolve_selector_manifest_path(symbol=args.symbol, required=False)
+    ticks_per_bar = args.ticks_per_bar
+    if ticks_per_bar is None:
+        # Prefer manifest parity when available, otherwise fall back to env vars.
+        if manifest_path is not None:
+            try:
+                from selector_manifest import load_selector_manifest
+
+                manifest = load_selector_manifest(manifest_path, verify_manifest_hash=False)
+                ticks_per_bar = int(manifest.ticks_per_bar or manifest.bar_construction_ticks_per_bar or 0) or None
+            except Exception:
+                ticks_per_bar = None
+        if ticks_per_bar is None:
+            ticks_per_bar = resolve_bar_construction_ticks_per_bar("BAR_SPEC_TICKS_PER_BAR", "TRADING_TICKS_PER_BAR")
 
     report = run_restart_drill(
         symbol=args.symbol,
         state_path=args.state_path,
         report_path=args.report_path,
-        ticks_per_bar=args.ticks_per_bar,
+        ticks_per_bar=int(ticks_per_bar),
+        manifest_path=manifest_path,
         use_real_mt5=args.use_real_mt5,
         allow_bar_spec_mismatch=args.allow_bar_spec_mismatch,
         bars_before_restart=args.bars_before_restart,

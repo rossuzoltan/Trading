@@ -47,6 +47,39 @@ def _verdict(ratio: float, ok: float = 0.10, warn: float = 0.30, crit: float = 0
         return "DRIFT_WARNING"
     return "DRIFT_CRITICAL"
 
+def _direction_verdict(delta_pp: float, *, ok_pp: float = 5.0, watch_pp: float = 15.0, warn_pp: float = 20.0) -> str:
+    """
+    Direction drift verdict based on deviation from the expected long-share.
+
+    Do not assume long/short balance should be ~1.0; compare to an exact-runtime
+    RC reference distribution (from the RC1 scoreboard) and measure absolute
+    deviation in percentage points.
+    """
+    delta_pp = abs(float(delta_pp))
+    if delta_pp <= ok_pp:
+        return "OK"
+    if delta_pp <= watch_pp:
+        return "WATCH"
+    if delta_pp <= warn_pp:
+        return "DRIFT_WARNING"
+    return "DRIFT_CRITICAL"
+
+
+def _worst_verdict(verdicts: list[str]) -> str:
+    order = {
+        "OK": 0,
+        "WATCH": 1,
+        "DRIFT_WARNING": 2,
+        "DRIFT_CRITICAL": 3,
+        "NO_REFERENCE": 4,
+        "NO_DATA": 5,
+    }
+    worst = "OK"
+    for verdict in verdicts:
+        if order.get(verdict, 0) > order.get(worst, 0):
+            worst = verdict
+    return worst
+
 
 def fetch_ticks_from_mt5(mt5, symbol: str, start_utc: datetime, end_utc: datetime) -> list[dict[str, Any]]:
     log.info("Fetching ticks %s %s -> %s", symbol, start_utc.date(), end_utc.date())
@@ -113,6 +146,7 @@ def run_rule_on_bars(bars: list[dict[str, Any]], manifest_path: Path) -> list[di
 
     selector = RuleSelector(manifest_path)
     feature_engine = FeatureEngine()
+    rule_params = dict(selector.manifest.rule_params or {})
 
     if len(bars) < WARMUP_BARS + 10:
         raise RuntimeError(f"Need at least {WARMUP_BARS + 10} bars; only got {len(bars)}")
@@ -169,6 +203,24 @@ def run_rule_on_bars(bars: list[dict[str, Any]], manifest_path: Path) -> list[di
 
         features = feature_engine._buffer.iloc[-1].to_dict()
         spread_pips = float(bar["avg_spread_pips"])
+        price_z = float(features.get("price_z", 0.0) or 0.0)
+        spread_z = float(features.get("spread_z", 0.0) or 0.0)
+        time_delta_z = float(features.get("time_delta_z", 0.0) or 0.0)
+        ma20_slope = float(features.get("ma20_slope", 0.0) or 0.0)
+        ma50_slope = float(features.get("ma50_slope", 0.0) or 0.0)
+        long_threshold = float(rule_params.get("long_threshold", -rule_params.get("threshold", 1.5)))
+        short_threshold = float(rule_params.get("short_threshold", rule_params.get("threshold", 1.5)))
+        raw_price_signal = 0
+        if price_z <= long_threshold:
+            raw_price_signal = 1
+        elif price_z >= short_threshold:
+            raw_price_signal = -1
+        guard_failures = {
+            "spread": bool(spread_z > float(rule_params.get("max_spread_z", 0.5))),
+            "time_delta": bool(abs(time_delta_z) > float(rule_params.get("max_time_delta_z", 2.0))),
+            "ma20": bool(abs(ma20_slope) > float(rule_params.get("max_abs_ma20_slope", 0.15))),
+            "ma50": bool(abs(ma50_slope) > float(rule_params.get("max_abs_ma50_slope", 0.08))),
+        }
         portfolio_state = {
             "current_positions": 1 if position_direction != 0 else 0,
             "current_direction": position_direction,
@@ -210,6 +262,13 @@ def run_rule_on_bars(bars: list[dict[str, Any]], manifest_path: Path) -> list[di
                 "allow_execution": bool(decision.allow_execution),
                 "reason": decision.reason or "",
                 "spread_pips": round(spread_pips, 4),
+                "price_z": round(price_z, 6),
+                "spread_z": round(spread_z, 6),
+                "time_delta_z": round(time_delta_z, 6),
+                "ma20_slope": round(ma20_slope, 6),
+                "ma50_slope": round(ma50_slope, 6),
+                "raw_price_signal": int(raw_price_signal),
+                "guard_failures": guard_failures,
                 "would_open": would_open,
                 "would_close": would_close,
                 "would_hold": would_hold,
@@ -226,7 +285,7 @@ def _resolve_replay_reference_metrics(
     *,
     manifest_path: Path,
     symbol: str,
-) -> tuple[float, int, int]:
+) -> tuple[float, int, int, float | None]:
     scoreboard_candidates = [
         manifest_path.parent / "baseline_scoreboard_rc1.json",
     ]
@@ -238,8 +297,14 @@ def _resolve_replay_reference_metrics(
             rc_candidate = dict(payload.get("rc_candidate") or {})
             replay_bars = int(rc_candidate.get("replay_bars", 0) or 0)
             replay_trade_count = int(rc_candidate.get("trade_count", 0) or 0)
+            long_count = float(rc_candidate.get("long_count", 0) or 0)
+            short_count = float(rc_candidate.get("short_count", 0) or 0)
+            expected_long_share = None
+            total = long_count + short_count
+            if total > 0:
+                expected_long_share = float(long_count / total)
             if replay_bars > 0:
-                return float(replay_trade_count / replay_bars), replay_trade_count, replay_bars
+                return float(replay_trade_count / replay_bars), replay_trade_count, replay_bars, expected_long_share
         except Exception:
             continue
 
@@ -252,7 +317,7 @@ def _resolve_replay_reference_metrics(
         os.environ["EVAL_MANIFEST_PATH"] = str(manifest_path)
         context = _load_promoted_manifest_context(symbol.upper())
         if context is None:
-            return 0.0, 0, 0
+            return 0.0, 0, 0, None
         selector = RuleSelector(manifest_path)
         provider = partial(_selector_action_provider, selector=selector)
         _, _, trade_log, _, _ = run_replay(
@@ -263,10 +328,10 @@ def _resolve_replay_reference_metrics(
         replay_bars = int(len(context.replay_frame))
         replay_trade_count = int(len(trade_log))
         if replay_bars <= 0:
-            return 0.0, replay_trade_count, replay_bars
-        return float(replay_trade_count / replay_bars), replay_trade_count, replay_bars
+            return 0.0, replay_trade_count, replay_bars, None
+        return float(replay_trade_count / replay_bars), replay_trade_count, replay_bars, None
     except Exception:
-        return 0.0, 0, 0
+        return 0.0, 0, 0, None
 
 
 def build_summary(
@@ -278,6 +343,7 @@ def build_summary(
     replay_trades_per_bar: float,
     replay_trade_count: int,
     replay_bars: int,
+    expected_long_share: float | None,
 ) -> dict[str, Any]:
     if not records:
         return {
@@ -304,12 +370,25 @@ def build_summary(
     )
     live_avg_spread_pips = float(frame["spread_pips"].mean())
     spread_ratio = live_avg_spread_pips / max(spread_backtest_pips, 1e-6)
-    long_short_ratio = longs / max(shorts, 1)
+
+    live_long_share = None
+    total_opens = longs + shorts
+    if total_opens > 0:
+        live_long_share = float(longs / total_opens)
+    directional_delta_pp = None
+    if expected_long_share is not None and live_long_share is not None:
+        directional_delta_pp = abs(float(live_long_share) - float(expected_long_share)) * 100.0
+
     if replay_trades_per_bar <= 0.0:
         overall_verdict = "NO_REFERENCE"
     else:
-        worst = max(abs(v - 1.0) for v in (signal_density_ratio, spread_ratio, long_short_ratio))
-        overall_verdict = _verdict(1.0 + worst)
+        density_verdict = _verdict(float(signal_density_ratio))
+        spread_verdict = _verdict(float(spread_ratio))
+        direction_verdict = _direction_verdict(float(directional_delta_pp)) if directional_delta_pp is not None else None
+        verdicts = [density_verdict, spread_verdict]
+        if direction_verdict is not None:
+            verdicts.append(direction_verdict)
+        overall_verdict = _worst_verdict(verdicts)
     labels = {
         "OK": "OK - Live behaviour matches backtest expectations",
         "WATCH": "WATCH - Minor deviations, monitor closely",
@@ -341,7 +420,9 @@ def build_summary(
         "live_avg_spread_pips": float(live_avg_spread_pips),
         "backtest_spread_pips": float(spread_backtest_pips),
         "spread_ratio": float(spread_ratio),
-        "long_short_ratio": float(long_short_ratio),
+        "expected_long_share": float(expected_long_share) if expected_long_share is not None else None,
+        "live_long_share": float(live_long_share) if live_long_share is not None else None,
+        "directional_delta_pp": float(directional_delta_pp) if directional_delta_pp is not None else None,
         "reason_counts": {
             "spread": int(frame[frame["reason"].str.contains("spread", case=False, na=False)].shape[0]),
             "session": int(frame[frame["reason"].str.contains("session", case=False, na=False)].shape[0]),
@@ -361,6 +442,7 @@ def render_report(
     replay_trades_per_bar: float,
     replay_trade_count: int,
     replay_bars: int,
+    expected_long_share: float | None = None,
 ) -> str:
     summary = build_summary(
         records,
@@ -370,6 +452,7 @@ def render_report(
         replay_trades_per_bar=replay_trades_per_bar,
         replay_trade_count=replay_trade_count,
         replay_bars=replay_bars,
+        expected_long_share=expected_long_share,
     )
     if not summary["bars_processed"]:
         return "# MT5 Historical Replay\nNo bars processed."
@@ -407,7 +490,21 @@ def render_report(
         "|---|---|",
         f"| Long opens | {summary['long_open_count']} |",
         f"| Short opens | {summary['short_open_count']} |",
-        f"| L/S ratio | {summary['long_short_ratio']:.2f}x  {_verdict(summary['long_short_ratio'])} |",
+        (
+            f"| Live long share | {float(summary['live_long_share']):.2%} |"
+            if summary.get("live_long_share") is not None
+            else "| Live long share | n/a |"
+        ),
+        (
+            f"| Expected long share (RC1) | {float(summary['expected_long_share']):.2%} |"
+            if summary.get("expected_long_share") is not None
+            else "| Expected long share (RC1) | n/a |"
+        ),
+        (
+            f"| Delta | {float(summary['directional_delta_pp']):.2f} pp  {_direction_verdict(float(summary['directional_delta_pp']))} |"
+            if summary.get("directional_delta_pp") is not None
+            else "| Delta | n/a (no RC1 direction reference) |"
+        ),
         "",
         "## D. State Occupancy",
         "| State | Bars | % |",
@@ -504,7 +601,7 @@ def main() -> None:
             handle.write(json.dumps(record) + "\n")
     log.info("Audit trace saved -> %s", audit_path)
 
-    replay_trades_per_bar, replay_trade_count, replay_bars = _resolve_replay_reference_metrics(
+    replay_trades_per_bar, replay_trade_count, replay_bars, expected_long_share = _resolve_replay_reference_metrics(
         manifest_path=manifest_path,
         symbol=symbol,
     )
@@ -516,6 +613,7 @@ def main() -> None:
         replay_trades_per_bar=replay_trades_per_bar,
         replay_trade_count=replay_trade_count,
         replay_bars=replay_bars,
+        expected_long_share=expected_long_share,
     )
     summary.update(
         {
@@ -536,6 +634,7 @@ def main() -> None:
         replay_trades_per_bar,
         replay_trade_count,
         replay_bars,
+        expected_long_share=expected_long_share,
     )
     out_path.write_text(report, encoding="utf-8")
     json_out_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")

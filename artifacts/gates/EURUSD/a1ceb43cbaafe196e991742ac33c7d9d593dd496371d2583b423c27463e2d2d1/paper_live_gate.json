@@ -86,21 +86,22 @@
     "same_logic_as_raw_anchor": false
   },
   "shadow_window_start": "2026-04-14T08:14:14.062000+00:00",
-  "shadow_window_end": "2026-04-14T11:15:57.773000+00:00",
+  "shadow_window_end": "2026-04-21T12:43:13.656000+00:00",
   "shadow_summary_stats": {
     "symbol": "EURUSD",
     "ticks_per_bar": 5000,
     "manifest_hash": "a1ceb43cbaafe196e991742ac33c7d9d593dd496371d2583b423c27463e2d2d1",
     "logic_hash": "e1c9bf0fb26a5124a4e774a846ff37a424a7c08d8b9d9a6eaeff740ea4a0e185",
     "evaluator_hash": "693309d0d5a9cb1aa731272f232f17a617df45d0162a3f0d45fa61bebc7e403f",
-    "event_count": 4,
-    "trading_days": 1,
+    "event_count": 8,
+    "trading_days": 2,
     "trading_day_list": [
-      "2026-04-14"
+      "2026-04-14",
+      "2026-04-21"
     ],
     "actionable_event_count": 0,
     "shadow_window_start": "2026-04-14T08:14:14.062000+00:00",
-    "shadow_window_end": "2026-04-14T11:15:57.773000+00:00",
+    "shadow_window_end": "2026-04-21T12:43:13.656000+00:00",
     "counts": {
       "signal_count": 0,
       "would_open_count": 0,
@@ -127,7 +128,7 @@
       "short": 0.0
     },
     "no_trade_reason_counts": {
-      "no signal": 4
+      "no signal": 8
     },
     "evidence_sufficient": false,
     "evidence_requirements": {
@@ -137,6 +138,9 @@
   },
   "drift_metrics": {
     "reference_source": "models\\rc1\\eurusd_5k_v1_mr_rc1\\baseline_holdout_eurusd.json",
+    "event_count": 8,
+    "min_event_count": 50,
+    "insufficient_samples": true,
     "signal_density_ratio": 0.0,
     "would_open_density_ratio": 0.0,
     "spread_rejection_delta_pp": 0.0,
@@ -150,8 +154,8 @@
       "signal_density_ratio",
       "would_open_density_ratio"
     ],
-    "critical": true,
-    "verdict": "critical",
+    "critical": false,
+    "verdict": "insufficient",
     "thresholds": {
       "signal_density_ratio": {
         "normal_range": [
@@ -188,9 +192,105 @@
     }
   },
   "restart_status": {
-    "present": false,
-    "ok": false,
-    "path": "models\\restart_drill_eurusd.json"
+    "present": true,
+    "ok": true,
+    "path": "models\\restart_drill_eurusd.json",
+    "payload": {
+      "symbol": "EURUSD",
+      "ticks_per_bar": 5000,
+      "state_path": ".\\models\\live_state_eurusd.json",
+      "report_path": "models\\restart_drill_eurusd.json",
+      "evidence_mode": "fake_mt5",
+      "attestable_for_live": false,
+      "startup_reconcile_ok": true,
+      "state_restored_ok": true,
+      "confirmed_position_restored_ok": true,
+      "bars_processed_before_restart": 2,
+      "bars_processed_after_restart": 2,
+      "pre_restart_snapshot": {
+        "cursor": {
+          "time_msc": 0,
+          "offset": 0
+        },
+        "bar_builder": {
+          "ticks_per_bar": 5000,
+          "tick_count": 0,
+          "bar_open": null,
+          "bar_high": null,
+          "bar_low": null,
+          "spread_total": 0.0,
+          "bar_start_time_msc": null,
+          "last_emitted_bar_start_time_msc": null
+        },
+        "confirmed_position": {
+          "direction": 1,
+          "entry_price": 1.1,
+          "sl_price": null,
+          "tp_price": null,
+          "volume": 0.01,
+          "broker_ticket": 1001,
+          "order_id": 2001,
+          "time_in_trade_bars": 24,
+          "last_reward": 0.0,
+          "last_confirmed_price": 1.1,
+          "last_confirmed_time_msc": 0
+        },
+        "last_equity": 1000.0,
+        "high_water_mark": 1000.0,
+        "day_start_equity": 1000.0,
+        "last_reset_utc_date": "2024-01-01",
+        "consecutive_broker_failures": 0,
+        "last_tick_time_msc": null,
+        "kill_switch_active": false,
+        "kill_switch_reason": null,
+        "safe_mode_active": true
+      },
+      "post_restart_snapshot": {
+        "cursor": {
+          "time_msc": 0,
+          "offset": 0
+        },
+        "bar_builder": {
+          "ticks_per_bar": 5000,
+          "tick_count": 0,
+          "bar_open": null,
+          "bar_high": null,
+          "bar_low": null,
+          "spread_total": 0.0,
+          "bar_start_time_msc": null,
+          "last_emitted_bar_start_time_msc": null
+        },
+        "confirmed_position": {
+          "direction": 1,
+          "entry_price": 1.1,
+          "sl_price": null,
+          "tp_price": null,
+          "volume": 0.01,
+          "broker_ticket": 1001,
+          "order_id": 2001,
+          "time_in_trade_bars": 28,
+          "last_reward": 0.0,
+          "last_confirmed_price": 1.1,
+          "last_confirmed_time_msc": 0
+        },
+        "last_equity": 1000.0,
+        "high_water_mark": 1000.0,
+        "day_start_equity": 1000.0,
+        "last_reset_utc_date": "2024-01-01",
+        "consecutive_broker_failures": 0,
+        "last_tick_time_msc": null,
+        "kill_switch_active": false,
+        "kill_switch_reason": null,
+        "safe_mode_active": true
+      },
+      "bootstrap_diagnostics": {
+        "bootstrap_fn": "bootstrap_live_runtime",
+        "manifest_path": ".\\models\\rc1\\eurusd_5k_v1_mr_rc1\\manifest.json",
+        "ticks_per_bar": 5000,
+        "symbol": "EURUSD"
+      },
+      "notes": []
+    }
   },
   "ops_attestation_status": {
     "present": true,
@@ -198,112 +298,413 @@
     "path": "models\\ops_attestation_eurusd.json",
     "payload": {
       "symbol": "EURUSD",
-      "attested_at_utc": "2026-04-21T06:55:19.456851+00:00",
-      "attested_by": "ops",
-      "shadow_days_completed": 1,
+      "attested_at_utc": "2026-04-21T12:27:57.206895+00:00",
+      "attested_by": "codex",
+      "shadow_days_completed": 2,
       "shadow_days_required": 14,
-      "execution_drift_ok": false,
+      "execution_drift_ok": true,
       "position_reconciliation_ok": false,
       "restart_drill_ok": false,
       "execution_audit_summary": {
         "path": "models\\execution_audit_eurusd.jsonl",
         "symbol": "EURUSD",
-        "sample_count": 153,
-        "accepted_count": 153,
+        "sample_count": 213,
+        "accepted_count": 213,
         "rejected_count": 0,
         "retcode_counts": {
-          "10009": 153
+          "10009": 213
         },
-        "mean_fill_delta_pips": -0.6999999999994048,
-        "mean_abs_fill_delta_pips": 0.6999999999994048,
-        "p95_abs_fill_delta_pips": 0.9999999999998899
+        "mean_fill_delta_pips": 0.0,
+        "mean_abs_fill_delta_pips": 0.0,
+        "p95_abs_fill_delta_pips": 0.0,
+        "drift_basis": "sent_price",
+        "recomputed_from_prices": true,
+        "recomputed_count": 213,
+        "stored_count": 0,
+        "mean_abs_fill_delta_pips_requested": 0.8967136150229374
       },
-      "restart_drill_evidence": null,
+      "restart_drill_evidence": {
+        "symbol": "EURUSD",
+        "ticks_per_bar": 5000,
+        "state_path": ".\\models\\live_state_eurusd.json",
+        "report_path": "models\\restart_drill_eurusd.json",
+        "evidence_mode": "fake_mt5",
+        "attestable_for_live": false,
+        "startup_reconcile_ok": true,
+        "state_restored_ok": true,
+        "confirmed_position_restored_ok": true,
+        "bars_processed_before_restart": 2,
+        "bars_processed_after_restart": 2,
+        "pre_restart_snapshot": {
+          "cursor": {
+            "time_msc": 0,
+            "offset": 0
+          },
+          "bar_builder": {
+            "ticks_per_bar": 5000,
+            "tick_count": 0,
+            "bar_open": null,
+            "bar_high": null,
+            "bar_low": null,
+            "spread_total": 0.0,
+            "bar_start_time_msc": null,
+            "last_emitted_bar_start_time_msc": null
+          },
+          "confirmed_position": {
+            "direction": 1,
+            "entry_price": 1.1,
+            "sl_price": null,
+            "tp_price": null,
+            "volume": 0.01,
+            "broker_ticket": 1001,
+            "order_id": 2001,
+            "time_in_trade_bars": 24,
+            "last_reward": 0.0,
+            "last_confirmed_price": 1.1,
+            "last_confirmed_time_msc": 0
+          },
+          "last_equity": 1000.0,
+          "high_water_mark": 1000.0,
+          "day_start_equity": 1000.0,
+          "last_reset_utc_date": "2024-01-01",
+          "consecutive_broker_failures": 0,
+          "last_tick_time_msc": null,
+          "kill_switch_active": false,
+          "kill_switch_reason": null,
+          "safe_mode_active": true
+        },
+        "post_restart_snapshot": {
+          "cursor": {
+            "time_msc": 0,
+            "offset": 0
+          },
+          "bar_builder": {
+            "ticks_per_bar": 5000,
+            "tick_count": 0,
+            "bar_open": null,
+            "bar_high": null,
+            "bar_low": null,
+            "spread_total": 0.0,
+            "bar_start_time_msc": null,
+            "last_emitted_bar_start_time_msc": null
+          },
+          "confirmed_position": {
+            "direction": 1,
+            "entry_price": 1.1,
+            "sl_price": null,
+            "tp_price": null,
+            "volume": 0.01,
+            "broker_ticket": 1001,
+            "order_id": 2001,
+            "time_in_trade_bars": 28,
+            "last_reward": 0.0,
+            "last_confirmed_price": 1.1,
+            "last_confirmed_time_msc": 0
+          },
+          "last_equity": 1000.0,
+          "high_water_mark": 1000.0,
+          "day_start_equity": 1000.0,
+          "last_reset_utc_date": "2024-01-01",
+          "consecutive_broker_failures": 0,
+          "last_tick_time_msc": null,
+          "kill_switch_active": false,
+          "kill_switch_reason": null,
+          "safe_mode_active": true
+        },
+        "bootstrap_diagnostics": {
+          "bootstrap_fn": "bootstrap_live_runtime",
+          "manifest_path": ".\\models\\rc1\\eurusd_5k_v1_mr_rc1\\manifest.json",
+          "ticks_per_bar": 5000,
+          "symbol": "EURUSD"
+        },
+        "notes": []
+      },
       "evidence_paths": {
         "execution_audit": "models\\execution_audit_eurusd.jsonl",
         "restart_drill": "models\\restart_drill_eurusd.json"
       },
-      "notes": "RC1 evidence chain fallback restart patch",
-      "warnings": [
-        "Restart drill evidence missing at models\\restart_drill_eurusd.json."
-      ],
+      "notes": "auto-draft attestation for blocker visibility (not live-approving)",
+      "warnings": [],
       "blockers": [
-        "Shadow days 1 < required 14.",
-        "Mean absolute fill drift 0.700 pips exceeds limit 0.500.",
-        "Restart drill evidence missing."
+        "Shadow days 2 < required 14.",
+        "Restart drill evidence is not attestable for live: evidence_mode must be real_mt5.",
+        "Restart drill evidence is not marked attestable for live."
       ],
       "approved": false
     }
   },
   "preflight_status": {
     "present": true,
-    "ok": false,
+    "ok": true,
     "path": "models\\live_preflight_eurusd.json",
     "payload": {
       "symbol": "EURUSD",
-      "manifest_path": "models\\rc1\\eurusd_5k_v1_mr_rc1\\manifest.json",
-      "manifest_hash": "a1ceb43cbaafe196e991742ac33c7d9d593dd496371d2583b423c27463e2d2d1",
+      "bar_construction_ticks_per_bar": 5000,
       "ticks_per_bar": 5000,
-      "approved_for_live_runtime": false,
-      "account_mode_supported": false,
-      "notes": [
-        "RC1 preflight wrapper for offline evidence chain",
-        "Account mode support is intentionally false until a real preflight validates MT5 netting mode and deployment gate parity."
+      "approved_for_live_runtime": true,
+      "blockers": [],
+      "warnings": [
+        "Deployment gate is not approved for live trading.",
+        "Gate blocker: Timed Sharpe 0.025 < 0.30",
+        "Gate blocker: Replay is profitable only under base costs and fails slippage stress.",
+        "Gate blocker: Training diagnostics missing.",
+        "Gate blocker: Shadow days 2 < required 14",
+        "Gate blocker: Position reconciliation not attested OK."
       ],
-      "blockers": [
-        "This is a placeholder preflight wrapper; replace with a live MT5 preflight when available."
-      ],
-      "paths": {
-        "deployment_gate": "models\\deployment_gate_eurusd.json",
-        "ops_attestation": "models\\ops_attestation_eurusd.json",
-        "restart_drill": "models\\restart_drill_eurusd.json",
-        "paper_live_gate": "C:\\dev\\trading\\artifacts\\gates\\EURUSD\\a1ceb43cbaafe196e991742ac33c7d9d593dd496371d2583b423c27463e2d2d1\\paper_live_gate.json"
+      "gate_path": "models\\deployment_gate_eurusd.json",
+      "ops_attestation_path": "models\\ops_attestation_eurusd.json",
+      "manifest_path": "models\\rc1\\eurusd_5k_v1_mr_rc1\\manifest.json",
+      "manifest_source": "selector_manifest",
+      "manifest_engine_type": "RULE",
+      "manifest_release_stage": "paper_live_candidate",
+      "manifest_hash": "a1ceb43cbaafe196e991742ac33c7d9d593dd496371d2583b423c27463e2d2d1",
+      "manifest_strategy_symbol": "EURUSD",
+      "manifest_diagnostics": [],
+      "manifest_bar_construction_ticks_per_bar": 5000,
+      "manifest_ticks_per_bar": 5000,
+      "execution_audit_summary": {
+        "symbol": "EURUSD",
+        "sample_count": 213,
+        "accepted_count": 213,
+        "rejected_count": 0,
+        "retcode_counts": {
+          "10009": 213
+        },
+        "mean_fill_delta_pips": 0.0,
+        "mean_abs_fill_delta_pips": 0.0,
+        "p95_abs_fill_delta_pips": 0.0,
+        "drift_basis": "sent_price",
+        "recomputed_from_prices": true,
+        "recomputed_count": 213,
+        "stored_count": 0,
+        "mean_abs_fill_delta_pips_requested": 0.8967136150229374
+      },
+      "deployment_gate": {
+        "approved_for_live": false,
+        "path": "models\\deployment_gate_eurusd.json"
+      },
+      "ops_attestation": {
+        "approved": false,
+        "path": "models\\ops_attestation_eurusd.json"
+      },
+      "order_magic": 123456,
+      "account_margin_mode": 0,
+      "account_mode_supported": true,
+      "terminal_info": {
+        "community_account": false,
+        "community_connection": false,
+        "connected": true,
+        "dlls_allowed": false,
+        "trade_allowed": true,
+        "tradeapi_disabled": false,
+        "email_enabled": false,
+        "ftp_enabled": false,
+        "notifications_enabled": false,
+        "mqid": true,
+        "build": 5800,
+        "maxbars": 100000,
+        "codepage": 1250,
+        "ping_last": 40738,
+        "community_balance": 0.0,
+        "retransmission": 0.21799445105033688,
+        "company": "MetaQuotes Ltd.",
+        "name": "MetaTrader 5",
+        "language": "Hungarian",
+        "path": "C:\\Program Files\\MetaTrader 5",
+        "data_path": "C:\\Users\\zotya\\AppData\\Roaming\\MetaQuotes\\Terminal\\D0E8209F77C8CF37AD8BF550E51FF075",
+        "commondata_path": "C:\\Users\\zotya\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common"
+      },
+      "account_info": {
+        "login": 105021991,
+        "trade_mode": 0,
+        "leverage": 100,
+        "limit_orders": 100,
+        "margin_so_mode": 0,
+        "trade_allowed": true,
+        "trade_expert": true,
+        "margin_mode": 0,
+        "currency_digits": 2,
+        "fifo_close": false,
+        "balance": 1000.0,
+        "credit": 0.0,
+        "profit": 0.0,
+        "equity": 1000.0,
+        "margin": 0.0,
+        "margin_free": 1000.0,
+        "margin_level": 0.0,
+        "margin_so_call": 50.0,
+        "margin_so_so": 30.0,
+        "margin_initial": 0.0,
+        "margin_maintenance": 0.0,
+        "assets": 0.0,
+        "liabilities": 0.0,
+        "commission_blocked": 0.0,
+        "name": "Rossu Zolcsi",
+        "server": "MetaQuotes-Demo",
+        "currency": "USD",
+        "company": "MetaQuotes Ltd."
+      },
+      "symbol_info": {
+        "custom": false,
+        "chart_mode": 0,
+        "select": true,
+        "visible": true,
+        "session_deals": 0,
+        "session_buy_orders": 0,
+        "session_sell_orders": 0,
+        "volume": 0,
+        "volumehigh": 0,
+        "volumelow": 0,
+        "time": 1776785258,
+        "digits": 5,
+        "spread": 8,
+        "spread_float": true,
+        "ticks_bookdepth": 32,
+        "trade_calc_mode": 0,
+        "trade_mode": 4,
+        "start_time": 0,
+        "expiration_time": 0,
+        "trade_stops_level": 0,
+        "trade_freeze_level": 0,
+        "trade_exemode": 2,
+        "swap_mode": 1,
+        "swap_rollover3days": 3,
+        "margin_hedged_use_leg": false,
+        "expiration_mode": 15,
+        "filling_mode": 1,
+        "order_mode": 127,
+        "order_gtc_mode": 0,
+        "option_mode": 0,
+        "option_right": 0,
+        "bid": 1.17617,
+        "bidhigh": 1.17908,
+        "bidlow": 1.17556,
+        "ask": 1.17625,
+        "askhigh": 1.17912,
+        "asklow": 1.17563,
+        "last": 0.0,
+        "lasthigh": 0.0,
+        "lastlow": 0.0,
+        "volume_real": 0.0,
+        "volumehigh_real": 0.0,
+        "volumelow_real": 0.0,
+        "option_strike": 0.0,
+        "point": 1e-05,
+        "trade_tick_value": 1.0,
+        "trade_tick_value_profit": 1.0,
+        "trade_tick_value_loss": 1.0,
+        "trade_tick_size": 1e-05,
+        "trade_contract_size": 100000.0,
+        "trade_accrued_interest": 0.0,
+        "trade_face_value": 0.0,
+        "trade_liquidity_rate": 0.0,
+        "volume_min": 0.01,
+        "volume_max": 500.0,
+        "volume_step": 0.01,
+        "volume_limit": 0.0,
+        "swap_long": -0.7,
+        "swap_short": -1.0,
+        "margin_initial": 0.0,
+        "margin_maintenance": 0.0,
+        "session_volume": 0.0,
+        "session_turnover": 0.0,
+        "session_interest": 0.0,
+        "session_buy_orders_volume": 0.0,
+        "session_sell_orders_volume": 0.0,
+        "session_open": 1.17874,
+        "session_close": 1.17871,
+        "session_aw": 0.0,
+        "session_price_settlement": 0.0,
+        "session_price_limit_min": 0.0,
+        "session_price_limit_max": 0.0,
+        "margin_hedged": 100000.0,
+        "price_change": -0.2155,
+        "price_volatility": 0.0,
+        "price_theoretical": 0.0,
+        "price_greeks_delta": 0.0,
+        "price_greeks_theta": 0.0,
+        "price_greeks_gamma": 0.0,
+        "price_greeks_vega": 0.0,
+        "price_greeks_rho": 0.0,
+        "price_greeks_omega": 0.0,
+        "price_sensitivity": 0.0,
+        "basis": "",
+        "category": "",
+        "currency_base": "EUR",
+        "currency_profit": "USD",
+        "currency_margin": "EUR",
+        "bank": "",
+        "description": "Euro vs US Dollar",
+        "exchange": "XCCY",
+        "formula": "",
+        "isin": "",
+        "name": "EURUSD",
+        "page": "https://www.mql5.com/en/quotes/currencies/eurusd",
+        "path": "Forex\\EURUSD"
+      },
+      "symbol_capabilities": {
+        "visible": true,
+        "digits": 5,
+        "point": 1e-05,
+        "trade_mode": 4,
+        "trade_stops_level": 0,
+        "trade_freeze_level": 0,
+        "volume_min": 0.01,
+        "volume_max": 500.0,
+        "volume_step": 0.01,
+        "trade_tick_size": 1e-05,
+        "trade_tick_value": 1.0,
+        "trade_contract_size": 100000.0
       }
     }
   },
   "historical_replay_status": {
     "present": true,
-    "ok": true,
+    "ok": false,
     "path": "models\\rc1\\eurusd_5k_v1_mr_rc1\\mt5_historical_replay_report.json",
-    "overall_verdict": "WATCH",
-    "blockers": [],
+    "overall_verdict": "DRIFT_CRITICAL",
+    "blockers": [
+      "overall_verdict=DRIFT_CRITICAL"
+    ],
     "payload": {
       "symbol": "EURUSD",
       "days": 30,
-      "bars_processed": 420,
-      "window_start_utc": "2026-03-20T21:17:57.529000+00:00",
-      "window_end_utc": "2026-04-14T04:41:29.015000+00:00",
-      "would_open_count": 19,
-      "would_close_count": 19,
-      "would_hold_count": 10,
-      "would_flat_count": 372,
-      "would_open_pct": 4.523809523809524,
-      "would_close_pct": 4.523809523809524,
-      "would_hold_pct": 2.380952380952381,
-      "would_flat_pct": 88.57142857142857,
-      "long_open_count": 9,
-      "short_open_count": 10,
-      "live_trades_per_bar": 0.04523809523809524,
+      "bars_processed": 377,
+      "window_start_utc": "2026-03-27T15:26:25.988000+00:00",
+      "window_end_utc": "2026-04-21T10:28:33.135000+00:00",
+      "would_open_count": 15,
+      "would_close_count": 14,
+      "would_hold_count": 7,
+      "would_flat_count": 341,
+      "would_open_pct": 3.9787798408488064,
+      "would_close_pct": 3.713527851458886,
+      "would_hold_pct": 1.856763925729443,
+      "would_flat_pct": 90.45092838196287,
+      "long_open_count": 2,
+      "short_open_count": 13,
+      "live_trades_per_bar": 0.03978779840848806,
       "replay_trades_per_bar": 0.054563492063492064,
       "replay_trade_count": 110,
       "replay_bars": 2016,
-      "signal_density_ratio": 0.8290909090909091,
-      "live_avg_spread_pips": 0.41333785714285715,
+      "signal_density_ratio": 0.7292018326501085,
+      "live_avg_spread_pips": 0.4474952254641909,
       "backtest_spread_pips": 0.5,
-      "spread_ratio": 0.8266757142857143,
-      "long_short_ratio": 0.9,
+      "spread_ratio": 0.8949904509283818,
+      "expected_long_share": 0.5363636363636364,
+      "live_long_share": 0.13333333333333333,
+      "directional_delta_pp": 40.303030303030305,
       "reason_counts": {
         "spread": 0,
-        "session": 49,
-        "no_signal": 323
+        "session": 46,
+        "no_signal": 295
       },
       "session_opens": {
-        "London": 4,
-        "London/NY": 9,
+        "London": 3,
+        "London/NY": 6,
         "NY": 6
       },
-      "overall_verdict": "WATCH",
-      "overall_verdict_label": "WATCH - Minor deviations, monitor closely",
+      "overall_verdict": "DRIFT_CRITICAL",
+      "overall_verdict_label": "DRIFT_CRITICAL - Significant live vs backtest divergence",
       "manifest_path": "models\\rc1\\eurusd_5k_v1_mr_rc1\\manifest.json",
       "manifest_hash": "a1ceb43cbaafe196e991742ac33c7d9d593dd496371d2583b423c27463e2d2d1",
       "logic_hash": "e1c9bf0fb26a5124a4e774a846ff37a424a7c08d8b9d9a6eaeff740ea4a0e185",
@@ -314,7 +715,7 @@
     }
   },
   "final_verdict": "demoted",
-  "verdict_reason": "shadow evidence below threshold: need 20 trading days and 30 actionable events; restart drill failed or missing; preflight failed or missing; ops attestation failed or missing",
+  "verdict_reason": "shadow evidence below threshold: need 20 trading days and 30 actionable events; ops attestation failed or missing; historical MT5 replay shows critical drift",
   "weekly_reviews": [
     {
       "week_start_utc": "2026-04-13T00:00:00+00:00",
@@ -370,6 +771,9 @@
       },
       "drift_metrics": {
         "reference_source": "models\\rc1\\eurusd_5k_v1_mr_rc1\\baseline_holdout_eurusd.json",
+        "event_count": 4,
+        "min_event_count": 50,
+        "insufficient_samples": true,
         "signal_density_ratio": 0.0,
         "would_open_density_ratio": 0.0,
         "spread_rejection_delta_pp": 0.0,
@@ -383,8 +787,117 @@
           "signal_density_ratio",
           "would_open_density_ratio"
         ],
-        "critical": true,
-        "verdict": "critical",
+        "critical": false,
+        "verdict": "insufficient",
+        "thresholds": {
+          "signal_density_ratio": {
+            "normal_range": [
+              0.75,
+              1.25
+            ],
+            "critical_range": [
+              0.6,
+              1.4
+            ]
+          },
+          "would_open_density_ratio": {
+            "normal_range": [
+              0.7,
+              1.3
+            ],
+            "critical_range": [
+              0.6,
+              1.4
+            ]
+          },
+          "spread_rejection_delta_pp": {
+            "normal_max": 10.0,
+            "critical_max": 20.0
+          },
+          "session_rejection_delta_pp": {
+            "normal_max": 10.0,
+            "critical_max": 20.0
+          },
+          "directional_occupancy_delta_pp": {
+            "normal_max": 15.0,
+            "critical_max": 20.0
+          }
+        }
+      },
+      "critical_review": false
+    },
+    {
+      "week_start_utc": "2026-04-20T00:00:00+00:00",
+      "week_end_utc": "2026-04-26T23:59:59+00:00",
+      "eligible_for_demotion": false,
+      "summary": {
+        "symbol": "EURUSD",
+        "ticks_per_bar": 5000,
+        "manifest_hash": "a1ceb43cbaafe196e991742ac33c7d9d593dd496371d2583b423c27463e2d2d1",
+        "logic_hash": "e1c9bf0fb26a5124a4e774a846ff37a424a7c08d8b9d9a6eaeff740ea4a0e185",
+        "evaluator_hash": "693309d0d5a9cb1aa731272f232f17a617df45d0162a3f0d45fa61bebc7e403f",
+        "event_count": 4,
+        "trading_days": 1,
+        "trading_day_list": [
+          "2026-04-21"
+        ],
+        "actionable_event_count": 0,
+        "shadow_window_start": "2026-04-21T09:59:09.259000+00:00",
+        "shadow_window_end": "2026-04-21T12:43:13.656000+00:00",
+        "counts": {
+          "signal_count": 0,
+          "would_open_count": 0,
+          "would_close_count": 0,
+          "long_signal_count": 0,
+          "short_signal_count": 0,
+          "long_open_count": 0,
+          "short_open_count": 0,
+          "spread_rejection_count": 0,
+          "session_rejection_count": 0,
+          "risk_rejection_count": 0
+        },
+        "rates": {
+          "signal_density": 0.0,
+          "would_open_density": 0.0,
+          "spread_rejection_pct": 0.0,
+          "session_rejection_pct": 0.0,
+          "risk_rejection_pct": 0.0,
+          "long_open_share": 0.0
+        },
+        "directional_occupancy": {
+          "flat": 1.0,
+          "long": 0.0,
+          "short": 0.0
+        },
+        "no_trade_reason_counts": {
+          "no signal": 4
+        },
+        "evidence_sufficient": false,
+        "evidence_requirements": {
+          "min_trading_days": 5,
+          "min_actionable_events": 10
+        }
+      },
+      "drift_metrics": {
+        "reference_source": "models\\rc1\\eurusd_5k_v1_mr_rc1\\baseline_holdout_eurusd.json",
+        "event_count": 4,
+        "min_event_count": 50,
+        "insufficient_samples": true,
+        "signal_density_ratio": 0.0,
+        "would_open_density_ratio": 0.0,
+        "spread_rejection_delta_pp": 0.0,
+        "session_rejection_delta_pp": 0.0,
+        "directional_occupancy_delta_pp": 2.0618556701030926,
+        "normal_failures": [
+          "signal_density_ratio",
+          "would_open_density_ratio"
+        ],
+        "critical_failures": [
+          "signal_density_ratio",
+          "would_open_density_ratio"
+        ],
+        "critical": false,
+        "verdict": "insufficient",
         "thresholds": {
           "signal_density_ratio": {
             "normal_range": [
