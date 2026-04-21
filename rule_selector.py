@@ -13,6 +13,21 @@ from strategies.rule_logic import compute_rule_direction
 log = logging.getLogger("rule_selector")
 
 
+def _session_bucket(hour_utc: int | None) -> str | None:
+    if hour_utc is None:
+        return None
+    hour = int(hour_utc)
+    if 0 <= hour < 7:
+        return "Asia"
+    if 7 <= hour < 12:
+        return "London"
+    if 12 <= hour < 17:
+        return "London/NY"
+    if 17 <= hour < 21:
+        return "NY"
+    return "Rollover"
+
+
 @dataclass
 class SelectorDecision:
     signal: int
@@ -87,29 +102,37 @@ class RuleSelector:
         current_hour_utc: int | None = None,
     ) -> dict[str, Any]:
         session_filter_active = bool(self.manifest.runtime_constraints.get("session_filter_active", False))
+        allowed_sessions = {
+            str(item).strip().lower()
+            for item in list(self.manifest.runtime_constraints.get("allowed_sessions", []) or [])
+            if str(item).strip()
+        }
+        session_name = _session_bucket(current_hour_utc)
+        current_positions = int(portfolio_state.get("current_positions", 0) or 0)
+        current_direction = int(portfolio_state.get("current_direction", 0) or 0)
+        has_open_position = bool(current_positions > 0 or current_direction != 0)
+        normalized_signal = int(signal or 0)
+        exit_intent = bool(has_open_position and (normalized_signal == 0 or normalized_signal != current_direction))
+        entry_intent = bool(normalized_signal != 0 and not has_open_position)
 
         # Manifest-driven rollover block (shared by shadow, replay, and live paths)
         rollover_hours = list(self.manifest.runtime_constraints.get("rollover_block_utc_hours", [22, 23]))
         rollover_hour_known = current_hour_utc is not None
         in_rollover = bool(rollover_hour_known and int(current_hour_utc) in rollover_hours)
         rollover_guard_ready = bool(not rollover_hours or rollover_hour_known)
+        session_name_ok = True
+        if entry_intent and allowed_sessions:
+            session_name_ok = bool(session_name is not None and session_name.lower() in allowed_sessions)
         session_ok = bool(
             (not session_filter_active)
-            or (is_session_open and rollover_guard_ready and not in_rollover)
+            or (is_session_open and rollover_guard_ready and not in_rollover and session_name_ok)
         )
 
         spread_limit = float(self.manifest.runtime_constraints.get("spread_sanity_max_pips", 999.0))
         spread_ok = float(current_spread_pips) <= spread_limit
 
-        current_positions = int(portfolio_state.get("current_positions", 0) or 0)
-        current_direction = int(portfolio_state.get("current_direction", 0) or 0)
-        has_open_position = bool(current_positions > 0 or current_direction != 0)
         max_positions = int(self.manifest.runtime_constraints.get("max_concurrent_positions", 1))
-        is_entry_intent = bool(signal != 0)
-        if not is_entry_intent:
-            position_ok = True
-        elif has_open_position:
-            # Never block close/reversal workflow due to max position cap.
+        if not entry_intent:
             position_ok = True
         else:
             position_ok = bool(current_positions < max_positions)
@@ -119,9 +142,12 @@ class RuleSelector:
         daily_loss_ok = bool(daily_pnl_usd > -abs(daily_loss_stop_usd))
 
         risk_ok = bool(position_ok and daily_loss_ok)
-        allow_execution = bool(session_ok and spread_ok and risk_ok)
+        entry_authorized = bool(session_ok and spread_ok and risk_ok and normalized_signal != 0)
+        allow_execution = bool(exit_intent or entry_authorized)
 
-        if not session_ok:
+        if exit_intent:
+            reason = "authorized_exit"
+        elif not session_ok:
             reason = "session blocked"
         elif not spread_ok:
             reason = "spread too high"
@@ -149,6 +175,10 @@ class RuleSelector:
             "in_rollover": in_rollover,
             "rollover_hour_known": rollover_hour_known,
             "has_open_position": has_open_position,
+            "session_name": session_name,
+            "session_name_ok": session_name_ok,
+            "entry_intent": entry_intent,
+            "exit_intent": exit_intent,
         }
 
     def decide(

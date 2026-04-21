@@ -34,11 +34,22 @@ from evaluate_oos import (
 )
 
 def _run_worker(base_ctx, config, alpha_gate):
-    """Worker function for multiprocessing."""
+    """Worker function for multiprocessing.
+
+    Uses an explicit deep-isolated copy of the mutable DataFrame fields to
+    prevent cross-worker state contamination in a multiprocessing Pool.
+    dataclasses.replace() is a *shallow* copy — two workers sharing the same
+    DataFrame object can race on index/column mutations inside _compute_raw.
+    """
     try:
-        from dataclasses import replace
-        # We copy via replace since it's a dataclass, preventing state leakage.
-        ctx = replace(base_ctx)
+        from dataclasses import replace as dc_replace
+        # Deep-isolate the DataFrame fields that are mutated during replay
+        ctx = dc_replace(
+            base_ctx,
+            replay_frame=base_ctx.replay_frame.copy() if base_ctx.replay_frame is not None and not base_ctx.replay_frame.empty else base_ctx.replay_frame,
+            trainable_feature_frame=base_ctx.trainable_feature_frame.copy() if base_ctx.trainable_feature_frame is not None and not base_ctx.trainable_feature_frame.empty else base_ctx.trainable_feature_frame,
+            holdout_feature_frame=base_ctx.holdout_feature_frame.copy() if base_ctx.holdout_feature_frame is not None and not base_ctx.holdout_feature_frame.empty else base_ctx.holdout_feature_frame,
+        )
         from tools.optimize_rules import _run_single_variant
         return _run_single_variant(ctx, config, alpha_gate=alpha_gate)
     except Exception as e:
@@ -68,11 +79,12 @@ def build_parameter_grid(*, include_regime_guard_variants: bool = False) -> list
         )
 
     # 1. mean_reversion (Standard & Aggressive)
-    # Testing everything from 'tight' (0.5) to 'deep' (2.0)
+    # Grid includes max_spread_z=0.5 which matches the current RC1 manifest value.
+    # NOTE: 0.5 was previously missing from the search space — this is now corrected.
     for long_threshold in [-0.5, -0.75, -1.0, -1.25, -1.5, -1.75, -2.0]:
         for short_threshold in [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]:
-            for max_spread_z in [0.75, 1.25]:
-                for max_abs_ma20_slope, max_abs_ma50_slope in [(0.15, 0.08), (0.25, 0.15), (0.5, 0.3)]:
+            for max_spread_z in [0.5, 0.75, 1.0, 1.25]:  # 0.5 added — was missing; matches RC1 manifest
+                for max_abs_ma20_slope, max_abs_ma50_slope in [(0.15, 0.08), (0.20, 0.10), (0.25, 0.15), (0.5, 0.3)]:
                     for regime_profile in regime_profiles:
                         params = {
                             "long_threshold": long_threshold,
@@ -237,7 +249,20 @@ def extract_constrained_metrics(
         reason.append(f"High Rollover Exposure ({roll_share:.1%} > 20%)")
     if not is_valid:
         reason.append("Accounting Validation Failed")
-        
+
+    # --- Cost-margin guard (Finding #2: cost model eats 70% of gross) ---
+    # Reject if net PnL per trade is less than 2x the estimated round-trip
+    # slippage cost — this ensures a live cost buffer exists.
+    # At 0.25 pip slippage + commission ~$0.84/trade, require expectancy > $1.68.
+    # This is a forward-looking safety check, not a backfit.
+    MIN_LIVE_EDGE_MULTIPLE = 2.0   # net must be ≥ 2× estimated cost buffer
+    ESTIMATED_RT_SLIP_USD = 0.84   # $0.84 estimated round-trip cost at 0.1 lot
+    min_required_expectancy = MIN_LIVE_EDGE_MULTIPLE * ESTIMATED_RT_SLIP_USD
+    if trades >= 10 and expectancy > 0 and expectancy < min_required_expectancy:
+        reason.append(
+            f"Thin live edge: expectancy ${expectancy:.2f} < {MIN_LIVE_EDGE_MULTIPLE:.0f}× cost buffer ${min_required_expectancy:.2f}"
+        )
+
     if not reason:
         status = "PASSED"
         
@@ -264,25 +289,33 @@ def extract_constrained_metrics(
 # ── Execution Task ───────────────────────────────────────────────────────────
 
 def _run_single_variant(replay_context: Any, config: dict[str, Any], alpha_gate: Any | None = None) -> dict[str, Any]:
-    """Runs replay on the TRAIN portion (which is trainable_feature_frame)"""
-    import evaluate_oos
-    from functools import partial
-    
-    # We want to optimize on the TRAIN set, NOT the HOLDOUT.
+    """Runs replay on the TRAIN portion (which is trainable_feature_frame).
 
-    # evaluate_oos uses replay_context.replay_frame, which is normally the holdout.
-    # We must explicitly swap it to use the trainable_feature_frame for the search phase,
-    # just like the model training does.
-    if replay_context.trainable_feature_frame is not None and not replay_context.trainable_feature_frame.empty:
-        # Instead of directly mutating, we should ideally use replace on context in a higher scope,
-        # but since we already got a copy from main loop, we safely assign it here as the object is ours.
-        replay_context.replay_frame = replay_context.trainable_feature_frame
-    
+    IMPORTANT: Uses dataclasses.replace() for all context mutations to avoid
+    mutating the shared base object — even inside a worker, the object may be
+    reused across multiple configs if the pool is reused.
+    """
+    import evaluate_oos
+    from dataclasses import replace as dc_replace
+
     rule_family = config["rule_family"]
     params = config["params"]
-    
-    replay_context.rule_family = rule_family
-    replay_context.rule_params = params
+
+    # Swap to TRAIN frame and inject rule config — use replace(), never direct mutation
+    train_frame = replay_context.trainable_feature_frame
+    if train_frame is not None and not train_frame.empty:
+        replay_context = dc_replace(
+            replay_context,
+            replay_frame=train_frame,
+            rule_family=rule_family,
+            rule_params=params,
+        )
+    else:
+        replay_context = dc_replace(
+            replay_context,
+            rule_family=rule_family,
+            rule_params=params,
+        )
 
     # Track how many times the rule logic itself fired
     signal_counts = {"long": 0, "short": 0}

@@ -260,6 +260,86 @@ class SelectorRc1Tests(unittest.TestCase):
             self.assertEqual(0, decision.signal)
             self.assertIn("alpha gate veto", decision.reason)
 
+    def test_rule_selector_blocks_entry_outside_allowed_sessions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            dataset_path = root / "dataset.csv"
+            dataset_path.write_text("x\n1\n", encoding="utf-8")
+
+            manifest = create_rule_manifest(
+                strategy_symbol="EURUSD",
+                rule_family="mean_reversion",
+                rule_params={"threshold": 1.0},
+                dataset_path=dataset_path,
+                ticks_per_bar=5000,
+                cost_model=CostModel(commission_per_lot=7.0, slippage_pips=0.25),
+                threshold_policy=ThresholdPolicy(min_edge_pips=0.0, reject_ambiguous=True),
+                runtime_constraints=RuntimeConstraints(
+                    session_filter_active=True,
+                    spread_sanity_max_pips=1.5,
+                    max_concurrent_positions=1,
+                    daily_loss_stop_usd=100.0,
+                    allowed_sessions=["London", "London/NY", "NY"],
+                ),
+                release_stage="paper_live_candidate",
+                evaluator_hash="eval",
+                logic_hash="logic",
+            )
+            manifest_path = root / "manifest.json"
+            save_selector_manifest(manifest, manifest_path)
+
+            selector = RuleSelector(manifest_path)
+            decision = selector.decide(
+                features={"price_z": -2.0, "spread_z": 0.0, "ma20_slope": 0.0, "ma50_slope": 0.0},
+                current_spread_pips=0.5,
+                is_session_open=True,
+                portfolio_state={"current_positions": 0, "current_direction": 0, "daily_pnl_usd": 0.0},
+                current_hour_utc=1,
+            )
+            self.assertEqual(1, decision.signal)
+            self.assertFalse(decision.allow_execution)
+            self.assertEqual("session blocked", decision.reason)
+
+    def test_rule_selector_authorizes_exit_even_when_entry_guards_fail(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            dataset_path = root / "dataset.csv"
+            dataset_path.write_text("x\n1\n", encoding="utf-8")
+
+            manifest = create_rule_manifest(
+                strategy_symbol="EURUSD",
+                rule_family="mean_reversion",
+                rule_params={"threshold": 1.0},
+                dataset_path=dataset_path,
+                ticks_per_bar=5000,
+                cost_model=CostModel(commission_per_lot=7.0, slippage_pips=0.25),
+                threshold_policy=ThresholdPolicy(min_edge_pips=0.0, reject_ambiguous=True),
+                runtime_constraints=RuntimeConstraints(
+                    session_filter_active=True,
+                    spread_sanity_max_pips=0.2,
+                    max_concurrent_positions=1,
+                    daily_loss_stop_usd=100.0,
+                    allowed_sessions=["London"],
+                ),
+                release_stage="paper_live_candidate",
+                evaluator_hash="eval",
+                logic_hash="logic",
+            )
+            manifest_path = root / "manifest.json"
+            save_selector_manifest(manifest, manifest_path)
+
+            selector = RuleSelector(manifest_path)
+            status = selector.gate_status(
+                signal=0,
+                current_spread_pips=0.8,
+                is_session_open=True,
+                portfolio_state={"current_positions": 1, "current_direction": 1, "daily_pnl_usd": -150.0},
+                current_hour_utc=1,
+            )
+            self.assertTrue(status["exit_intent"])
+            self.assertTrue(status["allow_execution"])
+            self.assertEqual("authorized_exit", status["reason"])
+
 
 if __name__ == "__main__":
     unittest.main()

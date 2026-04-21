@@ -45,6 +45,7 @@ class RuntimeConstraints:
     max_concurrent_positions: int
     daily_loss_stop_usd: float
     rollover_block_utc_hours: list[int] = field(default_factory=list)
+    allowed_sessions: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -219,6 +220,15 @@ def validate_selector_manifest(
             raise RuntimeError("Selector manifest is missing evaluator_hash.")
         if not manifest.logic_hash:
             raise RuntimeError("Selector manifest is missing logic_hash.")
+    allowed_sessions = list((manifest.runtime_constraints or {}).get("allowed_sessions", []) or [])
+    if allowed_sessions:
+        valid_sessions = {"asia", "london", "london/ny", "ny"}
+        invalid = [str(item) for item in allowed_sessions if str(item).strip().lower() not in valid_sessions]
+        if invalid:
+            raise RuntimeError(
+                "Selector manifest runtime_constraints.allowed_sessions contains unsupported values: "
+                + ", ".join(invalid)
+            )
     if require_paper_live_safety:
         if manifest.release_stage != "paper_live_candidate":
             raise RuntimeError(

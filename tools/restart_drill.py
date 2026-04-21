@@ -204,7 +204,10 @@ def _run_with_bootstrap(
     )
     startup_reconcile_ok = bool(
         getattr(runtime.confirmed_position, "is_flat", False)
-        or getattr(runtime.confirmed_position, "last_confirmed_time_msc", None) is not None
+        or (
+            getattr(runtime.confirmed_position, "last_confirmed_time_msc", None) is not None
+            and getattr(runtime.confirmed_position, "broker_ticket", None) is not None
+        )
     )
 
     pre_restart_snapshot = _snapshot_to_dict(runtime.snapshot)
@@ -229,8 +232,14 @@ def _run_with_bootstrap(
     )
     state_restored_ok = (
         persisted_snapshot["cursor"] == post_restart_snapshot["cursor"]
-        and persisted_snapshot["bar_builder"]["ticks_per_bar"] == post_restart_snapshot["bar_builder"]["ticks_per_bar"]
+        and persisted_snapshot["bar_builder"] == post_restart_snapshot["bar_builder"]
         and persisted_snapshot["last_tick_time_msc"] == post_restart_snapshot["last_tick_time_msc"]
+        and float(persisted_snapshot["last_equity"]) == float(post_restart_snapshot["last_equity"])
+        and float(persisted_snapshot["high_water_mark"]) == float(post_restart_snapshot["high_water_mark"])
+        and float(persisted_snapshot["day_start_equity"]) == float(post_restart_snapshot["day_start_equity"])
+        and persisted_snapshot["last_reset_utc_date"] == post_restart_snapshot["last_reset_utc_date"]
+        and bool(persisted_snapshot["kill_switch_active"]) == bool(post_restart_snapshot["kill_switch_active"])
+        and bool(persisted_snapshot["safe_mode_active"]) == bool(post_restart_snapshot["safe_mode_active"])
     )
 
     for index in range(bars_before_restart, bars_before_restart + bars_after_restart):
@@ -274,21 +283,82 @@ def run_restart_drill(
     if allow_bar_spec_mismatch:
         os.environ.setdefault("LIVE_ALLOW_BAR_SPEC_MISMATCH", "1")
 
-    report = _run_with_bootstrap(
-        live_bridge.bootstrap_live_runtime,
+    try:
+        report = _run_with_bootstrap(
+            live_bridge.bootstrap_live_runtime,
+            symbol=symbol,
+            state_path=state_path,
+            report_path=report_path,
+            ticks_per_bar=ticks_per_bar,
+            mt5_module=mt5_module,
+            evidence_mode=evidence_mode,
+            attestable_for_live=attestable_for_live,
+            bars_before_restart=bars_before_restart,
+            bars_after_restart=bars_after_restart,
+        )
+    except Exception as exc:
+        # Offline RC1 fallback: produce a structured restart report so the
+        # evidence chain has an explicit artifact, even though it is not live-attestable.
+        report = RestartDrillReport(
+            symbol=symbol.upper(),
+            ticks_per_bar=int(ticks_per_bar),
+            state_path=str(state_path),
+            report_path=str(Path(report_path) if report_path is not None else Path("models") / f"restart_drill_{symbol.lower()}.json"),
+            evidence_mode="offline_rc1_fallback",
+            attestable_for_live=False,
+            startup_reconcile_ok=False,
+            state_restored_ok=False,
+            confirmed_position_restored_ok=False,
+            bars_processed_before_restart=int(bars_before_restart),
+            bars_processed_after_restart=int(bars_after_restart),
+            pre_restart_snapshot={"error": str(exc)},
+            post_restart_snapshot={"error": str(exc)},
+            notes=[f"Fallback generated because bootstrap failed: {exc}"],
+        )
+    output_path = Path(report.report_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(asdict(report), indent=2), encoding="utf-8")
+    return report
+
+
+def build_rc1_restart_drill(
+    *,
+    manifest_path: str | Path,
+    state_path: str,
+    report_path: str | Path | None = None,
+    mt5_module: Any | None = None,
+    use_real_mt5: bool = False,
+    allow_bar_spec_mismatch: bool = False,
+    bars_before_restart: int = 2,
+    bars_after_restart: int = 2,
+) -> RestartDrillReport:
+    from selector_manifest import load_selector_manifest, validate_paper_live_candidate_manifest
+    from paper_live_metrics import resolve_paper_live_gate_paths
+
+    manifest = load_selector_manifest(manifest_path, verify_manifest_hash=True)
+    validate_paper_live_candidate_manifest(manifest)
+    ticks_per_bar = int(manifest.ticks_per_bar or manifest.bar_construction_ticks_per_bar or 0)
+    symbol = manifest.strategy_symbol.upper()
+
+    report = run_restart_drill(
         symbol=symbol,
         state_path=state_path,
         report_path=report_path,
         ticks_per_bar=ticks_per_bar,
         mt5_module=mt5_module,
-        evidence_mode=evidence_mode,
-        attestable_for_live=attestable_for_live,
+        use_real_mt5=use_real_mt5,
+        allow_bar_spec_mismatch=allow_bar_spec_mismatch,
         bars_before_restart=bars_before_restart,
         bars_after_restart=bars_after_restart,
     )
-    output_path = Path(report.report_path)
+    payload = asdict(report)
+    payload["manifest_path"] = str(Path(manifest_path))
+    payload["manifest_hash"] = manifest.manifest_hash
+    payload["logic_hash"] = manifest.logic_hash
+    payload["evaluator_hash"] = manifest.evaluator_hash
+    output_path = Path(report_path) if report_path is not None else Path("models") / f"restart_drill_{symbol.lower()}.json"
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(asdict(report), indent=2), encoding="utf-8")
+    output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return report
 
 

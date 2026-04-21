@@ -1,0 +1,432 @@
+{
+  "symbol": "EURUSD",
+  "ticks_per_bar": 5000,
+  "manifest_hash": "a1ceb43cbaafe196e991742ac33c7d9d593dd496371d2583b423c27463e2d2d1",
+  "logic_hash": "e1c9bf0fb26a5124a4e774a846ff37a424a7c08d8b9d9a6eaeff740ea4a0e185",
+  "evaluator_hash": "693309d0d5a9cb1aa731272f232f17a617df45d0162a3f0d45fa61bebc7e403f",
+  "release_stage": "paper_live_candidate",
+  "anchor_status": "demoted",
+  "replay_metrics": {
+    "net_pnl_usd": 39.46980566077127,
+    "gross_pnl_usd": 131.73120465095735,
+    "total_cost_usd": 92.2613989901845,
+    "profit_factor": 1.1715556524562543,
+    "expectancy_usd": 0.35881641509792067,
+    "trade_count": 110,
+    "win_rate": 0.6090909090909091,
+    "long_count": 59,
+    "short_count": 51,
+    "replay_bars": 2016,
+    "trades_per_bar": 0.054563492063492064,
+    "validation_passed": true
+  },
+  "baseline_comparison": {
+    "mandatory_baselines": {
+      "runtime_flat": {
+        "net_pnl_usd": 0.0,
+        "gross_pnl_usd": 0.0,
+        "total_cost_usd": 0.0,
+        "profit_factor": 0.0,
+        "expectancy_usd": 0.0,
+        "trade_count": 0,
+        "win_rate": 0.0,
+        "long_count": 0,
+        "short_count": 0
+      },
+      "runtime_always_short": {
+        "net_pnl_usd": -50.21108981788234,
+        "gross_pnl_usd": -46.760345824538255,
+        "total_cost_usd": 3.4507439933437833,
+        "profit_factor": 0.0,
+        "expectancy_usd": -10.042217963576467,
+        "trade_count": 5,
+        "win_rate": 0.0,
+        "long_count": 0,
+        "short_count": 5
+      },
+      "runtime_trend": {
+        "net_pnl_usd": -53.93945477024374,
+        "gross_pnl_usd": -31.280953786479763,
+        "total_cost_usd": 22.65850098376354,
+        "profit_factor": 0.643160995729938,
+        "expectancy_usd": -1.9264090989372764,
+        "trade_count": 28,
+        "win_rate": 0.32142857142857145,
+        "long_count": 16,
+        "short_count": 12
+      }
+    },
+    "raw_anchor_baseline": {
+      "net_pnl_usd": -54.64231838159458,
+      "gross_pnl_usd": 2.749083626051309,
+      "total_cost_usd": 57.39140200764578,
+      "profit_factor": 0.7144543719836415,
+      "expectancy_usd": -0.8406510520245319,
+      "trade_count": 65,
+      "win_rate": 0.5230769230769231,
+      "long_count": 31,
+      "short_count": 34
+    },
+    "deployed_anchor_rc": {
+      "net_pnl_usd": 39.46980566077127,
+      "gross_pnl_usd": 131.73120465095735,
+      "total_cost_usd": 92.2613989901845,
+      "profit_factor": 1.1715556524562543,
+      "expectancy_usd": 0.35881641509792067,
+      "trade_count": 110,
+      "win_rate": 0.6090909090909091,
+      "long_count": 59,
+      "short_count": 51,
+      "replay_bars": 2016,
+      "trades_per_bar": 0.054563492063492064,
+      "validation_passed": true
+    },
+    "mandatory_baseline_pass": true,
+    "raw_anchor_baseline_pass": true,
+    "same_logic_as_raw_anchor": false
+  },
+  "shadow_window_start": "2026-04-14T08:14:14.062000+00:00",
+  "shadow_window_end": "2026-04-14T11:15:57.773000+00:00",
+  "shadow_summary_stats": {
+    "symbol": "EURUSD",
+    "ticks_per_bar": 5000,
+    "manifest_hash": "a1ceb43cbaafe196e991742ac33c7d9d593dd496371d2583b423c27463e2d2d1",
+    "logic_hash": "e1c9bf0fb26a5124a4e774a846ff37a424a7c08d8b9d9a6eaeff740ea4a0e185",
+    "evaluator_hash": "693309d0d5a9cb1aa731272f232f17a617df45d0162a3f0d45fa61bebc7e403f",
+    "event_count": 4,
+    "trading_days": 1,
+    "trading_day_list": [
+      "2026-04-14"
+    ],
+    "actionable_event_count": 0,
+    "shadow_window_start": "2026-04-14T08:14:14.062000+00:00",
+    "shadow_window_end": "2026-04-14T11:15:57.773000+00:00",
+    "counts": {
+      "signal_count": 0,
+      "would_open_count": 0,
+      "would_close_count": 0,
+      "long_signal_count": 0,
+      "short_signal_count": 0,
+      "long_open_count": 0,
+      "short_open_count": 0,
+      "spread_rejection_count": 0,
+      "session_rejection_count": 0,
+      "risk_rejection_count": 0
+    },
+    "rates": {
+      "signal_density": 0.0,
+      "would_open_density": 0.0,
+      "spread_rejection_pct": 0.0,
+      "session_rejection_pct": 0.0,
+      "risk_rejection_pct": 0.0,
+      "long_open_share": 0.0
+    },
+    "directional_occupancy": {
+      "flat": 1.0,
+      "long": 0.0,
+      "short": 0.0
+    },
+    "no_trade_reason_counts": {
+      "no signal": 4
+    },
+    "evidence_sufficient": false,
+    "evidence_requirements": {
+      "min_trading_days": 20,
+      "min_actionable_events": 30
+    }
+  },
+  "drift_metrics": {
+    "reference_source": "models\\rc1\\eurusd_5k_v1_mr_rc1\\baseline_holdout_eurusd.json",
+    "signal_density_ratio": 0.0,
+    "would_open_density_ratio": 0.0,
+    "spread_rejection_delta_pp": 0.0,
+    "session_rejection_delta_pp": 0.0,
+    "directional_occupancy_delta_pp": 2.0618556701030926,
+    "normal_failures": [
+      "signal_density_ratio",
+      "would_open_density_ratio"
+    ],
+    "critical_failures": [
+      "signal_density_ratio",
+      "would_open_density_ratio"
+    ],
+    "critical": true,
+    "verdict": "critical",
+    "thresholds": {
+      "signal_density_ratio": {
+        "normal_range": [
+          0.75,
+          1.25
+        ],
+        "critical_range": [
+          0.6,
+          1.4
+        ]
+      },
+      "would_open_density_ratio": {
+        "normal_range": [
+          0.7,
+          1.3
+        ],
+        "critical_range": [
+          0.6,
+          1.4
+        ]
+      },
+      "spread_rejection_delta_pp": {
+        "normal_max": 10.0,
+        "critical_max": 20.0
+      },
+      "session_rejection_delta_pp": {
+        "normal_max": 10.0,
+        "critical_max": 20.0
+      },
+      "directional_occupancy_delta_pp": {
+        "normal_max": 15.0,
+        "critical_max": 20.0
+      }
+    }
+  },
+  "restart_status": {
+    "present": false,
+    "ok": false,
+    "path": "models\\restart_drill_eurusd.json"
+  },
+  "ops_attestation_status": {
+    "present": true,
+    "ok": false,
+    "path": "models\\ops_attestation_eurusd.json",
+    "payload": {
+      "symbol": "EURUSD",
+      "attested_at_utc": "2026-04-21T06:55:19.456851+00:00",
+      "attested_by": "ops",
+      "shadow_days_completed": 1,
+      "shadow_days_required": 14,
+      "execution_drift_ok": false,
+      "position_reconciliation_ok": false,
+      "restart_drill_ok": false,
+      "execution_audit_summary": {
+        "path": "models\\execution_audit_eurusd.jsonl",
+        "symbol": "EURUSD",
+        "sample_count": 153,
+        "accepted_count": 153,
+        "rejected_count": 0,
+        "retcode_counts": {
+          "10009": 153
+        },
+        "mean_fill_delta_pips": -0.6999999999994048,
+        "mean_abs_fill_delta_pips": 0.6999999999994048,
+        "p95_abs_fill_delta_pips": 0.9999999999998899
+      },
+      "restart_drill_evidence": null,
+      "evidence_paths": {
+        "execution_audit": "models\\execution_audit_eurusd.jsonl",
+        "restart_drill": "models\\restart_drill_eurusd.json"
+      },
+      "notes": "RC1 evidence chain fallback restart patch",
+      "warnings": [
+        "Restart drill evidence missing at models\\restart_drill_eurusd.json."
+      ],
+      "blockers": [
+        "Shadow days 1 < required 14.",
+        "Mean absolute fill drift 0.700 pips exceeds limit 0.500.",
+        "Restart drill evidence missing."
+      ],
+      "approved": false
+    }
+  },
+  "preflight_status": {
+    "present": true,
+    "ok": false,
+    "path": "models\\live_preflight_eurusd.json",
+    "payload": {
+      "symbol": "EURUSD",
+      "manifest_path": "models\\rc1\\eurusd_5k_v1_mr_rc1\\manifest.json",
+      "manifest_hash": "a1ceb43cbaafe196e991742ac33c7d9d593dd496371d2583b423c27463e2d2d1",
+      "ticks_per_bar": 5000,
+      "approved_for_live_runtime": false,
+      "account_mode_supported": false,
+      "notes": [
+        "RC1 preflight wrapper for offline evidence chain",
+        "Account mode support is intentionally false until a real preflight validates MT5 netting mode and deployment gate parity."
+      ],
+      "blockers": [
+        "This is a placeholder preflight wrapper; replace with a live MT5 preflight when available."
+      ],
+      "paths": {
+        "deployment_gate": "models\\deployment_gate_eurusd.json",
+        "ops_attestation": "models\\ops_attestation_eurusd.json",
+        "restart_drill": "models\\restart_drill_eurusd.json",
+        "paper_live_gate": "C:\\dev\\trading\\artifacts\\gates\\EURUSD\\a1ceb43cbaafe196e991742ac33c7d9d593dd496371d2583b423c27463e2d2d1\\paper_live_gate.json"
+      }
+    }
+  },
+  "historical_replay_status": {
+    "present": true,
+    "ok": true,
+    "path": "models\\rc1\\eurusd_5k_v1_mr_rc1\\mt5_historical_replay_report.json",
+    "overall_verdict": "WATCH",
+    "blockers": [],
+    "payload": {
+      "symbol": "EURUSD",
+      "days": 30,
+      "bars_processed": 420,
+      "window_start_utc": "2026-03-20T21:17:57.529000+00:00",
+      "window_end_utc": "2026-04-14T04:41:29.015000+00:00",
+      "would_open_count": 19,
+      "would_close_count": 19,
+      "would_hold_count": 10,
+      "would_flat_count": 372,
+      "would_open_pct": 4.523809523809524,
+      "would_close_pct": 4.523809523809524,
+      "would_hold_pct": 2.380952380952381,
+      "would_flat_pct": 88.57142857142857,
+      "long_open_count": 9,
+      "short_open_count": 10,
+      "live_trades_per_bar": 0.04523809523809524,
+      "replay_trades_per_bar": 0.054563492063492064,
+      "replay_trade_count": 110,
+      "replay_bars": 2016,
+      "signal_density_ratio": 0.8290909090909091,
+      "live_avg_spread_pips": 0.41333785714285715,
+      "backtest_spread_pips": 0.5,
+      "spread_ratio": 0.8266757142857143,
+      "long_short_ratio": 0.9,
+      "reason_counts": {
+        "spread": 0,
+        "session": 49,
+        "no_signal": 323
+      },
+      "session_opens": {
+        "London": 4,
+        "London/NY": 9,
+        "NY": 6
+      },
+      "overall_verdict": "WATCH",
+      "overall_verdict_label": "WATCH - Minor deviations, monitor closely",
+      "manifest_path": "models\\rc1\\eurusd_5k_v1_mr_rc1\\manifest.json",
+      "manifest_hash": "a1ceb43cbaafe196e991742ac33c7d9d593dd496371d2583b423c27463e2d2d1",
+      "logic_hash": "e1c9bf0fb26a5124a4e774a846ff37a424a7c08d8b9d9a6eaeff740ea4a0e185",
+      "evaluator_hash": "693309d0d5a9cb1aa731272f232f17a617df45d0162a3f0d45fa61bebc7e403f",
+      "ticks_per_bar": 5000,
+      "audit_trace_path": "models\\rc1\\eurusd_5k_v1_mr_rc1\\mt5_historical_replay_report.audit.jsonl",
+      "raw_bars_path": "models\\rc1\\eurusd_5k_v1_mr_rc1\\mt5_historical_replay_report.bars.jsonl"
+    }
+  },
+  "final_verdict": "demoted",
+  "verdict_reason": "shadow evidence below threshold: need 20 trading days and 30 actionable events; restart drill failed or missing; preflight failed or missing; ops attestation failed or missing",
+  "weekly_reviews": [
+    {
+      "week_start_utc": "2026-04-13T00:00:00+00:00",
+      "week_end_utc": "2026-04-19T23:59:59+00:00",
+      "eligible_for_demotion": false,
+      "summary": {
+        "symbol": "EURUSD",
+        "ticks_per_bar": 5000,
+        "manifest_hash": "a1ceb43cbaafe196e991742ac33c7d9d593dd496371d2583b423c27463e2d2d1",
+        "logic_hash": "e1c9bf0fb26a5124a4e774a846ff37a424a7c08d8b9d9a6eaeff740ea4a0e185",
+        "evaluator_hash": "693309d0d5a9cb1aa731272f232f17a617df45d0162a3f0d45fa61bebc7e403f",
+        "event_count": 4,
+        "trading_days": 1,
+        "trading_day_list": [
+          "2026-04-14"
+        ],
+        "actionable_event_count": 0,
+        "shadow_window_start": "2026-04-14T08:14:14.062000+00:00",
+        "shadow_window_end": "2026-04-14T11:15:57.773000+00:00",
+        "counts": {
+          "signal_count": 0,
+          "would_open_count": 0,
+          "would_close_count": 0,
+          "long_signal_count": 0,
+          "short_signal_count": 0,
+          "long_open_count": 0,
+          "short_open_count": 0,
+          "spread_rejection_count": 0,
+          "session_rejection_count": 0,
+          "risk_rejection_count": 0
+        },
+        "rates": {
+          "signal_density": 0.0,
+          "would_open_density": 0.0,
+          "spread_rejection_pct": 0.0,
+          "session_rejection_pct": 0.0,
+          "risk_rejection_pct": 0.0,
+          "long_open_share": 0.0
+        },
+        "directional_occupancy": {
+          "flat": 1.0,
+          "long": 0.0,
+          "short": 0.0
+        },
+        "no_trade_reason_counts": {
+          "no signal": 4
+        },
+        "evidence_sufficient": false,
+        "evidence_requirements": {
+          "min_trading_days": 5,
+          "min_actionable_events": 10
+        }
+      },
+      "drift_metrics": {
+        "reference_source": "models\\rc1\\eurusd_5k_v1_mr_rc1\\baseline_holdout_eurusd.json",
+        "signal_density_ratio": 0.0,
+        "would_open_density_ratio": 0.0,
+        "spread_rejection_delta_pp": 0.0,
+        "session_rejection_delta_pp": 0.0,
+        "directional_occupancy_delta_pp": 2.0618556701030926,
+        "normal_failures": [
+          "signal_density_ratio",
+          "would_open_density_ratio"
+        ],
+        "critical_failures": [
+          "signal_density_ratio",
+          "would_open_density_ratio"
+        ],
+        "critical": true,
+        "verdict": "critical",
+        "thresholds": {
+          "signal_density_ratio": {
+            "normal_range": [
+              0.75,
+              1.25
+            ],
+            "critical_range": [
+              0.6,
+              1.4
+            ]
+          },
+          "would_open_density_ratio": {
+            "normal_range": [
+              0.7,
+              1.3
+            ],
+            "critical_range": [
+              0.6,
+              1.4
+            ]
+          },
+          "spread_rejection_delta_pp": {
+            "normal_max": 10.0,
+            "critical_max": 20.0
+          },
+          "session_rejection_delta_pp": {
+            "normal_max": 10.0,
+            "critical_max": 20.0
+          },
+          "directional_occupancy_delta_pp": {
+            "normal_max": 15.0,
+            "critical_max": 20.0
+          }
+        }
+      },
+      "critical_review": false
+    }
+  ],
+  "replay_reference": {
+    "reference_source": "models\\rc1\\eurusd_5k_v1_mr_rc1\\baseline_holdout_eurusd.json",
+    "signal_density": 0.04816285998013903,
+    "would_open_density": 0.04816285998013903,
+    "long_share": 0.020618556701030927
+  }
+}

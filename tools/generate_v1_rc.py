@@ -49,9 +49,10 @@ RC_CONFIGS: tuple[dict[str, Any], ...] = (
         },
         "spread_limit_pips": 1.0,
         "rollover_block_utc_hours": [21, 22, 23, 0],
+        "allowed_sessions": ["London", "London/NY", "NY"],
         "alpha_gate": {
-            "enabled": True,
-            "model_preference": "auto",
+            "enabled": False,
+            "model_preference": "xgboost_pair",
             "horizon_bars": 25,
             "probability_threshold": 0.53,
             "probability_margin": 0.03,
@@ -74,12 +75,13 @@ RC_CONFIGS: tuple[dict[str, Any], ...] = (
         },
         "spread_limit_pips": 1.25,
         "rollover_block_utc_hours": [21, 22, 23, 0],
+        "allowed_sessions": ["London", "London/NY", "NY"],
         "alpha_gate": {
             "enabled": True,
-            "model_preference": "auto",
+            "model_preference": "xgboost_pair",
             "horizon_bars": 25,
-            "probability_threshold": 0.53,
-            "probability_margin": 0.03,
+            "probability_threshold": 0.61,
+            "probability_margin": 0.01,
             "min_edge_pips": 0.0,
         },
     },
@@ -209,6 +211,7 @@ def generate_rc_notes(manifest: dict[str, Any]) -> str:
         "* Approved only for paper-live shadow evidence collection.\n\n"
         "## Runtime Contract\n"
         f"* **Spread Guard**: `{runtime_constraints.get('spread_sanity_max_pips')}` pips\n"
+        f"* **Allowed Sessions**: `{runtime_constraints.get('allowed_sessions')}`\n"
         f"* **Rollover Block (UTC)**: `{runtime_constraints.get('rollover_block_utc_hours')}`\n"
         f"* **Daily Loss Stop**: `${runtime_constraints.get('daily_loss_stop_usd')}`\n"
         f"* **Rule Params**: `{json.dumps(rule_params, sort_keys=True)}`\n\n"
@@ -242,6 +245,7 @@ def build_manifest(config: dict[str, Any], *, git_commit: str, evaluator_hash: s
         max_concurrent_positions=1,
         daily_loss_stop_usd=100.0,
         rollover_block_utc_hours=list(config.get("rollover_block_utc_hours", [21, 22, 23, 0])),
+        allowed_sessions=list(config.get("allowed_sessions", [])),
     )
     manifest = create_rule_manifest(
         strategy_symbol=config["symbol"],

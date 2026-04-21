@@ -25,16 +25,22 @@ log = logging.getLogger("alpha_gate_bakeoff")
 DEFAULT_MODELS = ("none", "manifest", "logistic_pair", "xgboost_pair", "lightgbm_pair")
 
 
-def _load_context_for_manifest(manifest_path: Path):
-    previous = os.environ.get("EVAL_MANIFEST_PATH")
+def _load_context_for_manifest(manifest_path: Path, *, symbol: str):
+    previous_manifest = os.environ.get("EVAL_MANIFEST_PATH")
+    previous_symbol = os.environ.get("EVAL_SYMBOL")
     os.environ["EVAL_MANIFEST_PATH"] = str(manifest_path)
+    os.environ["EVAL_SYMBOL"] = str(symbol).upper()
     try:
-        return load_replay_context()
+        return load_replay_context(symbol=symbol)
     finally:
-        if previous is None:
+        if previous_manifest is None:
             os.environ.pop("EVAL_MANIFEST_PATH", None)
         else:
-            os.environ["EVAL_MANIFEST_PATH"] = previous
+            os.environ["EVAL_MANIFEST_PATH"] = previous_manifest
+        if previous_symbol is None:
+            os.environ.pop("EVAL_SYMBOL", None)
+        else:
+            os.environ["EVAL_SYMBOL"] = previous_symbol
 
 
 def _score_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -154,7 +160,10 @@ def build_alpha_gate_bakeoff(
             "models": list(models),
         },
     )
-    replay_context = _load_context_for_manifest(resolved_manifest_path)
+    replay_context = _load_context_for_manifest(
+        resolved_manifest_path,
+        symbol=manifest.strategy_symbol,
+    )
     replay_bars = int(len(replay_context.replay_frame))
     selected_models = [item.strip().lower() for item in models if item.strip()]
     if not selected_models:

@@ -161,6 +161,44 @@ class Rc1ShadowTests(unittest.TestCase):
             self.assertEqual(True, rows[0]["would_open"])
             self.assertEqual(True, rows[1]["would_close"])
 
+    def test_shadow_broker_can_close_during_blocked_session(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dataset_path = self._write_dataset_stub(root)
+            manifest = create_rule_manifest(
+                strategy_symbol="EURUSD",
+                rule_family="mean_reversion",
+                rule_params={"threshold": 1.0},
+                dataset_path=dataset_path,
+                ticks_per_bar=5000,
+                cost_model=CostModel(commission_per_lot=7.0, slippage_pips=0.25),
+                threshold_policy=ThresholdPolicy(min_edge_pips=0.0, reject_ambiguous=True),
+                runtime_constraints=RuntimeConstraints(
+                    session_filter_active=True,
+                    spread_sanity_max_pips=0.2,
+                    max_concurrent_positions=1,
+                    daily_loss_stop_usd=100.0,
+                    allowed_sessions=["London"],
+                ),
+                release_stage="paper_live_candidate",
+                evaluator_hash="eval-hash",
+                logic_hash="logic-hash",
+                replay_parity_reference="baseline_scoreboard_rc1.json",
+            )
+            manifest_path = root / "manifest.json"
+            save_selector_manifest(manifest, manifest_path)
+
+            broker = ShadowBroker(manifest_path, audit_path=root / "shadow_audit.jsonl")
+            broker.position_direction = 1
+            close_record = broker.evaluate(
+                bar_ts=datetime(2026, 4, 8, 1, 5, tzinfo=timezone.utc),
+                features={"spread_z": 0.0, "price_z": 0.0},
+                current_spread_pips=0.8,
+                is_session_open=True,
+            )
+            self.assertTrue(close_record.would_close)
+            self.assertEqual("authorized_exit", close_record.reason)
+
 
 if __name__ == "__main__":
     unittest.main()

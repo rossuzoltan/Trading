@@ -176,6 +176,12 @@ class ShadowDriftAnalyzer:
         replay_tpb = self._expected_ratio("trades_per_bar")
         density_ratio = shadow_tpb / max(replay_tpb, 1e-6)
         
+        # Guard against small sample noise (Finding #1)
+        if total_bars < 50:
+            density_verdict = "WATCH"
+        else:
+            density_verdict = _resolve_severity("signal_density", density_ratio, 1.0)
+            
         # B. Gate reason drift
         spread_ratio = agg["reason_counts"].get("spread", 0) / total_bars
         
@@ -195,7 +201,8 @@ class ShadowDriftAnalyzer:
                     "shadow_tpb": shadow_tpb,
                     "replay_tpb": replay_tpb,
                     "ratio": density_ratio,
-                    "verdict": _resolve_severity("signal_density", density_ratio, 1.0)
+                    "verdict": density_verdict,
+                    "insufficient_samples": total_bars < 50
                 },
                 "direction_skew": {
                     "long_to_short_ratio": ls_ratio,

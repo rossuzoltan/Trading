@@ -506,6 +506,14 @@ def main(*, strict_runtime_assets: bool = False, mode: str = "rc1") -> int:
     else:
         print("Requirement files cover the core runtime dependencies.")
 
+    _print_header("Audit Dashboard")
+    dashboard = ROOT_DIR / "docs" / "RC1_AUDIT_DASHBOARD.md"
+    if dashboard.exists():
+        print(f"Dashboard: {_display_path(dashboard)}")
+        print("Use it to track evidence chain completeness and avoid optimism bias.")
+    else:
+        print("Dashboard missing: docs/RC1_AUDIT_DASHBOARD.md")
+
     _print_header("Summary")
     if all_issues:
         print(f"Found {len(all_issues)} issue(s).")

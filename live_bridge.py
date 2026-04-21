@@ -82,7 +82,11 @@ MAX_DRAWDOWN_FRACTION = float(os.environ.get("TRADING_MAX_DRAWDOWN_FRACTION", "0
 
 
 def _resolve_execution_cost_profile(manifest) -> dict[str, float]:
-    profile = dict(getattr(manifest, "execution_cost_profile", None) or {})
+    # Preferred source is the selector manifest's cost_model.
+    # Keep backward-compatible fallback to legacy execution_cost_profile if present.
+    cost_model = dict(getattr(manifest, "cost_model", None) or {})
+    legacy_profile = dict(getattr(manifest, "execution_cost_profile", None) or {})
+    profile = cost_model or legacy_profile
     return {
         "commission_per_lot": float(profile.get("commission_per_lot", 7.0)),
         "slippage_pips": float(profile.get("slippage_pips", 0.25)),
@@ -671,11 +675,16 @@ def bootstrap_live_runtime(
     execution_cost_profile = _resolve_execution_cost_profile(manifest)
     reward_profile = _resolve_reward_profile(manifest)
     manifest_ticks = manifest.bar_construction_ticks_per_bar or manifest.ticks_per_bar
-    if manifest_ticks is not None:
+    if manifest_ticks is not None and Path(dataset_path).exists():
         validate_dataset_bar_spec(
             dataset_path=dataset_path,
             expected_ticks_per_bar=int(manifest_ticks),
             metadata_required=True,
+        )
+    elif manifest_ticks is not None:
+        log.warning(
+            "Dataset path %s does not exist during bootstrap; skipping dataset bar-spec validation.",
+            dataset_path,
         )
     if manifest_ticks is not None and int(manifest_ticks) != int(ticks_per_bar) and not LIVE_ALLOW_BAR_SPEC_MISMATCH:
         raise RuntimeError(

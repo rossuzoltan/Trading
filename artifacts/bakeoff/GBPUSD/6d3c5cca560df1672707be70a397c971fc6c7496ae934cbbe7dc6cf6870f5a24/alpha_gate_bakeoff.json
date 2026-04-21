@@ -1,0 +1,171 @@
+{
+  "timestamp_utc": "2026-04-14T08:51:01.746853+00:00",
+  "symbol": "GBPUSD",
+  "manifest_path": "C:\\dev\\trading\\models\\rc1\\gbpusd_10k_v1_mr_rc1\\manifest.json",
+  "manifest_hash": "6d3c5cca560df1672707be70a397c971fc6c7496ae934cbbe7dc6cf6870f5a24",
+  "holdout_start_utc": "2025-10-13T15:26:57+00:00",
+  "replay_bars": 1054,
+  "defaults": {
+    "probability_threshold": 0.51,
+    "probability_margin": 0.01,
+    "min_edge_pips": 0.0,
+    "horizon_bars": 25,
+    "min_trade_count": 20,
+    "commission_per_lot": 7.0,
+    "slippage_pips": 0.25
+  },
+  "results": [
+    {
+      "name": "rule_only",
+      "source": "selector",
+      "status": "completed",
+      "metrics": {
+        "net_pnl_usd": -55.45761642912487,
+        "gross_pnl_usd": -44.80058144046461,
+        "total_cost_usd": 10.657034988659777,
+        "profit_factor": 0.3101647247636034,
+        "expectancy_usd": -3.080978690506937,
+        "trade_count": 18,
+        "win_rate": 0.3888888888888889,
+        "timed_sharpe": -0.05334532847649763,
+        "max_drawdown": 0.06282606806197036,
+        "validation_passed": true,
+        "accounting_gap_detected": false,
+        "long_count": 10,
+        "short_count": 8
+      },
+      "gate_fit": null
+    },
+    {
+      "name": "manifest_gate",
+      "source": "manifest",
+      "status": "completed",
+      "metrics": {
+        "net_pnl_usd": 4.764736852046099,
+        "gross_pnl_usd": 8.36491584777832,
+        "total_cost_usd": 3.600178995732101,
+        "profit_factor": 1.8362181779877433,
+        "expectancy_usd": 0.7941228086743498,
+        "trade_count": 6,
+        "win_rate": 0.5,
+        "timed_sharpe": 0.01517736209469205,
+        "max_drawdown": 0.004540339290240737,
+        "validation_passed": true,
+        "accounting_gap_detected": false,
+        "long_count": 3,
+        "short_count": 3
+      },
+      "gate_fit": {
+        "model_kind": "xgboost_pair",
+        "probability_threshold": 0.71,
+        "probability_margin": 0.01,
+        "min_edge_pips": 0.0,
+        "fit_trade_count": 93.0,
+        "fit_long_trade_count": 56.0,
+        "fit_short_trade_count": 37.0,
+        "fit_expectancy_usd": 747.689312365593,
+        "fit_profit_factor": Infinity,
+        "fit_quality_passed": true
+      }
+    },
+    {
+      "name": "logistic_pair",
+      "source": "refit",
+      "status": "completed",
+      "metrics": {
+        "net_pnl_usd": 0.0,
+        "gross_pnl_usd": 0.0,
+        "total_cost_usd": 0.0,
+        "profit_factor": 0.0,
+        "expectancy_usd": 0.0,
+        "trade_count": 0,
+        "win_rate": 0.0,
+        "timed_sharpe": 0.0,
+        "max_drawdown": 0.0,
+        "validation_passed": true,
+        "accounting_gap_detected": false,
+        "long_count": 0,
+        "short_count": 0
+      },
+      "gate_fit": {
+        "model_kind": "logistic_pair",
+        "probability_threshold": 0.61,
+        "probability_margin": 0.01,
+        "min_edge_pips": 0.0,
+        "fit_trade_count": 61.0,
+        "fit_long_trade_count": 39.0,
+        "fit_short_trade_count": 22.0,
+        "fit_expectancy_usd": 153.5817500000012,
+        "fit_profit_factor": 1.5874938041374147,
+        "fit_quality_passed": true
+      }
+    },
+    {
+      "name": "xgboost_pair",
+      "source": "refit",
+      "status": "completed",
+      "metrics": {
+        "net_pnl_usd": 4.764736852046099,
+        "gross_pnl_usd": 8.36491584777832,
+        "total_cost_usd": 3.600178995732101,
+        "profit_factor": 1.8362181779877433,
+        "expectancy_usd": 0.7941228086743498,
+        "trade_count": 6,
+        "win_rate": 0.5,
+        "timed_sharpe": 0.01517736209469205,
+        "max_drawdown": 0.004540339290240737,
+        "validation_passed": true,
+        "accounting_gap_detected": false,
+        "long_count": 3,
+        "short_count": 3
+      },
+      "gate_fit": {
+        "model_kind": "xgboost_pair",
+        "probability_threshold": 0.61,
+        "probability_margin": 0.01,
+        "min_edge_pips": 0.0,
+        "fit_trade_count": 195.0,
+        "fit_long_trade_count": 106.0,
+        "fit_short_trade_count": 89.0,
+        "fit_expectancy_usd": 466.3828989743603,
+        "fit_profit_factor": 5.316795962329176,
+        "fit_quality_passed": true
+      }
+    },
+    {
+      "name": "lightgbm_pair",
+      "source": "refit",
+      "status": "completed",
+      "metrics": {
+        "net_pnl_usd": -21.514237558929153,
+        "gross_pnl_usd": -11.03296609079285,
+        "total_cost_usd": 10.481271468136105,
+        "profit_factor": 0.5971383336470084,
+        "expectancy_usd": -1.1323282925752185,
+        "trade_count": 19,
+        "win_rate": 0.3157894736842105,
+        "timed_sharpe": -0.015324088200151223,
+        "max_drawdown": 0.038144281953634125,
+        "validation_passed": true,
+        "accounting_gap_detected": false,
+        "long_count": 6,
+        "short_count": 13
+      },
+      "gate_fit": {
+        "model_kind": "lightgbm_pair",
+        "probability_threshold": 0.56,
+        "probability_margin": 0.01,
+        "min_edge_pips": 0.0,
+        "fit_trade_count": 234.0,
+        "fit_long_trade_count": 118.0,
+        "fit_short_trade_count": 116.0,
+        "fit_expectancy_usd": 678.9928660256422,
+        "fit_profit_factor": 34.286305205081035,
+        "fit_quality_passed": true
+      }
+    }
+  ],
+  "best_candidate": "manifest_gate",
+  "saved_best_gate": null,
+  "artifact_dir": "artifacts\\bakeoff\\GBPUSD\\6d3c5cca560df1672707be70a397c971fc6c7496ae934cbbe7dc6cf6870f5a24"
+}
