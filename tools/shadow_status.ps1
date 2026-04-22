@@ -23,7 +23,11 @@ $summaryMd = Join-Path $evidenceDir "shadow_summary.md"
 
 $pidRows = Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
     Where-Object {
-        ($_.CommandLine -like "*runtime*shadow_broker*" -or $_.CommandLine -like "*shadow_broker.py*") -and
+        (
+            $_.CommandLine -like "*runtime*shadow_broker*" -or
+            $_.CommandLine -like "*shadow_broker.py*" -or
+            $_.CommandLine -like "*shadow_sweep_broker.py*"
+        ) -and
         $_.CommandLine -like "*$ManifestPath*"
     } |
     Select-Object ProcessId, ExecutablePath, CommandLine

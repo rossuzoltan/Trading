@@ -215,13 +215,21 @@ class Mt5CursorTickSource:
         all_ticks: list[TickEvent] = []
         working_cursor = TickCursor(time_msc=cursor.time_msc, offset=cursor.offset)
         epoch = datetime.fromtimestamp(0, tz=timezone.utc)
+        resynced = False
+        lookback_msc = int(self.initial_lookback_seconds) * 1000
+        now_msc = int(datetime.now(timezone.utc).timestamp() * 1000)
+        if working_cursor.time_msc > now_msc + 1000:
+            # Defensive clamp: if the cursor drifts into the future, pull it back into the recent window.
+            working_cursor = TickCursor(time_msc=max(0, now_msc - lookback_msc), offset=0)
         if working_cursor.time_msc > 0:
             start_dt_utc = epoch + timedelta(milliseconds=working_cursor.time_msc)
         else:
             start_dt_utc = datetime.now(timezone.utc) - timedelta(seconds=self.initial_lookback_seconds)
 
-        # MT5 API uses broker server timestamps; shift the UTC cursor forward.
-        start_dt = start_dt_utc + timedelta(hours=int(self.server_utc_offset_hours))
+        # Important: MT5 Python API expects datetimes in UTC for copy_ticks_from().
+        # We still apply `server_utc_offset_msc` when converting tick records so that the
+        # emitted audit timestamps are true UTC.
+        start_dt = start_dt_utc
 
         while True:
             request_count = self.batch_size + max(working_cursor.offset, 0)
@@ -229,6 +237,16 @@ class Mt5CursorTickSource:
             if raw is None:
                 raise RuntimeError("MT5 copy_ticks_from() returned None.")
             if len(raw) == 0:
+                # MT5 can occasionally return empty results if the cursor drifts into the future
+                # (time conversions / server offset mismatch) or the terminal momentarily lags.
+                # One-shot resync to the recent window keeps long-running shadows from stalling.
+                if not resynced and working_cursor.time_msc > 0:
+                    resynced = True
+                    now_msc = int(datetime.now(timezone.utc).timestamp() * 1000)
+                    working_cursor = TickCursor(time_msc=max(0, now_msc - lookback_msc), offset=0)
+                    start_dt_utc = epoch + timedelta(milliseconds=working_cursor.time_msc)
+                    start_dt = start_dt_utc
+                    continue
                 break
 
             converted = sorted(
@@ -236,11 +254,20 @@ class Mt5CursorTickSource:
                 key=lambda item: item.time_msc,
             )
             new_ticks = _filter_ticks_by_cursor(converted, working_cursor)
+            if not new_ticks and not resynced and working_cursor.time_msc > 0:
+                # One-shot resync if we keep requesting data but the cursor filter removes everything.
+                # This typically happens when time conversion pushes the cursor ahead of the feed.
+                resynced = True
+                now_msc = int(datetime.now(timezone.utc).timestamp() * 1000)
+                working_cursor = TickCursor(time_msc=max(0, now_msc - lookback_msc), offset=0)
+                start_dt_utc = epoch + timedelta(milliseconds=working_cursor.time_msc)
+                start_dt = start_dt_utc
+                continue
             if new_ticks:
                 all_ticks.extend(new_ticks)
                 working_cursor = advance_cursor(working_cursor, new_ticks)
                 start_dt_utc = epoch + timedelta(milliseconds=working_cursor.time_msc)
-                start_dt = start_dt_utc + timedelta(hours=int(self.server_utc_offset_hours))
+                start_dt = start_dt_utc
 
             if len(raw) < request_count or not new_ticks:
                 break
