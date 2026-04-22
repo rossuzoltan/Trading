@@ -34,6 +34,9 @@ if (-not (Test-Path $ManifestPath)) {
     throw "Manifest not found: $ManifestPath"
 }
 $ManifestPath = (Resolve-Path $ManifestPath).Path
+$manifestInfo = Get-Content $ManifestPath -Raw | ConvertFrom-Json
+$symbolName = "$($manifestInfo.strategy_symbol)".ToUpperInvariant()
+$manifestHash = "$($manifestInfo.manifest_hash)"
 
 # Refuse to start duplicate shadow brokers for the same manifest, since multiple
 # processes can corrupt evidence and make drift/debugging non-actionable.
@@ -92,5 +95,26 @@ if (-not [string]::IsNullOrWhiteSpace($logDir)) {
     New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 }
 $proc = Start-Process -FilePath $python -ArgumentList $args -NoNewWindow -PassThru -RedirectStandardOutput $StdoutPath -RedirectStandardError $StderrPath
+$effectiveShadowRoot = if ([string]::IsNullOrWhiteSpace($AuditDir)) { Join-Path $root "artifacts/shadow" } else { $AuditDir }
+$evidenceDir = Join-Path $effectiveShadowRoot (Join-Path $symbolName $manifestHash)
+$metadata = [ordered]@{
+    started_at_utc = (Get-Date).ToUniversalTime().ToString("o")
+    pid = $proc.Id
+    manifest_path = $ManifestPath
+    manifest_hash = $manifestHash
+    symbol = $symbolName
+    audit_root = $effectiveShadowRoot
+    evidence_dir = $evidenceDir
+    stdout_path = $StdoutPath
+    stderr_path = $StderrPath
+    poll_interval_ms = $PollIntervalMs
+    command = @($python) + $args
+}
+$metadataJson = $metadata | ConvertTo-Json -Depth 4
+$metadataPath = Join-Path $root "logs/shadow_launch_${stamp}.json"
+$latestMetadataPath = Join-Path $root ("logs/shadow_latest_{0}_{1}.json" -f $symbolName, $manifestHash)
+$metadataJson | Set-Content -Path $metadataPath -Encoding UTF8
+$metadataJson | Set-Content -Path $latestMetadataPath -Encoding UTF8
+Write-Output "Metadata: $metadataPath"
 Write-Output "PID: $($proc.Id)"
 Write-Output "Stop with: Stop-Process -Id $($proc.Id)"

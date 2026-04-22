@@ -1,7 +1,8 @@
 param(
     [string]$ManifestPath = "models/rc1/eurusd_5k_v1_mr_rc1/manifest.json",
     [string]$AuditDir = "artifacts/shadow_sweep",
-    [int]$PollIntervalMs = 250
+    [int]$PollIntervalMs = 250,
+    [string]$ProfileSet = "gate_sweep_v1"
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,7 +19,7 @@ if (-not (Test-Path $python)) {
 }
 
 $createScript = Join-Path $root "tools/create_shadow_sweep_manifests.py"
-$payload = & $python $createScript --base-manifest $ManifestPath | ConvertFrom-Json
+$payload = & $python $createScript --base-manifest $ManifestPath --profile-set $ProfileSet | ConvertFrom-Json
 $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
 
 $existing = Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
@@ -36,6 +37,7 @@ if ($existing) {
 
 Write-Output "Base manifest: $($payload.base_manifest_path)"
 Write-Output "Base manifest hash: $($payload.base_manifest_hash)"
+Write-Output "Profile set: $($payload.profile_set)"
 Write-Output "Audit root: $AuditDir"
 Write-Output ""
 

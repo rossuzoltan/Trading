@@ -1,0 +1,60 @@
+{
+  "symbol": "EURUSD",
+  "ticks_per_bar": 5000,
+  "manifest_hash": "27d36313a4630a59c2d373bac7f7323a9f1fd74b5a9692ff1efbcf9e7e61f52c",
+  "logic_hash": "e1c9bf0fb26a5124a4e774a846ff37a424a7c08d8b9d9a6eaeff740ea4a0e185",
+  "evaluator_hash": "e8509a738e4536f762b7377604fb1374fab54a761e095da127d29f2edc497a73",
+  "event_count": 8,
+  "trading_days": 1,
+  "trading_day_list": [
+    "2026-04-22"
+  ],
+  "actionable_event_count": 2,
+  "shadow_window_start": "2026-04-22T12:04:54.776000+00:00",
+  "shadow_window_end": "2026-04-22T17:22:22.197000+00:00",
+  "counts": {
+    "signal_count": 1,
+    "would_open_count": 1,
+    "would_close_count": 1,
+    "would_hold_count": 0,
+    "long_signal_count": 0,
+    "short_signal_count": 1,
+    "long_open_count": 0,
+    "short_open_count": 1,
+    "spread_rejection_count": 0,
+    "session_rejection_count": 0,
+    "risk_rejection_count": 0,
+    "context_macro_day_count": 0,
+    "context_blackout_count": 0,
+    "context_block_entry_count": 0,
+    "context_close_only_reversal_count": 0
+  },
+  "rates": {
+    "signal_density": 0.125,
+    "would_open_density": 0.125,
+    "spread_rejection_pct": 0.0,
+    "session_rejection_pct": 0.0,
+    "risk_rejection_pct": 0.0,
+    "long_open_share": 0.0,
+    "context_blackout_pct": 0.0
+  },
+  "directional_occupancy": {
+    "flat": 0.875,
+    "long": 0.0,
+    "short": 0.125
+  },
+  "no_trade_reason_counts": {
+    "no signal": 6,
+    "authorized": 1,
+    "authorized_exit": 1
+  },
+  "evidence_sufficient": false,
+  "evidence_requirements": {
+    "min_trading_days": 20,
+    "min_actionable_events": 30
+  },
+  "evidence_shortfall": {
+    "trading_days_remaining": 19,
+    "actionable_events_remaining": 28
+  }
+}
