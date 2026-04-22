@@ -1,0 +1,147 @@
+{
+  "timestamp_utc": "2026-04-14T08:45:58.914542+00:00",
+  "symbol": "EURUSD",
+  "manifest_path": "C:\\dev\\trading\\models\\rc1\\eurusd_5k_v1_mr_rc1\\manifest.json",
+  "manifest_hash": "a1ceb43cbaafe196e991742ac33c7d9d593dd496371d2583b423c27463e2d2d1",
+  "holdout_start_utc": "2025-09-10T07:06:02+00:00",
+  "replay_bars": 2016,
+  "defaults": {
+    "probability_threshold": 0.51,
+    "probability_margin": 0.01,
+    "min_edge_pips": 0.0,
+    "horizon_bars": 25,
+    "min_trade_count": 20,
+    "commission_per_lot": 7.0,
+    "slippage_pips": 0.25
+  },
+  "results": [
+    {
+      "name": "rule_only",
+      "source": "selector",
+      "status": "completed",
+      "metrics": {
+        "net_pnl_usd": 39.46980566077127,
+        "gross_pnl_usd": 131.73120465095735,
+        "total_cost_usd": 92.2613989901845,
+        "profit_factor": 1.1715556524562543,
+        "expectancy_usd": 0.35881641509792067,
+        "trade_count": 110,
+        "win_rate": 0.6090909090909091,
+        "timed_sharpe": 0.02534307734405927,
+        "max_drawdown": 0.07405917799115566,
+        "validation_passed": true,
+        "accounting_gap_detected": false,
+        "long_count": 59,
+        "short_count": 51
+      },
+      "gate_fit": null
+    },
+    {
+      "name": "manifest_gate",
+      "source": "manifest",
+      "status": "skipped",
+      "reason": "manifest_alpha_gate_disabled",
+      "metrics": {},
+      "gate_fit": null
+    },
+    {
+      "name": "logistic_pair",
+      "source": "refit",
+      "status": "completed",
+      "metrics": {
+        "net_pnl_usd": 0.0,
+        "gross_pnl_usd": 0.0,
+        "total_cost_usd": 0.0,
+        "profit_factor": 0.0,
+        "expectancy_usd": 0.0,
+        "trade_count": 0,
+        "win_rate": 0.0,
+        "timed_sharpe": 0.0,
+        "max_drawdown": 0.0,
+        "validation_passed": true,
+        "accounting_gap_detected": false,
+        "long_count": 0,
+        "short_count": 0
+      },
+      "gate_fit": {
+        "model_kind": "logistic_pair",
+        "probability_threshold": 0.61,
+        "probability_margin": 0.01,
+        "min_edge_pips": 0.0,
+        "fit_trade_count": 13.0,
+        "fit_long_trade_count": 13.0,
+        "fit_short_trade_count": 0.0,
+        "fit_expectancy_usd": 360.37415384616156,
+        "fit_profit_factor": 2.5672494829516115,
+        "fit_quality_passed": false
+      }
+    },
+    {
+      "name": "xgboost_pair",
+      "source": "refit",
+      "status": "completed",
+      "metrics": {
+        "net_pnl_usd": 12.573379230337082,
+        "gross_pnl_usd": 25.734782218933105,
+        "total_cost_usd": 13.16140298859571,
+        "profit_factor": 1.4827144304445827,
+        "expectancy_usd": 0.8980985164526487,
+        "trade_count": 14,
+        "win_rate": 0.6428571428571429,
+        "timed_sharpe": 0.015928452888895984,
+        "max_drawdown": 0.007888707373191884,
+        "validation_passed": true,
+        "accounting_gap_detected": false,
+        "long_count": 11,
+        "short_count": 3
+      },
+      "gate_fit": {
+        "model_kind": "xgboost_pair",
+        "probability_threshold": 0.61,
+        "probability_margin": 0.01,
+        "min_edge_pips": 0.0,
+        "fit_trade_count": 313.0,
+        "fit_long_trade_count": 158.0,
+        "fit_short_trade_count": 155.0,
+        "fit_expectancy_usd": 313.25903035143733,
+        "fit_profit_factor": 5.869638005050957,
+        "fit_quality_passed": true
+      }
+    },
+    {
+      "name": "lightgbm_pair",
+      "source": "refit",
+      "status": "completed",
+      "metrics": {
+        "net_pnl_usd": 5.8628958569318,
+        "gross_pnl_usd": 35.97780384892957,
+        "total_cost_usd": 30.11490799199707,
+        "profit_factor": 1.0620413489042733,
+        "expectancy_usd": 0.16751131019805143,
+        "trade_count": 35,
+        "win_rate": 0.6285714285714286,
+        "timed_sharpe": 0.012668808024782981,
+        "max_drawdown": 0.047459790839868454,
+        "validation_passed": true,
+        "accounting_gap_detected": false,
+        "long_count": 20,
+        "short_count": 15
+      },
+      "gate_fit": {
+        "model_kind": "lightgbm_pair",
+        "probability_threshold": 0.61,
+        "probability_margin": 0.01,
+        "min_edge_pips": 0.0,
+        "fit_trade_count": 419.0,
+        "fit_long_trade_count": 210.0,
+        "fit_short_trade_count": 209.0,
+        "fit_expectancy_usd": 370.9968780429595,
+        "fit_profit_factor": 17.574903591966656,
+        "fit_quality_passed": true
+      }
+    }
+  ],
+  "best_candidate": "rule_only",
+  "saved_best_gate": null,
+  "artifact_dir": "artifacts\\bakeoff\\EURUSD\\a1ceb43cbaafe196e991742ac33c7d9d593dd496371d2583b423c27463e2d2d1"
+}

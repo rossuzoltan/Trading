@@ -64,6 +64,8 @@ class ShadowDriftAnalyzer:
     def analyze_summary_mode(self) -> Dict[str, Any]:
         """Aggregate all daily summary JSONs."""
         summary_files = list(self.audit_dir.glob("shadow_summary_*.json"))
+        if not summary_files and (self.audit_dir / "shadow_summary.json").exists():
+            summary_files = [self.audit_dir / "shadow_summary.json"]
         if not summary_files:
             log.warning("No shadow_summary_*.json found in %s", self.audit_dir)
             return {}
@@ -98,6 +100,8 @@ class ShadowDriftAnalyzer:
     def analyze_trace_mode(self) -> Dict[str, Any]:
         """Deep dive into raw JSONL lines."""
         jsonl_files = list(self.audit_dir.glob("shadow_audit_*.jsonl"))
+        if not jsonl_files and (self.audit_dir / "events.jsonl").exists():
+            jsonl_files = [self.audit_dir / "events.jsonl"]
         if not jsonl_files:
             log.warning("No shadow_audit_*.jsonl found in %s", self.audit_dir)
             return {}
@@ -116,7 +120,15 @@ class ShadowDriftAnalyzer:
             return {}
 
         df = pd.DataFrame(records)
-        df['datetime'] = pd.to_datetime(df['bar_ts'], utc=True)
+        timestamp_column = 'timestamp_utc' if 'timestamp_utc' in df.columns else 'bar_ts'
+        signal_column = 'signal_direction' if 'signal_direction' in df.columns else 'signal'
+        reason_column = 'no_trade_reason' if 'no_trade_reason' in df.columns else 'reason'
+        session_ok_column = 'session_filter_pass' if 'session_filter_pass' in df.columns else 'session_ok'
+        risk_ok_column = 'risk_filter_pass' if 'risk_filter_pass' in df.columns else 'risk_ok'
+        spread_ok_column = 'spread_ok'
+        position_state_column = 'position_state' if 'position_state' in df.columns else 'active_position_state'
+
+        df['datetime'] = pd.to_datetime(df[timestamp_column], utc=True)
         df['hour_utc'] = df['datetime'].dt.hour
         df['session'] = df['hour_utc'].apply(get_session_by_hour)
 
@@ -125,28 +137,30 @@ class ShadowDriftAnalyzer:
             "total_bars_processed": len(df),
             "total_would_open": int(df['would_open'].sum()),
             "total_would_close": int(df['would_close'].sum()),
-            "total_would_hold_position": int(df['would_hold_position'].sum()),
-            "total_would_remain_flat": int(df['would_remain_flat'].sum()),
-            "long_open_count": int(df[(df['would_open'] == True) & (df['signal'] > 0)].shape[0]),
-            "short_open_count": int(df[(df['would_open'] == True) & (df['signal'] < 0)].shape[0]),
+            "total_would_hold_position": int(df['would_hold_position'].sum()) if 'would_hold_position' in df.columns else int(df['would_hold'].sum()),
+            "total_would_remain_flat": int(df['would_remain_flat'].sum()) if 'would_remain_flat' in df.columns else int((df['action_state'] == 'flat').sum()),
+            "long_open_count": int(df[(df['would_open'] == True) & (df[signal_column] > 0)].shape[0]),
+            "short_open_count": int(df[(df['would_open'] == True) & (df[signal_column] < 0)].shape[0]),
             "reason_counts": {
-               "spread": int(df[~df['spread_ok']].shape[0]),
-               "session": int(df[~df['session_ok']].shape[0]),
-               "risk": int(df[~df['risk_ok']].shape[0]),
-               "no_signal": int(df[df['reason'].str.contains('signal', case=False, na=False)].shape[0]),
+               "spread": int(df[~df[spread_ok_column]].shape[0]),
+               "session": int(df[~df[session_ok_column]].shape[0]),
+               "risk": int(df[~df[risk_ok_column]].shape[0]),
+               "no_signal": int(df[df[reason_column].astype(str).str.contains('signal', case=False, na=False)].shape[0]),
             }
         }
 
         metrics = self._compute_drift_metrics(agg)
         
         # Add trace-specific forensics
+        fingerprint_column = 'manifest_fingerprint' if 'manifest_fingerprint' in df.columns else 'manifest_hash'
+
         metrics["trace_forensics"] = {
             "session_density": df[df['would_open'] == True].groupby('session').size().to_dict(),
             "manifest_truth": {
-                "fingerprint_matches": df['manifest_fingerprint'].nunique() == 1,
+                "fingerprint_matches": df[fingerprint_column].nunique() == 1,
                 "release_statuses": df['release_stage'].unique().tolist(),
             },
-            "position_state_distribution": df['active_position_state'].value_counts(normalize=True).to_dict()
+            "position_state_distribution": df[position_state_column].value_counts(normalize=True).to_dict()
         }
         
         return metrics
@@ -162,6 +176,12 @@ class ShadowDriftAnalyzer:
         replay_tpb = self._expected_ratio("trades_per_bar")
         density_ratio = shadow_tpb / max(replay_tpb, 1e-6)
         
+        # Guard against small sample noise (Finding #1)
+        if total_bars < 50:
+            density_verdict = "WATCH"
+        else:
+            density_verdict = _resolve_severity("signal_density", density_ratio, 1.0)
+            
         # B. Gate reason drift
         spread_ratio = agg["reason_counts"].get("spread", 0) / total_bars
         
@@ -181,7 +201,8 @@ class ShadowDriftAnalyzer:
                     "shadow_tpb": shadow_tpb,
                     "replay_tpb": replay_tpb,
                     "ratio": density_ratio,
-                    "verdict": _resolve_severity("signal_density", density_ratio, 1.0)
+                    "verdict": density_verdict,
+                    "insufficient_samples": total_bars < 50
                 },
                 "direction_skew": {
                     "long_to_short_ratio": ls_ratio,

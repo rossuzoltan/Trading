@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import json
 import shutil
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pandas as pd
+
 from artifact_manifest import ArtifactManifest, save_manifest
 from event_pipeline import BarBuilderState, JsonStateStore, RuntimeSnapshot, TickCursor, VolumeBar
 from runtime_common import ConfirmedPosition
+from selector_manifest import CostModel, RuntimeConstraints, ThresholdPolicy, create_rule_manifest, save_selector_manifest
 from trading_config import deployment_paths
 
 import live_operating_checklist
@@ -70,7 +74,7 @@ class RestartValidationTests(unittest.TestCase):
             state_path = tmpdir / "live_state_eurusd.json"
             report_path = tmpdir / "restart_drill_eurusd.json"
 
-            def bootstrap_fn(*, symbol, state_path, ticks_per_bar, mt5_module):
+            def bootstrap_fn(*, symbol, state_path, ticks_per_bar, mt5_module, manifest_path=None):
                 store = JsonStateStore(state_path, ticks_per_bar=ticks_per_bar)
                 runtime = DummyRuntime(store, symbol=symbol)
                 if store.path.exists():
@@ -102,6 +106,68 @@ class RestartValidationTests(unittest.TestCase):
             self.assertFalse(saved["attestable_for_live"])
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_restart_drill_supports_selector_manifest_bootstrap(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            dataset_path = tmp_path / "DATA_CLEAN_VOLUME_5000.csv"
+            dataset_path.write_text("stub dataset", encoding="utf-8")
+            manifest_path = tmp_path / "manifest.json"
+            state_path = tmp_path / "live_state_eurusd.json"
+            report_path = tmp_path / "restart_drill_eurusd.json"
+
+            manifest = create_rule_manifest(
+                strategy_symbol="EURUSD",
+                rule_family="mean_reversion",
+                rule_params={"threshold": 1.0, "sl_value": 1.5, "tp_value": 3.0},
+                dataset_path=dataset_path,
+                ticks_per_bar=5000,
+                cost_model=CostModel(commission_per_lot=7.0, slippage_pips=0.25),
+                threshold_policy=ThresholdPolicy(min_edge_pips=0.0, reject_ambiguous=True),
+                runtime_constraints=RuntimeConstraints(
+                    session_filter_active=True,
+                    spread_sanity_max_pips=1.5,
+                    max_concurrent_positions=1,
+                    daily_loss_stop_usd=100.0,
+                ),
+                release_stage="paper_live_candidate",
+                evaluator_hash="eval-hash",
+                logic_hash="logic-hash",
+            )
+            save_selector_manifest(manifest, manifest_path)
+
+            warmup_idx = pd.date_range("2024-01-01", periods=160, freq="min", tz="UTC")
+            warmup_frame = pd.DataFrame(
+                {
+                    "Open": [1.0 + (i * 0.0001) for i in range(160)],
+                    "High": [1.0002 + (i * 0.0001) for i in range(160)],
+                    "Low": [0.9998 + (i * 0.0001) for i in range(160)],
+                    "Close": [1.0 + (i * 0.0001) for i in range(160)],
+                    "Volume": [5000.0] * 160,
+                    "avg_spread": [0.0001] * 160,
+                    "time_delta_s": [60.0] * 160,
+                },
+                index=warmup_idx,
+            )
+
+            fake_mt5 = restart_drill.FakeMt5()
+            with unittest.mock.patch("live_bridge._load_warmup_bars", return_value=warmup_frame):
+                report = restart_drill.run_restart_drill(
+                    symbol="EURUSD",
+                    state_path=str(state_path),
+                    report_path=str(report_path),
+                    ticks_per_bar=5000,
+                    mt5_module=fake_mt5,
+                    manifest_path=str(manifest_path),
+                    bars_before_restart=1,
+                    bars_after_restart=1,
+                )
+
+            self.assertTrue(report.startup_reconcile_ok)
+            self.assertTrue(report.state_restored_ok)
+            self.assertTrue(report.confirmed_position_restored_ok)
+            self.assertEqual(str(manifest_path), report.bootstrap_diagnostics["manifest_path"])
+            self.assertTrue(report_path.exists())
 
     def test_json_state_store_recovers_from_backup_when_primary_is_corrupt(self):
         tmpdir = make_test_dir("state_store_backup")

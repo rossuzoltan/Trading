@@ -647,6 +647,12 @@ class FeatureEngine:
             "avg_spread": valid_raw['avg_spread'],
             "time_delta_s": valid_raw['time_delta_s']
         }, index=pd.DatetimeIndex(valid_ts, tz='UTC'))
+
+        # Guard against rare timestamp duplication in the numpy ring-buffer path.
+        # pandas_ta indicator helpers will raise if the index contains duplicates.
+        if not df.index.is_unique:
+            df = df.loc[~df.index.duplicated(keep="last")].copy()
+            df = df.sort_index()
         
         raw = _compute_raw(df, latest_only_hurst=True, fast_mode=True)
         self._buffer = self._drop_invalid_feature_rows(raw)
@@ -703,21 +709,24 @@ class FeatureEngine:
         candle_range = (h[-1] - l[-1]) / atr_safe
         vol_norm_atr = atr / c[-1] if c[-1] > 0 else 0.0
         
-        # 5. Z-Scores (Last 200 bars)
-        def z_score(val, series):
+        # 5. Z-Scores (Last 200 bars) — match pandas rolling std semantics more closely
+        def z_score(val, series, *, min_periods: int = 20):
             roll = series[-200:].astype(np.float64, copy=False)
+            if len(roll) < min_periods:
+                return 0.0
             m = np.mean(roll)
-            std = np.std(roll)
+            std = np.std(roll, ddof=1)
             return (val - m) / std if std > 0 else 0.0
             
         spread_z = z_score(s[-1], s)
         time_delta_z = np.clip(z_score(d[-1], d), -5.0, 5.0)
 
-        # 5b. price_z: (close - MA20) / std(close,20)
+        # 5b. price_z parity: match _compute_raw semantics exactly
+        # _compute_raw defines price_z as (Close - MA20) / rolling_std(Close, 20)
         c20 = c[-20:] if len(c) >= 20 else c
-        price_mean = np.mean(c20)
-        price_std = np.std(c20)
-        price_z = float((c[-1] - price_mean) / price_std) if price_std > 0 else 0.0
+        ma20_for_price_z = _np_sma(c, 20)
+        price_std = np.std(c20, ddof=1) if len(c20) >= 2 else 0.0
+        price_z = float((c[-1] - ma20_for_price_z) / price_std) if price_std > 0 else 0.0
 
         # 6. Temporal (Cyclical) - Pure numpy/math (assuming ts is datetime64[ns])
         # last_dt = pd.Timestamp(ts[-1])

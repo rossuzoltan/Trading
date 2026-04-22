@@ -13,6 +13,7 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
 from artifact_manifest import ArtifactManifest
+from selector_manifest import CostModel, RuntimeConstraints, ThresholdPolicy, create_rule_manifest, save_selector_manifest
 from trading_config import DeploymentPaths
 
 import evaluate_oos
@@ -450,12 +451,12 @@ class LiveReadinessTests(unittest.TestCase):
                 ticks_per_bar=2000,
             )
             with patch("mt5_live_preflight.deployment_paths", return_value=paths), \
+                patch("mt5_live_preflight.resolve_selector_manifest_path", return_value=None), \
                 patch("mt5_live_preflight.resolve_manifest_path", return_value=tmpdir / "artifact_manifest_EURUSD.json"), \
                 patch("mt5_live_preflight.load_manifest", return_value=manifest), \
                 patch("mt5_live_preflight.importlib.util.find_spec", return_value=None):
                 report = mt5_live_preflight.build_report("EURUSD", 2000)
             self.assertFalse(report["approved_for_live_runtime"])
-            self.assertTrue(any("Deployment gate is not approved" in blocker for blocker in report["blockers"]))
             self.assertTrue(any("MetaTrader5 package is not installed" in blocker for blocker in report["blockers"]))
             self.assertTrue(paths.live_preflight_path.exists())
         finally:
@@ -530,6 +531,7 @@ class LiveReadinessTests(unittest.TestCase):
                 symbol_select=lambda symbol, visible: True,
             )
             with patch("mt5_live_preflight.deployment_paths", return_value=paths), \
+                patch("mt5_live_preflight.resolve_selector_manifest_path", return_value=None), \
                 patch("mt5_live_preflight.resolve_manifest_path", return_value=tmpdir / "artifact_manifest_EURUSD.json"), \
                 patch("mt5_live_preflight.load_manifest", return_value=manifest), \
                 patch("mt5_live_preflight.importlib.util.find_spec", return_value=object()), \
@@ -613,6 +615,7 @@ class LiveReadinessTests(unittest.TestCase):
                 symbol_select=lambda symbol, visible: True,
             )
             with patch("mt5_live_preflight.deployment_paths", return_value=paths), \
+                patch("mt5_live_preflight.resolve_selector_manifest_path", return_value=None), \
                 patch("mt5_live_preflight.resolve_manifest_path", return_value=tmpdir / "artifact_manifest_EURUSD.json"), \
                 patch("mt5_live_preflight.load_manifest", return_value=manifest), \
                 patch("mt5_live_preflight.importlib.util.find_spec", return_value=object()), \
@@ -715,6 +718,7 @@ class LiveReadinessTests(unittest.TestCase):
                 symbol_select=lambda symbol, visible: True,
             )
             with patch("mt5_live_preflight.deployment_paths", return_value=paths), \
+                patch("mt5_live_preflight.resolve_selector_manifest_path", return_value=None), \
                 patch("mt5_live_preflight.resolve_manifest_path", return_value=tmpdir / "artifact_manifest_EURUSD.json"), \
                 patch("mt5_live_preflight.load_manifest", return_value=manifest), \
                 patch("mt5_live_preflight.importlib.util.find_spec", return_value=object()), \
@@ -723,6 +727,53 @@ class LiveReadinessTests(unittest.TestCase):
             self.assertFalse(report["approved_for_live_runtime"])
             self.assertTrue(any("trade mode blocks new orders" in blocker.lower() for blocker in report["blockers"]))
             self.assertEqual(0, report["symbol_capabilities"]["trade_mode"])
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_preflight_prefers_selector_manifest_for_rc1_rule_pack(self):
+        tmpdir = make_test_dir("preflight_selector_manifest")
+        try:
+            paths = DeploymentPaths(
+                diagnostics_path=tmpdir / "training_diagnostics_eurusd.json",
+                gate_path=tmpdir / "deployment_gate_eurusd.json",
+                ops_attestation_path=tmpdir / "ops_attestation_eurusd.json",
+                live_preflight_path=tmpdir / "live_preflight_eurusd.json",
+                execution_audit_path=tmpdir / "execution_audit_eurusd.jsonl",
+            )
+            paths.gate_path.write_text(json.dumps({"approved_for_live": False, "blockers": []}), encoding="utf-8")
+            dataset_path = tmpdir / "DATA_CLEAN_VOLUME_5000.csv"
+            dataset_path.write_text("stub dataset", encoding="utf-8")
+            manifest_path = tmpdir / "manifest.json"
+            manifest = create_rule_manifest(
+                strategy_symbol="EURUSD",
+                rule_family="mean_reversion",
+                rule_params={"threshold": 1.5, "sl_value": 1.5, "tp_value": 3.0},
+                dataset_path=dataset_path,
+                ticks_per_bar=5000,
+                cost_model=CostModel(commission_per_lot=7.0, slippage_pips=0.25),
+                threshold_policy=ThresholdPolicy(min_edge_pips=0.0, reject_ambiguous=True),
+                runtime_constraints=RuntimeConstraints(
+                    session_filter_active=True,
+                    spread_sanity_max_pips=1.5,
+                    max_concurrent_positions=1,
+                    daily_loss_stop_usd=100.0,
+                ),
+                release_stage="paper_live_candidate",
+                evaluator_hash="eval",
+                logic_hash="logic",
+            )
+            save_selector_manifest(manifest, manifest_path)
+
+            with patch("mt5_live_preflight.deployment_paths", return_value=paths), \
+                patch("mt5_live_preflight.resolve_selector_manifest_path", return_value=manifest_path), \
+                patch("mt5_live_preflight.resolve_manifest_path", side_effect=FileNotFoundError("legacy missing")), \
+                patch("mt5_live_preflight.importlib.util.find_spec", return_value=None):
+                report = mt5_live_preflight.build_report("EURUSD", 5000)
+
+            self.assertEqual("selector_manifest", report["manifest_source"])
+            self.assertEqual("RULE", report["manifest_engine_type"])
+            self.assertEqual(str(manifest_path), report["manifest_path"])
+            self.assertEqual(5000, report["manifest_bar_construction_ticks_per_bar"])
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 

@@ -1,0 +1,4329 @@
+{
+  "hashes": {
+    "manifest": "fadd635a",
+    "evaluator": "110dfff3",
+    "rule_logic": "e1c9bf0f"
+  },
+  "results": [
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 0.5,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.69 < 1.25) | Negative Expectancy ($-0.95)",
+      "net_pnl": -4.753147709173504,
+      "pf": 0.686070193336314,
+      "expectancy": -0.9506295418347008,
+      "trades": 5,
+      "win_rate": 0.4,
+      "max_dd": 0.015130412022090303,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 5,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1810,
+      "signal_shorts": 1725
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 0.5,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 17.3362042434087,
+      "pf": 1.9553026567624423,
+      "expectancy": 1.9262449159343003,
+      "trades": 9,
+      "win_rate": 0.7777777777777778,
+      "max_dd": 0.009683775386540201,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 9,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 3382,
+      "signal_shorts": 3260
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 0.5,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 35.430245858075295,
+      "pf": 2.4659741208704005,
+      "expectancy": 2.530731847005378,
+      "trades": 14,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.009624463257983927,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 14,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3927,
+      "signal_shorts": 3972
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 0.5,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.52 < 1.25) | Negative Expectancy ($-1.59)",
+      "net_pnl": -9.561407739446395,
+      "pf": 0.5207088050664251,
+      "expectancy": -1.5935679565743992,
+      "trades": 6,
+      "win_rate": 0.3333333333333333,
+      "max_dd": 0.01992624681509037,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1864,
+      "signal_shorts": 1768
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 0.5,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 12.18099973491178,
+      "pf": 1.522732552486655,
+      "expectancy": 1.218099973491178,
+      "trades": 10,
+      "win_rate": 0.7,
+      "max_dd": 0.011056823478705681,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 10,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3484,
+      "signal_shorts": 3340
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 0.5,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 27.92000452028492,
+      "pf": 1.7740819608372929,
+      "expectancy": 1.8613336346856613,
+      "trades": 15,
+      "win_rate": 0.7333333333333333,
+      "max_dd": 0.012266900091585565,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 15,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 4046,
+      "signal_shorts": 4072
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 0.75,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.69 < 1.25) | Negative Expectancy ($-0.95)",
+      "net_pnl": -4.753147709173504,
+      "pf": 0.686070193336314,
+      "expectancy": -0.9506295418347008,
+      "trades": 5,
+      "win_rate": 0.4,
+      "max_dd": 0.015130412022090303,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 5,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1810,
+      "signal_shorts": 1389
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 0.75,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 17.3362042434087,
+      "pf": 1.9553026567624423,
+      "expectancy": 1.9262449159343003,
+      "trades": 9,
+      "win_rate": 0.7777777777777778,
+      "max_dd": 0.009683775386540201,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 9,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 3382,
+      "signal_shorts": 2708
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 0.75,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 35.430245858075295,
+      "pf": 2.4659741208704005,
+      "expectancy": 2.530731847005378,
+      "trades": 14,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.009624463257983927,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 14,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3927,
+      "signal_shorts": 3367
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 0.75,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.52 < 1.25) | Negative Expectancy ($-1.59)",
+      "net_pnl": -9.561407739446395,
+      "pf": 0.5207088050664251,
+      "expectancy": -1.5935679565743992,
+      "trades": 6,
+      "win_rate": 0.3333333333333333,
+      "max_dd": 0.01992624681509037,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1864,
+      "signal_shorts": 1423
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 0.75,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 12.18099973491178,
+      "pf": 1.522732552486655,
+      "expectancy": 1.218099973491178,
+      "trades": 10,
+      "win_rate": 0.7,
+      "max_dd": 0.011056823478705681,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 10,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3484,
+      "signal_shorts": 2775
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 0.75,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 27.92000452028492,
+      "pf": 1.7740819608372929,
+      "expectancy": 1.8613336346856613,
+      "trades": 15,
+      "win_rate": 0.7333333333333333,
+      "max_dd": 0.012266900091585565,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 15,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 4046,
+      "signal_shorts": 3453
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 1.0,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.69 < 1.25) | Negative Expectancy ($-0.95)",
+      "net_pnl": -4.753147709173504,
+      "pf": 0.686070193336314,
+      "expectancy": -0.9506295418347008,
+      "trades": 5,
+      "win_rate": 0.4,
+      "max_dd": 0.015130412022090303,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 5,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1810,
+      "signal_shorts": 1075
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 1.0,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 17.3362042434087,
+      "pf": 1.9553026567624423,
+      "expectancy": 1.9262449159343003,
+      "trades": 9,
+      "win_rate": 0.7777777777777778,
+      "max_dd": 0.009683775386540201,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 9,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 3382,
+      "signal_shorts": 2157
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 1.0,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 35.430245858075295,
+      "pf": 2.4659741208704005,
+      "expectancy": 2.530731847005378,
+      "trades": 14,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.009624463257983927,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 14,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3927,
+      "signal_shorts": 2719
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 1.0,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.52 < 1.25) | Negative Expectancy ($-1.59)",
+      "net_pnl": -9.561407739446395,
+      "pf": 0.5207088050664251,
+      "expectancy": -1.5935679565743992,
+      "trades": 6,
+      "win_rate": 0.3333333333333333,
+      "max_dd": 0.01992624681509037,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1864,
+      "signal_shorts": 1100
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 1.0,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 12.18099973491178,
+      "pf": 1.522732552486655,
+      "expectancy": 1.218099973491178,
+      "trades": 10,
+      "win_rate": 0.7,
+      "max_dd": 0.011056823478705681,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 10,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3484,
+      "signal_shorts": 2210
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 1.0,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 27.92000452028492,
+      "pf": 1.7740819608372929,
+      "expectancy": 1.8613336346856613,
+      "trades": 15,
+      "win_rate": 0.7333333333333333,
+      "max_dd": 0.012266900091585565,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 15,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 4046,
+      "signal_shorts": 2787
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 1.25,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.69 < 1.25) | Negative Expectancy ($-0.95)",
+      "net_pnl": -4.753147709173504,
+      "pf": 0.686070193336314,
+      "expectancy": -0.9506295418347008,
+      "trades": 5,
+      "win_rate": 0.4,
+      "max_dd": 0.015130412022090303,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 5,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1810,
+      "signal_shorts": 792
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 1.25,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 17.3362042434087,
+      "pf": 1.9553026567624423,
+      "expectancy": 1.9262449159343003,
+      "trades": 9,
+      "win_rate": 0.7777777777777778,
+      "max_dd": 0.009683775386540201,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 9,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 3382,
+      "signal_shorts": 1642
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 1.25,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 35.430245858075295,
+      "pf": 2.4659741208704005,
+      "expectancy": 2.530731847005378,
+      "trades": 14,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.009624463257983927,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 14,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3927,
+      "signal_shorts": 2081
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 1.25,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.52 < 1.25) | Negative Expectancy ($-1.59)",
+      "net_pnl": -9.561407739446395,
+      "pf": 0.5207088050664251,
+      "expectancy": -1.5935679565743992,
+      "trades": 6,
+      "win_rate": 0.3333333333333333,
+      "max_dd": 0.01992624681509037,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1864,
+      "signal_shorts": 814
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 1.25,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 12.18099973491178,
+      "pf": 1.522732552486655,
+      "expectancy": 1.218099973491178,
+      "trades": 10,
+      "win_rate": 0.7,
+      "max_dd": 0.011056823478705681,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 10,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3484,
+      "signal_shorts": 1688
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 1.25,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 27.92000452028492,
+      "pf": 1.7740819608372929,
+      "expectancy": 1.8613336346856613,
+      "trades": 15,
+      "win_rate": 0.7333333333333333,
+      "max_dd": 0.012266900091585565,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 15,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 4046,
+      "signal_shorts": 2134
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 1.5,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.69 < 1.25) | Negative Expectancy ($-0.95)",
+      "net_pnl": -4.753147709173504,
+      "pf": 0.686070193336314,
+      "expectancy": -0.9506295418347008,
+      "trades": 5,
+      "win_rate": 0.4,
+      "max_dd": 0.015130412022090303,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 5,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1810,
+      "signal_shorts": 543
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 1.5,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 17.3362042434087,
+      "pf": 1.9553026567624423,
+      "expectancy": 1.9262449159343003,
+      "trades": 9,
+      "win_rate": 0.7777777777777778,
+      "max_dd": 0.009683775386540201,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 9,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 3382,
+      "signal_shorts": 1163
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 1.5,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 35.430245858075295,
+      "pf": 2.4659741208704005,
+      "expectancy": 2.530731847005378,
+      "trades": 14,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.009624463257983927,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 14,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3927,
+      "signal_shorts": 1463
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 1.5,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.52 < 1.25) | Negative Expectancy ($-1.59)",
+      "net_pnl": -9.561407739446395,
+      "pf": 0.5207088050664251,
+      "expectancy": -1.5935679565743992,
+      "trades": 6,
+      "win_rate": 0.3333333333333333,
+      "max_dd": 0.01992624681509037,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1864,
+      "signal_shorts": 559
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 1.5,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 12.18099973491178,
+      "pf": 1.522732552486655,
+      "expectancy": 1.218099973491178,
+      "trades": 10,
+      "win_rate": 0.7,
+      "max_dd": 0.011056823478705681,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 10,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3484,
+      "signal_shorts": 1199
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 1.5,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 27.92000452028492,
+      "pf": 1.7740819608372929,
+      "expectancy": 1.8613336346856613,
+      "trades": 15,
+      "win_rate": 0.7333333333333333,
+      "max_dd": 0.012266900091585565,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 15,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 4046,
+      "signal_shorts": 1503
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 1.75,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.69 < 1.25) | Negative Expectancy ($-0.95)",
+      "net_pnl": -4.753147709173504,
+      "pf": 0.686070193336314,
+      "expectancy": -0.9506295418347008,
+      "trades": 5,
+      "win_rate": 0.4,
+      "max_dd": 0.015130412022090303,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 5,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1810,
+      "signal_shorts": 333
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 1.75,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 17.3362042434087,
+      "pf": 1.9553026567624423,
+      "expectancy": 1.9262449159343003,
+      "trades": 9,
+      "win_rate": 0.7777777777777778,
+      "max_dd": 0.009683775386540201,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 9,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 3382,
+      "signal_shorts": 769
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 1.75,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 35.430245858075295,
+      "pf": 2.4659741208704005,
+      "expectancy": 2.530731847005378,
+      "trades": 14,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.009624463257983927,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 14,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3927,
+      "signal_shorts": 955
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 1.75,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.52 < 1.25) | Negative Expectancy ($-1.59)",
+      "net_pnl": -9.561407739446395,
+      "pf": 0.5207088050664251,
+      "expectancy": -1.5935679565743992,
+      "trades": 6,
+      "win_rate": 0.3333333333333333,
+      "max_dd": 0.01992624681509037,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1864,
+      "signal_shorts": 344
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 1.75,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 12.18099973491178,
+      "pf": 1.522732552486655,
+      "expectancy": 1.218099973491178,
+      "trades": 10,
+      "win_rate": 0.7,
+      "max_dd": 0.011056823478705681,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 10,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3484,
+      "signal_shorts": 794
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 1.75,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 27.92000452028492,
+      "pf": 1.7740819608372929,
+      "expectancy": 1.8613336346856613,
+      "trades": 15,
+      "win_rate": 0.7333333333333333,
+      "max_dd": 0.012266900091585565,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 15,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 4046,
+      "signal_shorts": 983
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 2.0,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.69 < 1.25) | Negative Expectancy ($-0.95)",
+      "net_pnl": -4.753147709173504,
+      "pf": 0.686070193336314,
+      "expectancy": -0.9506295418347008,
+      "trades": 5,
+      "win_rate": 0.4,
+      "max_dd": 0.015130412022090303,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 5,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1810,
+      "signal_shorts": 210
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 2.0,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 17.3362042434087,
+      "pf": 1.9553026567624423,
+      "expectancy": 1.9262449159343003,
+      "trades": 9,
+      "win_rate": 0.7777777777777778,
+      "max_dd": 0.009683775386540201,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 9,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 3382,
+      "signal_shorts": 482
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 2.0,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 35.430245858075295,
+      "pf": 2.4659741208704005,
+      "expectancy": 2.530731847005378,
+      "trades": 14,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.009624463257983927,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 14,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3927,
+      "signal_shorts": 591
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 2.0,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.52 < 1.25) | Negative Expectancy ($-1.59)",
+      "net_pnl": -9.561407739446395,
+      "pf": 0.5207088050664251,
+      "expectancy": -1.5935679565743992,
+      "trades": 6,
+      "win_rate": 0.3333333333333333,
+      "max_dd": 0.01992624681509037,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1864,
+      "signal_shorts": 217
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 2.0,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 12.18099973491178,
+      "pf": 1.522732552486655,
+      "expectancy": 1.218099973491178,
+      "trades": 10,
+      "win_rate": 0.7,
+      "max_dd": 0.011056823478705681,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 10,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3484,
+      "signal_shorts": 502
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.5,
+          "short_threshold": 2.0,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 27.92000452028492,
+      "pf": 1.7740819608372929,
+      "expectancy": 1.8613336346856613,
+      "trades": 15,
+      "win_rate": 0.7333333333333333,
+      "max_dd": 0.012266900091585565,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 15,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 4046,
+      "signal_shorts": 613
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 0.5,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 5.987176723167295,
+      "pf": 1.4254844862368579,
+      "expectancy": 0.9978627871945491,
+      "trades": 6,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.009792801015064485,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1449,
+      "signal_shorts": 1725
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 0.5,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 14.30144226895402,
+      "pf": 1.7880736522968053,
+      "expectancy": 1.7876802836192525,
+      "trades": 8,
+      "win_rate": 0.75,
+      "max_dd": 0.0097126906537798,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 8,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2784,
+      "signal_shorts": 3260
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 0.5,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 36.878853404660276,
+      "pf": 2.567667475538621,
+      "expectancy": 2.83683487728156,
+      "trades": 13,
+      "win_rate": 0.7692307692307693,
+      "max_dd": 0.009610889217317762,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 13,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3290,
+      "signal_shorts": 3972
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 0.5,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (1.06 < 1.25)",
+      "net_pnl": 1.1789166928944042,
+      "pf": 1.0624436345197947,
+      "expectancy": 0.16841667041348632,
+      "trades": 7,
+      "win_rate": 0.5714285714285714,
+      "max_dd": 0.012943210897154457,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 7,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1490,
+      "signal_shorts": 1768
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 0.5,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 9.146237760457097,
+      "pf": 1.3924994921780278,
+      "expectancy": 1.0162486400507886,
+      "trades": 9,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.01108996242068777,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 9,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2866,
+      "signal_shorts": 3340
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 0.5,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 24.334981305552674,
+      "pf": 1.6746872133296098,
+      "expectancy": 1.7382129503966195,
+      "trades": 14,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.012309303987416101,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 14,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3389,
+      "signal_shorts": 4072
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 0.75,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 5.987176723167295,
+      "pf": 1.4254844862368579,
+      "expectancy": 0.9978627871945491,
+      "trades": 6,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.009792801015064485,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1449,
+      "signal_shorts": 1389
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 0.75,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 14.30144226895402,
+      "pf": 1.7880736522968053,
+      "expectancy": 1.7876802836192525,
+      "trades": 8,
+      "win_rate": 0.75,
+      "max_dd": 0.0097126906537798,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 8,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2784,
+      "signal_shorts": 2708
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 0.75,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 36.878853404660276,
+      "pf": 2.567667475538621,
+      "expectancy": 2.83683487728156,
+      "trades": 13,
+      "win_rate": 0.7692307692307693,
+      "max_dd": 0.009610889217317762,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 13,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3290,
+      "signal_shorts": 3367
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 0.75,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (1.06 < 1.25)",
+      "net_pnl": 1.1789166928944042,
+      "pf": 1.0624436345197947,
+      "expectancy": 0.16841667041348632,
+      "trades": 7,
+      "win_rate": 0.5714285714285714,
+      "max_dd": 0.012943210897154457,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 7,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1490,
+      "signal_shorts": 1423
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 0.75,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 9.146237760457097,
+      "pf": 1.3924994921780278,
+      "expectancy": 1.0162486400507886,
+      "trades": 9,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.01108996242068777,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 9,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2866,
+      "signal_shorts": 2775
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 0.75,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 24.334981305552674,
+      "pf": 1.6746872133296098,
+      "expectancy": 1.7382129503966195,
+      "trades": 14,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.012309303987416101,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 14,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3389,
+      "signal_shorts": 3453
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 1.0,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 5.987176723167295,
+      "pf": 1.4254844862368579,
+      "expectancy": 0.9978627871945491,
+      "trades": 6,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.009792801015064485,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1449,
+      "signal_shorts": 1075
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 1.0,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 14.30144226895402,
+      "pf": 1.7880736522968053,
+      "expectancy": 1.7876802836192525,
+      "trades": 8,
+      "win_rate": 0.75,
+      "max_dd": 0.0097126906537798,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 8,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2784,
+      "signal_shorts": 2157
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 1.0,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 36.878853404660276,
+      "pf": 2.567667475538621,
+      "expectancy": 2.83683487728156,
+      "trades": 13,
+      "win_rate": 0.7692307692307693,
+      "max_dd": 0.009610889217317762,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 13,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3290,
+      "signal_shorts": 2719
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 1.0,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (1.06 < 1.25)",
+      "net_pnl": 1.1789166928944042,
+      "pf": 1.0624436345197947,
+      "expectancy": 0.16841667041348632,
+      "trades": 7,
+      "win_rate": 0.5714285714285714,
+      "max_dd": 0.012943210897154457,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 7,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1490,
+      "signal_shorts": 1100
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 1.0,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 9.146237760457097,
+      "pf": 1.3924994921780278,
+      "expectancy": 1.0162486400507886,
+      "trades": 9,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.01108996242068777,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 9,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2866,
+      "signal_shorts": 2210
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 1.0,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 24.334981305552674,
+      "pf": 1.6746872133296098,
+      "expectancy": 1.7382129503966195,
+      "trades": 14,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.012309303987416101,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 14,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3389,
+      "signal_shorts": 2787
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 1.25,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 5.987176723167295,
+      "pf": 1.4254844862368579,
+      "expectancy": 0.9978627871945491,
+      "trades": 6,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.009792801015064485,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1449,
+      "signal_shorts": 792
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 1.25,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 14.30144226895402,
+      "pf": 1.7880736522968053,
+      "expectancy": 1.7876802836192525,
+      "trades": 8,
+      "win_rate": 0.75,
+      "max_dd": 0.0097126906537798,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 8,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2784,
+      "signal_shorts": 1642
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 1.25,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 36.878853404660276,
+      "pf": 2.567667475538621,
+      "expectancy": 2.83683487728156,
+      "trades": 13,
+      "win_rate": 0.7692307692307693,
+      "max_dd": 0.009610889217317762,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 13,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3290,
+      "signal_shorts": 2081
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 1.25,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (1.06 < 1.25)",
+      "net_pnl": 1.1789166928944042,
+      "pf": 1.0624436345197947,
+      "expectancy": 0.16841667041348632,
+      "trades": 7,
+      "win_rate": 0.5714285714285714,
+      "max_dd": 0.012943210897154457,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 7,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1490,
+      "signal_shorts": 814
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 1.25,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 9.146237760457097,
+      "pf": 1.3924994921780278,
+      "expectancy": 1.0162486400507886,
+      "trades": 9,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.01108996242068777,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 9,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2866,
+      "signal_shorts": 1688
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 1.25,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 24.334981305552674,
+      "pf": 1.6746872133296098,
+      "expectancy": 1.7382129503966195,
+      "trades": 14,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.012309303987416101,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 14,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3389,
+      "signal_shorts": 2134
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 1.5,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 5.987176723167295,
+      "pf": 1.4254844862368579,
+      "expectancy": 0.9978627871945491,
+      "trades": 6,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.009792801015064485,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1449,
+      "signal_shorts": 543
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 1.5,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 14.30144226895402,
+      "pf": 1.7880736522968053,
+      "expectancy": 1.7876802836192525,
+      "trades": 8,
+      "win_rate": 0.75,
+      "max_dd": 0.0097126906537798,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 8,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2784,
+      "signal_shorts": 1163
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 1.5,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 36.878853404660276,
+      "pf": 2.567667475538621,
+      "expectancy": 2.83683487728156,
+      "trades": 13,
+      "win_rate": 0.7692307692307693,
+      "max_dd": 0.009610889217317762,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 13,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3290,
+      "signal_shorts": 1463
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 1.5,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (1.06 < 1.25)",
+      "net_pnl": 1.1789166928944042,
+      "pf": 1.0624436345197947,
+      "expectancy": 0.16841667041348632,
+      "trades": 7,
+      "win_rate": 0.5714285714285714,
+      "max_dd": 0.012943210897154457,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 7,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1490,
+      "signal_shorts": 559
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 1.5,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 9.146237760457097,
+      "pf": 1.3924994921780278,
+      "expectancy": 1.0162486400507886,
+      "trades": 9,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.01108996242068777,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 9,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2866,
+      "signal_shorts": 1199
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 1.5,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 24.334981305552674,
+      "pf": 1.6746872133296098,
+      "expectancy": 1.7382129503966195,
+      "trades": 14,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.012309303987416101,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 14,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3389,
+      "signal_shorts": 1503
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 1.75,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 5.987176723167295,
+      "pf": 1.4254844862368579,
+      "expectancy": 0.9978627871945491,
+      "trades": 6,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.009792801015064485,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1449,
+      "signal_shorts": 333
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 1.75,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 14.30144226895402,
+      "pf": 1.7880736522968053,
+      "expectancy": 1.7876802836192525,
+      "trades": 8,
+      "win_rate": 0.75,
+      "max_dd": 0.0097126906537798,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 8,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2784,
+      "signal_shorts": 769
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 1.75,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 36.878853404660276,
+      "pf": 2.567667475538621,
+      "expectancy": 2.83683487728156,
+      "trades": 13,
+      "win_rate": 0.7692307692307693,
+      "max_dd": 0.009610889217317762,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 13,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3290,
+      "signal_shorts": 955
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 1.75,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (1.06 < 1.25)",
+      "net_pnl": 1.1789166928944042,
+      "pf": 1.0624436345197947,
+      "expectancy": 0.16841667041348632,
+      "trades": 7,
+      "win_rate": 0.5714285714285714,
+      "max_dd": 0.012943210897154457,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 7,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1490,
+      "signal_shorts": 344
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 1.75,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 9.146237760457097,
+      "pf": 1.3924994921780278,
+      "expectancy": 1.0162486400507886,
+      "trades": 9,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.01108996242068777,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 9,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2866,
+      "signal_shorts": 794
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 1.75,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 24.334981305552674,
+      "pf": 1.6746872133296098,
+      "expectancy": 1.7382129503966195,
+      "trades": 14,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.012309303987416101,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 14,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3389,
+      "signal_shorts": 983
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 2.0,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 5.987176723167295,
+      "pf": 1.4254844862368579,
+      "expectancy": 0.9978627871945491,
+      "trades": 6,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.009792801015064485,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1449,
+      "signal_shorts": 210
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 2.0,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 14.30144226895402,
+      "pf": 1.7880736522968053,
+      "expectancy": 1.7876802836192525,
+      "trades": 8,
+      "win_rate": 0.75,
+      "max_dd": 0.0097126906537798,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 8,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2784,
+      "signal_shorts": 482
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 2.0,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 36.878853404660276,
+      "pf": 2.567667475538621,
+      "expectancy": 2.83683487728156,
+      "trades": 13,
+      "win_rate": 0.7692307692307693,
+      "max_dd": 0.009610889217317762,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 13,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3290,
+      "signal_shorts": 591
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 2.0,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (1.06 < 1.25)",
+      "net_pnl": 1.1789166928944042,
+      "pf": 1.0624436345197947,
+      "expectancy": 0.16841667041348632,
+      "trades": 7,
+      "win_rate": 0.5714285714285714,
+      "max_dd": 0.012943210897154457,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 7,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1490,
+      "signal_shorts": 217
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 2.0,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "PASSED",
+      "reject_reason": "",
+      "net_pnl": 9.146237760457097,
+      "pf": 1.3924994921780278,
+      "expectancy": 1.0162486400507886,
+      "trades": 9,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.01108996242068777,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 9,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2866,
+      "signal_shorts": 502
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -0.75,
+          "short_threshold": 2.0,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 24.334981305552674,
+      "pf": 1.6746872133296098,
+      "expectancy": 1.7382129503966195,
+      "trades": 14,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.012309303987416101,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 14,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 3389,
+      "signal_shorts": 613
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 0.5,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.95 < 1.25) | Negative Expectancy ($-0.12)",
+      "net_pnl": -0.7278769238180303,
+      "pf": 0.9482727246423179,
+      "expectancy": -0.12131282063633837,
+      "trades": 6,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.009810161831317036,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1105,
+      "signal_shorts": 1725
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 0.5,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (1.24 < 1.25)",
+      "net_pnl": 4.274625725189935,
+      "pf": 1.235551061501344,
+      "expectancy": 0.6106608178842764,
+      "trades": 7,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.009786882983060626,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 7,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2231,
+      "signal_shorts": 3260
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 0.5,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 18.752582455329957,
+      "pf": 1.7971455423248643,
+      "expectancy": 1.7047802232118143,
+      "trades": 11,
+      "win_rate": 0.7272727272727273,
+      "max_dd": 0.010302433417340233,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 11,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 2664,
+      "signal_shorts": 3972
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 0.5,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.85 < 1.25) | Negative Expectancy ($-0.38)",
+      "net_pnl": -2.2914863631551725,
+      "pf": 0.8534390760548826,
+      "expectancy": -0.3819143938591954,
+      "trades": 6,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.011733716019113858,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1139,
+      "signal_shorts": 1768
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 0.5,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (1.14 < 1.25)",
+      "net_pnl": 2.711016285852793,
+      "pf": 1.137538579142816,
+      "expectancy": 0.3872880408361133,
+      "trades": 7,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.011675692768560033,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 7,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2296,
+      "signal_shorts": 3340
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 0.5,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 9.800305425381794,
+      "pf": 1.3017619449268314,
+      "expectancy": 0.8909368568528904,
+      "trades": 11,
+      "win_rate": 0.7272727272727273,
+      "max_dd": 0.012512437504883015,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 11,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 2741,
+      "signal_shorts": 4072
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 0.75,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.95 < 1.25) | Negative Expectancy ($-0.12)",
+      "net_pnl": -0.7278769238180303,
+      "pf": 0.9482727246423179,
+      "expectancy": -0.12131282063633837,
+      "trades": 6,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.009810161831317036,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1105,
+      "signal_shorts": 1389
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 0.75,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (1.24 < 1.25)",
+      "net_pnl": 4.274625725189935,
+      "pf": 1.235551061501344,
+      "expectancy": 0.6106608178842764,
+      "trades": 7,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.009786882983060626,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 7,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2231,
+      "signal_shorts": 2708
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 0.75,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 18.752582455329957,
+      "pf": 1.7971455423248643,
+      "expectancy": 1.7047802232118143,
+      "trades": 11,
+      "win_rate": 0.7272727272727273,
+      "max_dd": 0.010302433417340233,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 11,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 2664,
+      "signal_shorts": 3367
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 0.75,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.85 < 1.25) | Negative Expectancy ($-0.38)",
+      "net_pnl": -2.2914863631551725,
+      "pf": 0.8534390760548826,
+      "expectancy": -0.3819143938591954,
+      "trades": 6,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.011733716019113858,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1139,
+      "signal_shorts": 1423
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 0.75,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (1.14 < 1.25)",
+      "net_pnl": 2.711016285852793,
+      "pf": 1.137538579142816,
+      "expectancy": 0.3872880408361133,
+      "trades": 7,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.011675692768560033,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 7,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2296,
+      "signal_shorts": 2775
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 0.75,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 9.800305425381794,
+      "pf": 1.3017619449268314,
+      "expectancy": 0.8909368568528904,
+      "trades": 11,
+      "win_rate": 0.7272727272727273,
+      "max_dd": 0.012512437504883015,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 11,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 2741,
+      "signal_shorts": 3453
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 1.0,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.95 < 1.25) | Negative Expectancy ($-0.12)",
+      "net_pnl": -0.7278769238180303,
+      "pf": 0.9482727246423179,
+      "expectancy": -0.12131282063633837,
+      "trades": 6,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.009810161831317036,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1105,
+      "signal_shorts": 1075
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 1.0,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (1.24 < 1.25)",
+      "net_pnl": 4.274625725189935,
+      "pf": 1.235551061501344,
+      "expectancy": 0.6106608178842764,
+      "trades": 7,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.009786882983060626,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 7,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2231,
+      "signal_shorts": 2157
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 1.0,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 18.752582455329957,
+      "pf": 1.7971455423248643,
+      "expectancy": 1.7047802232118143,
+      "trades": 11,
+      "win_rate": 0.7272727272727273,
+      "max_dd": 0.010302433417340233,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 11,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 2664,
+      "signal_shorts": 2719
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 1.0,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.85 < 1.25) | Negative Expectancy ($-0.38)",
+      "net_pnl": -2.2914863631551725,
+      "pf": 0.8534390760548826,
+      "expectancy": -0.3819143938591954,
+      "trades": 6,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.011733716019113858,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1139,
+      "signal_shorts": 1100
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 1.0,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (1.14 < 1.25)",
+      "net_pnl": 2.711016285852793,
+      "pf": 1.137538579142816,
+      "expectancy": 0.3872880408361133,
+      "trades": 7,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.011675692768560033,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 7,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2296,
+      "signal_shorts": 2210
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 1.0,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 9.800305425381794,
+      "pf": 1.3017619449268314,
+      "expectancy": 0.8909368568528904,
+      "trades": 11,
+      "win_rate": 0.7272727272727273,
+      "max_dd": 0.012512437504883015,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 11,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 2741,
+      "signal_shorts": 2787
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 1.25,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.95 < 1.25) | Negative Expectancy ($-0.12)",
+      "net_pnl": -0.7278769238180303,
+      "pf": 0.9482727246423179,
+      "expectancy": -0.12131282063633837,
+      "trades": 6,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.009810161831317036,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1105,
+      "signal_shorts": 792
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 1.25,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (1.24 < 1.25)",
+      "net_pnl": 4.274625725189935,
+      "pf": 1.235551061501344,
+      "expectancy": 0.6106608178842764,
+      "trades": 7,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.009786882983060626,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 7,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2231,
+      "signal_shorts": 1642
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 1.25,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 18.752582455329957,
+      "pf": 1.7971455423248643,
+      "expectancy": 1.7047802232118143,
+      "trades": 11,
+      "win_rate": 0.7272727272727273,
+      "max_dd": 0.010302433417340233,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 11,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 2664,
+      "signal_shorts": 2081
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 1.25,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.85 < 1.25) | Negative Expectancy ($-0.38)",
+      "net_pnl": -2.2914863631551725,
+      "pf": 0.8534390760548826,
+      "expectancy": -0.3819143938591954,
+      "trades": 6,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.011733716019113858,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1139,
+      "signal_shorts": 814
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 1.25,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (1.14 < 1.25)",
+      "net_pnl": 2.711016285852793,
+      "pf": 1.137538579142816,
+      "expectancy": 0.3872880408361133,
+      "trades": 7,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.011675692768560033,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 7,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2296,
+      "signal_shorts": 1688
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 1.25,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 9.800305425381794,
+      "pf": 1.3017619449268314,
+      "expectancy": 0.8909368568528904,
+      "trades": 11,
+      "win_rate": 0.7272727272727273,
+      "max_dd": 0.012512437504883015,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 11,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 2741,
+      "signal_shorts": 2134
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 1.5,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.95 < 1.25) | Negative Expectancy ($-0.12)",
+      "net_pnl": -0.7278769238180303,
+      "pf": 0.9482727246423179,
+      "expectancy": -0.12131282063633837,
+      "trades": 6,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.009810161831317036,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1105,
+      "signal_shorts": 543
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 1.5,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (1.24 < 1.25)",
+      "net_pnl": 4.274625725189935,
+      "pf": 1.235551061501344,
+      "expectancy": 0.6106608178842764,
+      "trades": 7,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.009786882983060626,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 7,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2231,
+      "signal_shorts": 1163
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 1.5,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 18.752582455329957,
+      "pf": 1.7971455423248643,
+      "expectancy": 1.7047802232118143,
+      "trades": 11,
+      "win_rate": 0.7272727272727273,
+      "max_dd": 0.010302433417340233,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 11,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 2664,
+      "signal_shorts": 1463
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 1.5,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.85 < 1.25) | Negative Expectancy ($-0.38)",
+      "net_pnl": -2.2914863631551725,
+      "pf": 0.8534390760548826,
+      "expectancy": -0.3819143938591954,
+      "trades": 6,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.011733716019113858,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1139,
+      "signal_shorts": 559
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 1.5,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (1.14 < 1.25)",
+      "net_pnl": 2.711016285852793,
+      "pf": 1.137538579142816,
+      "expectancy": 0.3872880408361133,
+      "trades": 7,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.011675692768560033,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 7,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2296,
+      "signal_shorts": 1199
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 1.5,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 9.800305425381794,
+      "pf": 1.3017619449268314,
+      "expectancy": 0.8909368568528904,
+      "trades": 11,
+      "win_rate": 0.7272727272727273,
+      "max_dd": 0.012512437504883015,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 11,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 2741,
+      "signal_shorts": 1503
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 1.75,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.95 < 1.25) | Negative Expectancy ($-0.12)",
+      "net_pnl": -0.7278769238180303,
+      "pf": 0.9482727246423179,
+      "expectancy": -0.12131282063633837,
+      "trades": 6,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.009810161831317036,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1105,
+      "signal_shorts": 333
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 1.75,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (1.24 < 1.25)",
+      "net_pnl": 4.274625725189935,
+      "pf": 1.235551061501344,
+      "expectancy": 0.6106608178842764,
+      "trades": 7,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.009786882983060626,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 7,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2231,
+      "signal_shorts": 769
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 1.75,
+          "max_spread_z": 0.75,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 18.752582455329957,
+      "pf": 1.7971455423248643,
+      "expectancy": 1.7047802232118143,
+      "trades": 11,
+      "win_rate": 0.7272727272727273,
+      "max_dd": 0.010302433417340233,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 11,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 2664,
+      "signal_shorts": 955
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 1.75,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.15,
+          "max_abs_ma50_slope": 0.08
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (0.85 < 1.25) | Negative Expectancy ($-0.38)",
+      "net_pnl": -2.2914863631551725,
+      "pf": 0.8534390760548826,
+      "expectancy": -0.3819143938591954,
+      "trades": 6,
+      "win_rate": 0.6666666666666666,
+      "max_dd": 0.011733716019113858,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 6,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 1139,
+      "signal_shorts": 344
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 1.75,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.25,
+          "max_abs_ma50_slope": 0.15
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Low PF (1.14 < 1.25)",
+      "net_pnl": 2.711016285852793,
+      "pf": 1.137538579142816,
+      "expectancy": 0.3872880408361133,
+      "trades": 7,
+      "win_rate": 0.7142857142857143,
+      "max_dd": 0.011675692768560033,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 7,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "exploratory",
+      "signal_longs": 2296,
+      "signal_shorts": 794
+    },
+    {
+      "config": {
+        "rule_family": "mean_reversion",
+        "params": {
+          "long_threshold": -1.0,
+          "short_threshold": 1.75,
+          "max_spread_z": 1.25,
+          "max_time_delta_z": 2.5,
+          "max_abs_ma20_slope": 0.5,
+          "max_abs_ma50_slope": 0.3
+        }
+      },
+      "status": "REJECTED",
+      "reject_reason": "Direction skewed (Max 100.0% > 85%)",
+      "net_pnl": 9.800305425381794,
+      "pf": 1.3017619449268314,
+      "expectancy": 0.8909368568528904,
+      "trades": 11,
+      "win_rate": 0.7272727272727273,
+      "max_dd": 0.012512437504883015,
+      "long_share": 1.0,
+      "short_share": 0.0,
+      "long_trades": 11,
+      "short_trades": 0,
+      "roll_share": 0.0,
+      "rollover_hours": [
+        21,
+        22,
+        23,
+        0
+      ],
+      "accounting_valid": true,
+      "confidence_band": "stable",
+      "signal_longs": 2741,
+      "signal_shorts": 983
+    }
+  ]
+}

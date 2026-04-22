@@ -1,0 +1,5022 @@
+{
+  "symbol": "EURUSD",
+  "manifest_path": "C:\\dev\\trading\\models\\rc1\\eurusd_5k_v1_mr_rc1\\manifest.json",
+  "manifest_hash": "a1ceb43cbaafe196e991742ac33c7d9d593dd496371d2583b423c27463e2d2d1",
+  "bars_path": "C:\\dev\\trading\\models\\rc1\\eurusd_5k_v1_mr_rc1\\mt5_historical_replay_report.bars.jsonl",
+  "variants": [
+    {
+      "name": "rc1_baseline",
+      "rule_family": "mean_reversion",
+      "rule_params": {
+        "threshold": 1.5,
+        "sl_value": 1.5,
+        "tp_value": 3.0,
+        "max_spread_z": 0.5,
+        "max_time_delta_z": 2.0,
+        "max_abs_ma20_slope": 0.15,
+        "max_abs_ma50_slope": 0.08
+      },
+      "holdout_metrics": {
+        "final_equity": 1039.4698056607713,
+        "total_return": 0.039469805660771275,
+        "timed_sharpe": 0.02534307734405927,
+        "max_drawdown": 0.07405917799115566,
+        "steps": 2016,
+        "profit_factor": 1.1715556524562543,
+        "expectancy": 0.35881641509792067,
+        "expectancy_usd": 0.35881641509792067,
+        "expectancy_pips": 2.8916884599180808,
+        "win_rate": 0.6090909090909091,
+        "trade_count": 110.0,
+        "gross_pnl_usd": 131.73120465095735,
+        "net_pnl_usd": 39.46980566077127,
+        "gross_profit_usd": 269.5397864259684,
+        "gross_loss_usd": 230.0699807651971,
+        "total_transaction_cost_usd": 92.2613989901845,
+        "total_commission_usd": 56.84000000000008,
+        "total_spread_slippage_cost_usd": 35.42139899018437,
+        "total_spread_cost_usd": 15.12139899020806,
+        "total_slippage_cost_usd": 20.29999999997633,
+        "forced_close_count": 0,
+        "avg_holding_bars": 2.2636363636363637,
+        "avg_win_usd": 4.022981886954752,
+        "avg_loss_usd": -5.350464668958072,
+        "win_loss_asymmetry": 0.7518939262032678,
+        "metrics_reconciliation": {
+          "passed": true,
+          "mismatch_fields": [],
+          "checks": {
+            "trade_count_vs_trade_log": {
+              "passed": true,
+              "left": 110,
+              "right": 110
+            },
+            "trade_count_vs_diagnostics": {
+              "passed": true,
+              "left": 110,
+              "right": 110
+            },
+            "forced_close_count_vs_diagnostics": {
+              "passed": true,
+              "left": 0,
+              "right": 0
+            },
+            "executed_order_count_vs_execution_log": {
+              "passed": true,
+              "left": 220,
+              "right": 220
+            },
+            "gross_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 131.73120465095735,
+              "right": 131.73120465095735,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "net_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 39.46980566077127,
+              "right": 39.46980566077292,
+              "abs_diff": 1.6484591469634324e-12,
+              "tolerance": 1e-06
+            },
+            "total_transaction_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 92.2613989901845,
+              "right": 92.2613989901845,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_commission_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 56.84000000000008,
+              "right": 56.84000000000008,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 35.42139899018437,
+              "right": 35.42139899018437,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 15.12139899020806,
+              "right": 15.12139899020806,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 20.29999999997633,
+              "right": 20.29999999997633,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            }
+          }
+        },
+        "metric_reconciliation": {
+          "passed": true,
+          "mismatch_fields": [],
+          "checks": {
+            "trade_count_vs_trade_log": {
+              "passed": true,
+              "left": 110,
+              "right": 110
+            },
+            "trade_count_vs_diagnostics": {
+              "passed": true,
+              "left": 110,
+              "right": 110
+            },
+            "forced_close_count_vs_diagnostics": {
+              "passed": true,
+              "left": 0,
+              "right": 0
+            },
+            "executed_order_count_vs_execution_log": {
+              "passed": true,
+              "left": 220,
+              "right": 220
+            },
+            "gross_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 131.73120465095735,
+              "right": 131.73120465095735,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "net_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 39.46980566077127,
+              "right": 39.46980566077292,
+              "abs_diff": 1.6484591469634324e-12,
+              "tolerance": 1e-06
+            },
+            "total_transaction_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 92.2613989901845,
+              "right": 92.2613989901845,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_commission_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 56.84000000000008,
+              "right": 56.84000000000008,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 35.42139899018437,
+              "right": 35.42139899018437,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 15.12139899020806,
+              "right": 15.12139899020806,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 20.29999999997633,
+              "right": 20.29999999997633,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            }
+          }
+        },
+        "executed_order_count": 220,
+        "validation_status": {
+          "passed": true,
+          "reason": "Accounting reconciliation passed.",
+          "mismatches": []
+        },
+        "accounting_gap_detected": false
+      },
+      "recent_replay_metrics": {
+        "bars_processed": 377,
+        "would_open_count": 15,
+        "would_close_count": 14,
+        "long_open_count": 2,
+        "short_open_count": 13,
+        "signal_count": 25,
+        "live_trades_per_bar": 0.03978779840848806,
+        "long_short_ratio": 0.15384615384615385,
+        "guard_failure_counts": {
+          "spread": 57,
+          "time_delta": 4,
+          "ma20": 122,
+          "ma50": 170
+        },
+        "signal_breakdown": {
+          "raw_long": 38,
+          "raw_short": 71,
+          "guarded_long": 6,
+          "guarded_short": 19
+        },
+        "opens_by_session": {
+          "London/NY": 6,
+          "NY": 6,
+          "London": 3
+        },
+        "signals_by_session": {
+          "London/NY": 10,
+          "NY": 7,
+          "London": 5,
+          "Asia": 2,
+          "Rollover": 1
+        },
+        "reason_counts": {
+          "session": 3,
+          "spread": 0,
+          "no_signal": 338,
+          "authorized": 22
+        },
+        "examples": {
+          "authorized_opens": [
+            {
+              "bar_ts": "2026-03-31T14:06:25.664000+00:00",
+              "session": "London/NY",
+              "signal": -1,
+              "price_z": 1.62424,
+              "spread_z": -0.527755,
+              "ma20_slope": -0.010289,
+              "ma50_slope": -0.051353
+            },
+            {
+              "bar_ts": "2026-04-06T10:00:26.708000+00:00",
+              "session": "London",
+              "signal": -1,
+              "price_z": 2.679507,
+              "spread_z": -0.253047,
+              "ma20_slope": 0.070038,
+              "ma50_slope": -0.070281
+            },
+            {
+              "bar_ts": "2026-04-06T17:06:53.868000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.504308,
+              "spread_z": -0.280153,
+              "ma20_slope": 0.062048,
+              "ma50_slope": -0.036834
+            },
+            {
+              "bar_ts": "2026-04-07T11:09:12.412000+00:00",
+              "session": "London",
+              "signal": -1,
+              "price_z": 1.916308,
+              "spread_z": -0.53884,
+              "ma20_slope": 0.022641,
+              "ma50_slope": 0.057225
+            },
+            {
+              "bar_ts": "2026-04-07T17:01:46.939000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.777052,
+              "spread_z": 0.44151,
+              "ma20_slope": 0.111606,
+              "ma50_slope": 0.04217
+            },
+            {
+              "bar_ts": "2026-04-07T18:28:46.560000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.569439,
+              "spread_z": 0.458447,
+              "ma20_slope": 0.113359,
+              "ma50_slope": 0.054527
+            },
+            {
+              "bar_ts": "2026-04-10T13:01:19.072000+00:00",
+              "session": "London/NY",
+              "signal": -1,
+              "price_z": 1.766391,
+              "spread_z": 0.425055,
+              "ma20_slope": 0.147435,
+              "ma50_slope": 0.033564
+            },
+            {
+              "bar_ts": "2026-04-10T15:59:15.311000+00:00",
+              "session": "London/NY",
+              "signal": -1,
+              "price_z": 1.673076,
+              "spread_z": 0.361089,
+              "ma20_slope": 0.102438,
+              "ma50_slope": 0.051081
+            },
+            {
+              "bar_ts": "2026-04-10T17:53:32.905000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.586806,
+              "spread_z": -0.114984,
+              "ma20_slope": 0.128069,
+              "ma50_slope": 0.060271
+            },
+            {
+              "bar_ts": "2026-04-13T19:35:55.007000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.957622,
+              "spread_z": -0.392403,
+              "ma20_slope": -0.000505,
+              "ma50_slope": 0.071046
+            }
+          ],
+          "blocked_signals": [
+            {
+              "bar_ts": "2026-03-27T22:16:10.178000+00:00",
+              "session": "Rollover",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -2.300879,
+              "spread_z": 4.303135,
+              "ma20_slope": -0.128803,
+              "ma50_slope": -0.100155
+            },
+            {
+              "bar_ts": "2026-03-30T01:07:33.862000+00:00",
+              "session": "Asia",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": true,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -2.529804,
+              "spread_z": 0.55444,
+              "ma20_slope": -0.176459,
+              "ma50_slope": -0.120622
+            },
+            {
+              "bar_ts": "2026-03-30T10:23:59.591000+00:00",
+              "session": "London",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -1.70652,
+              "spread_z": 0.009364,
+              "ma20_slope": -0.058446,
+              "ma50_slope": -0.099913
+            },
+            {
+              "bar_ts": "2026-03-30T11:24:30.138000+00:00",
+              "session": "London",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -1.521331,
+              "spread_z": 0.484668,
+              "ma20_slope": -0.103279,
+              "ma50_slope": -0.086527
+            },
+            {
+              "bar_ts": "2026-03-30T14:31:12.417000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -1.998137,
+              "spread_z": 0.333686,
+              "ma20_slope": -0.177373,
+              "ma50_slope": -0.115484
+            },
+            {
+              "bar_ts": "2026-03-30T15:17:11.894000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -1.527905,
+              "spread_z": 0.591345,
+              "ma20_slope": -0.176603,
+              "ma50_slope": -0.093127
+            },
+            {
+              "bar_ts": "2026-03-30T15:55:14.406000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": false
+              },
+              "price_z": -1.856855,
+              "spread_z": -0.29056,
+              "ma20_slope": -0.187609,
+              "ma50_slope": -0.066721
+            },
+            {
+              "bar_ts": "2026-03-30T16:39:17.896000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -2.292242,
+              "spread_z": -0.427086,
+              "ma20_slope": -0.206697,
+              "ma50_slope": -0.092946
+            },
+            {
+              "bar_ts": "2026-03-30T17:12:48.362000+00:00",
+              "session": "NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -1.81937,
+              "spread_z": -0.531842,
+              "ma20_slope": -0.180587,
+              "ma50_slope": -0.106447
+            },
+            {
+              "bar_ts": "2026-03-30T17:50:05.892000+00:00",
+              "session": "NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -2.132447,
+              "spread_z": -0.230521,
+              "ma20_slope": -0.190767,
+              "ma50_slope": -0.119701
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "asym_short_1.80",
+      "rule_family": "mean_reversion",
+      "rule_params": {
+        "threshold": 1.5,
+        "sl_value": 1.5,
+        "tp_value": 3.0,
+        "max_spread_z": 0.5,
+        "max_time_delta_z": 2.0,
+        "max_abs_ma20_slope": 0.15,
+        "max_abs_ma50_slope": 0.08,
+        "long_threshold": -1.5,
+        "short_threshold": 1.8
+      },
+      "holdout_metrics": {
+        "final_equity": 949.2731757550387,
+        "total_return": -0.05072682424496133,
+        "timed_sharpe": -0.019080462121637245,
+        "max_drawdown": 0.07163608542854442,
+        "steps": 2016,
+        "profit_factor": 0.6520661541280564,
+        "expectancy": -1.0568088384366945,
+        "expectancy_usd": -1.0568088384366945,
+        "expectancy_pips": -0.8492960727475571,
+        "win_rate": 0.4791666666666667,
+        "trade_count": 48.0,
+        "gross_pnl_usd": -6.673519241774173,
+        "net_pnl_usd": -50.726824244961335,
+        "gross_profit_usd": 95.06762733486926,
+        "gross_loss_usd": 145.7944515798306,
+        "total_transaction_cost_usd": 44.05330500318686,
+        "total_commission_usd": 26.73999999999998,
+        "total_spread_slippage_cost_usd": 17.31330500318684,
+        "total_spread_cost_usd": 7.763305003197975,
+        "total_slippage_cost_usd": 9.549999999988867,
+        "forced_close_count": 1,
+        "avg_holding_bars": 2.1666666666666665,
+        "avg_win_usd": 4.133375101516054,
+        "avg_loss_usd": -5.831778063193224,
+        "win_loss_asymmetry": 0.7087675588348438,
+        "metrics_reconciliation": {
+          "passed": true,
+          "mismatch_fields": [],
+          "checks": {
+            "trade_count_vs_trade_log": {
+              "passed": true,
+              "left": 48,
+              "right": 48
+            },
+            "trade_count_vs_diagnostics": {
+              "passed": true,
+              "left": 48,
+              "right": 48
+            },
+            "forced_close_count_vs_diagnostics": {
+              "passed": true,
+              "left": 1,
+              "right": 1
+            },
+            "executed_order_count_vs_execution_log": {
+              "passed": true,
+              "left": 96,
+              "right": 96
+            },
+            "gross_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -6.673519241774173,
+              "right": -6.673519241774173,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "net_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -50.726824244961335,
+              "right": -50.72682424496102,
+              "abs_diff": 3.126388037344441e-13,
+              "tolerance": 1e-06
+            },
+            "total_transaction_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 44.05330500318686,
+              "right": 44.05330500318686,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_commission_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 26.73999999999998,
+              "right": 26.73999999999998,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 17.31330500318684,
+              "right": 17.31330500318684,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 7.763305003197975,
+              "right": 7.763305003197975,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 9.549999999988867,
+              "right": 9.549999999988867,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            }
+          }
+        },
+        "metric_reconciliation": {
+          "passed": true,
+          "mismatch_fields": [],
+          "checks": {
+            "trade_count_vs_trade_log": {
+              "passed": true,
+              "left": 48,
+              "right": 48
+            },
+            "trade_count_vs_diagnostics": {
+              "passed": true,
+              "left": 48,
+              "right": 48
+            },
+            "forced_close_count_vs_diagnostics": {
+              "passed": true,
+              "left": 1,
+              "right": 1
+            },
+            "executed_order_count_vs_execution_log": {
+              "passed": true,
+              "left": 96,
+              "right": 96
+            },
+            "gross_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -6.673519241774173,
+              "right": -6.673519241774173,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "net_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -50.726824244961335,
+              "right": -50.72682424496102,
+              "abs_diff": 3.126388037344441e-13,
+              "tolerance": 1e-06
+            },
+            "total_transaction_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 44.05330500318686,
+              "right": 44.05330500318686,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_commission_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 26.73999999999998,
+              "right": 26.73999999999998,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 17.31330500318684,
+              "right": 17.31330500318684,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 7.763305003197975,
+              "right": 7.763305003197975,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 9.549999999988867,
+              "right": 9.549999999988867,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            }
+          }
+        },
+        "executed_order_count": 96,
+        "validation_status": {
+          "passed": true,
+          "reason": "Accounting reconciliation passed.",
+          "mismatches": []
+        },
+        "accounting_gap_detected": false
+      },
+      "recent_replay_metrics": {
+        "bars_processed": 377,
+        "would_open_count": 8,
+        "would_close_count": 7,
+        "long_open_count": 2,
+        "short_open_count": 6,
+        "signal_count": 15,
+        "live_trades_per_bar": 0.021220159151193633,
+        "long_short_ratio": 0.3333333333333333,
+        "guard_failure_counts": {
+          "spread": 57,
+          "time_delta": 4,
+          "ma20": 122,
+          "ma50": 170
+        },
+        "signal_breakdown": {
+          "raw_long": 38,
+          "raw_short": 40,
+          "guarded_long": 6,
+          "guarded_short": 9
+        },
+        "opens_by_session": {
+          "London/NY": 3,
+          "London": 3,
+          "NY": 2
+        },
+        "signals_by_session": {
+          "London/NY": 6,
+          "London": 4,
+          "Asia": 2,
+          "NY": 2,
+          "Rollover": 1
+        },
+        "reason_counts": {
+          "session": 3,
+          "spread": 0,
+          "no_signal": 355,
+          "authorized": 12
+        },
+        "examples": {
+          "authorized_opens": [
+            {
+              "bar_ts": "2026-03-31T14:41:12.680000+00:00",
+              "session": "London/NY",
+              "signal": -1,
+              "price_z": 2.912444,
+              "spread_z": 0.313201,
+              "ma20_slope": 0.080059,
+              "ma50_slope": -0.027332
+            },
+            {
+              "bar_ts": "2026-04-06T10:00:26.708000+00:00",
+              "session": "London",
+              "signal": -1,
+              "price_z": 2.679507,
+              "spread_z": -0.253047,
+              "ma20_slope": 0.070038,
+              "ma50_slope": -0.070281
+            },
+            {
+              "bar_ts": "2026-04-07T11:09:12.412000+00:00",
+              "session": "London",
+              "signal": -1,
+              "price_z": 1.916308,
+              "spread_z": -0.53884,
+              "ma20_slope": 0.022641,
+              "ma50_slope": 0.057225
+            },
+            {
+              "bar_ts": "2026-04-13T19:35:55.007000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.957622,
+              "spread_z": -0.392403,
+              "ma20_slope": -0.000505,
+              "ma50_slope": 0.071046
+            },
+            {
+              "bar_ts": "2026-04-15T12:36:00.775000+00:00",
+              "session": "London/NY",
+              "signal": 1,
+              "price_z": -2.342669,
+              "spread_z": -0.203778,
+              "ma20_slope": -0.034734,
+              "ma50_slope": 0.068288
+            },
+            {
+              "bar_ts": "2026-04-17T14:14:03.996000+00:00",
+              "session": "London/NY",
+              "signal": -1,
+              "price_z": 2.256537,
+              "spread_z": 0.26582,
+              "ma20_slope": 0.094482,
+              "ma50_slope": 0.003581
+            },
+            {
+              "bar_ts": "2026-04-20T18:24:34.092000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.812929,
+              "spread_z": 0.447313,
+              "ma20_slope": 0.136762,
+              "ma50_slope": 0.010792
+            },
+            {
+              "bar_ts": "2026-04-21T10:28:33.135000+00:00",
+              "session": "London",
+              "signal": 1,
+              "price_z": -2.167007,
+              "spread_z": 0.129817,
+              "ma20_slope": -0.034409,
+              "ma50_slope": -0.058673
+            }
+          ],
+          "blocked_signals": [
+            {
+              "bar_ts": "2026-03-27T22:16:10.178000+00:00",
+              "session": "Rollover",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -2.300879,
+              "spread_z": 4.303135,
+              "ma20_slope": -0.128803,
+              "ma50_slope": -0.100155
+            },
+            {
+              "bar_ts": "2026-03-30T01:07:33.862000+00:00",
+              "session": "Asia",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": true,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -2.529804,
+              "spread_z": 0.55444,
+              "ma20_slope": -0.176459,
+              "ma50_slope": -0.120622
+            },
+            {
+              "bar_ts": "2026-03-30T10:23:59.591000+00:00",
+              "session": "London",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -1.70652,
+              "spread_z": 0.009364,
+              "ma20_slope": -0.058446,
+              "ma50_slope": -0.099913
+            },
+            {
+              "bar_ts": "2026-03-30T11:24:30.138000+00:00",
+              "session": "London",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -1.521331,
+              "spread_z": 0.484668,
+              "ma20_slope": -0.103279,
+              "ma50_slope": -0.086527
+            },
+            {
+              "bar_ts": "2026-03-30T14:31:12.417000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -1.998137,
+              "spread_z": 0.333686,
+              "ma20_slope": -0.177373,
+              "ma50_slope": -0.115484
+            },
+            {
+              "bar_ts": "2026-03-30T15:17:11.894000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -1.527905,
+              "spread_z": 0.591345,
+              "ma20_slope": -0.176603,
+              "ma50_slope": -0.093127
+            },
+            {
+              "bar_ts": "2026-03-30T15:55:14.406000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": false
+              },
+              "price_z": -1.856855,
+              "spread_z": -0.29056,
+              "ma20_slope": -0.187609,
+              "ma50_slope": -0.066721
+            },
+            {
+              "bar_ts": "2026-03-30T16:39:17.896000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -2.292242,
+              "spread_z": -0.427086,
+              "ma20_slope": -0.206697,
+              "ma50_slope": -0.092946
+            },
+            {
+              "bar_ts": "2026-03-30T17:12:48.362000+00:00",
+              "session": "NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -1.81937,
+              "spread_z": -0.531842,
+              "ma20_slope": -0.180587,
+              "ma50_slope": -0.106447
+            },
+            {
+              "bar_ts": "2026-03-30T17:50:05.892000+00:00",
+              "session": "NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -2.132447,
+              "spread_z": -0.230521,
+              "ma20_slope": -0.190767,
+              "ma50_slope": -0.119701
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "asym_long_-1.20",
+      "rule_family": "mean_reversion",
+      "rule_params": {
+        "threshold": 1.5,
+        "sl_value": 1.5,
+        "tp_value": 3.0,
+        "max_spread_z": 0.5,
+        "max_time_delta_z": 2.0,
+        "max_abs_ma20_slope": 0.15,
+        "max_abs_ma50_slope": 0.08,
+        "long_threshold": -1.2,
+        "short_threshold": 1.5
+      },
+      "holdout_metrics": {
+        "final_equity": 1013.2366532098488,
+        "total_return": 0.013236653209848782,
+        "timed_sharpe": 0.005358615264919907,
+        "max_drawdown": 0.07423278708805905,
+        "steps": 2016,
+        "profit_factor": 1.043043801697285,
+        "expectancy": 0.0995237083447277,
+        "expectancy_usd": 0.0995237083447277,
+        "expectancy_pips": 1.668626929951077,
+        "win_rate": 0.5864661654135338,
+        "trade_count": 133.0,
+        "gross_pnl_usd": 123.60156319220607,
+        "net_pnl_usd": 13.236653209848782,
+        "gross_profit_usd": 320.7525483656367,
+        "gross_loss_usd": 307.5158951557879,
+        "total_transaction_cost_usd": 110.3649099823552,
+        "total_commission_usd": 68.18000000000012,
+        "total_spread_slippage_cost_usd": 42.18490998235502,
+        "total_spread_cost_usd": 17.83490998238343,
+        "total_slippage_cost_usd": 24.34999999997162,
+        "forced_close_count": 0,
+        "avg_holding_bars": 2.3157894736842106,
+        "avg_win_usd": 4.112212158533803,
+        "avg_loss_usd": -5.591198093741599,
+        "win_loss_asymmetry": 0.7354796037609059,
+        "metrics_reconciliation": {
+          "passed": true,
+          "mismatch_fields": [],
+          "checks": {
+            "trade_count_vs_trade_log": {
+              "passed": true,
+              "left": 133,
+              "right": 133
+            },
+            "trade_count_vs_diagnostics": {
+              "passed": true,
+              "left": 133,
+              "right": 133
+            },
+            "forced_close_count_vs_diagnostics": {
+              "passed": true,
+              "left": 0,
+              "right": 0
+            },
+            "executed_order_count_vs_execution_log": {
+              "passed": true,
+              "left": 266,
+              "right": 266
+            },
+            "gross_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 123.60156319220607,
+              "right": 123.60156319220607,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "net_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 13.236653209848782,
+              "right": 13.236653209850994,
+              "abs_diff": 2.211564265053312e-12,
+              "tolerance": 1e-06
+            },
+            "total_transaction_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 110.3649099823552,
+              "right": 110.3649099823552,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_commission_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 68.18000000000012,
+              "right": 68.18000000000012,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 42.18490998235502,
+              "right": 42.18490998235502,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 17.83490998238343,
+              "right": 17.83490998238343,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 24.34999999997162,
+              "right": 24.34999999997162,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            }
+          }
+        },
+        "metric_reconciliation": {
+          "passed": true,
+          "mismatch_fields": [],
+          "checks": {
+            "trade_count_vs_trade_log": {
+              "passed": true,
+              "left": 133,
+              "right": 133
+            },
+            "trade_count_vs_diagnostics": {
+              "passed": true,
+              "left": 133,
+              "right": 133
+            },
+            "forced_close_count_vs_diagnostics": {
+              "passed": true,
+              "left": 0,
+              "right": 0
+            },
+            "executed_order_count_vs_execution_log": {
+              "passed": true,
+              "left": 266,
+              "right": 266
+            },
+            "gross_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 123.60156319220607,
+              "right": 123.60156319220607,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "net_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 13.236653209848782,
+              "right": 13.236653209850994,
+              "abs_diff": 2.211564265053312e-12,
+              "tolerance": 1e-06
+            },
+            "total_transaction_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 110.3649099823552,
+              "right": 110.3649099823552,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_commission_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 68.18000000000012,
+              "right": 68.18000000000012,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 42.18490998235502,
+              "right": 42.18490998235502,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 17.83490998238343,
+              "right": 17.83490998238343,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 24.34999999997162,
+              "right": 24.34999999997162,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            }
+          }
+        },
+        "executed_order_count": 266,
+        "validation_status": {
+          "passed": true,
+          "reason": "Accounting reconciliation passed.",
+          "mismatches": []
+        },
+        "accounting_gap_detected": false
+      },
+      "recent_replay_metrics": {
+        "bars_processed": 377,
+        "would_open_count": 19,
+        "would_close_count": 18,
+        "long_open_count": 6,
+        "short_open_count": 13,
+        "signal_count": 33,
+        "live_trades_per_bar": 0.050397877984084884,
+        "long_short_ratio": 0.46153846153846156,
+        "guard_failure_counts": {
+          "spread": 57,
+          "time_delta": 4,
+          "ma20": 122,
+          "ma50": 170
+        },
+        "signal_breakdown": {
+          "raw_long": 62,
+          "raw_short": 71,
+          "guarded_long": 14,
+          "guarded_short": 19
+        },
+        "opens_by_session": {
+          "London/NY": 7,
+          "NY": 7,
+          "London": 5
+        },
+        "signals_by_session": {
+          "London/NY": 12,
+          "NY": 9,
+          "London": 7,
+          "Asia": 4,
+          "Rollover": 1
+        },
+        "reason_counts": {
+          "session": 5,
+          "spread": 0,
+          "no_signal": 326,
+          "authorized": 28
+        },
+        "examples": {
+          "authorized_opens": [
+            {
+              "bar_ts": "2026-03-31T14:06:25.664000+00:00",
+              "session": "London/NY",
+              "signal": -1,
+              "price_z": 1.62424,
+              "spread_z": -0.527755,
+              "ma20_slope": -0.010289,
+              "ma50_slope": -0.051353
+            },
+            {
+              "bar_ts": "2026-04-06T10:00:26.708000+00:00",
+              "session": "London",
+              "signal": -1,
+              "price_z": 2.679507,
+              "spread_z": -0.253047,
+              "ma20_slope": 0.070038,
+              "ma50_slope": -0.070281
+            },
+            {
+              "bar_ts": "2026-04-06T17:06:53.868000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.504308,
+              "spread_z": -0.280153,
+              "ma20_slope": 0.062048,
+              "ma50_slope": -0.036834
+            },
+            {
+              "bar_ts": "2026-04-07T07:08:00.483000+00:00",
+              "session": "London",
+              "signal": 1,
+              "price_z": -1.204162,
+              "spread_z": -0.165477,
+              "ma20_slope": 0.035418,
+              "ma50_slope": 0.010904
+            },
+            {
+              "bar_ts": "2026-04-07T11:09:12.412000+00:00",
+              "session": "London",
+              "signal": -1,
+              "price_z": 1.916308,
+              "spread_z": -0.53884,
+              "ma20_slope": 0.022641,
+              "ma50_slope": 0.057225
+            },
+            {
+              "bar_ts": "2026-04-07T17:01:46.939000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.777052,
+              "spread_z": 0.44151,
+              "ma20_slope": 0.111606,
+              "ma50_slope": 0.04217
+            },
+            {
+              "bar_ts": "2026-04-07T18:28:46.560000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.569439,
+              "spread_z": 0.458447,
+              "ma20_slope": 0.113359,
+              "ma50_slope": 0.054527
+            },
+            {
+              "bar_ts": "2026-04-10T13:01:19.072000+00:00",
+              "session": "London/NY",
+              "signal": -1,
+              "price_z": 1.766391,
+              "spread_z": 0.425055,
+              "ma20_slope": 0.147435,
+              "ma50_slope": 0.033564
+            },
+            {
+              "bar_ts": "2026-04-10T15:59:15.311000+00:00",
+              "session": "London/NY",
+              "signal": -1,
+              "price_z": 1.673076,
+              "spread_z": 0.361089,
+              "ma20_slope": 0.102438,
+              "ma50_slope": 0.051081
+            },
+            {
+              "bar_ts": "2026-04-10T17:53:32.905000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.586806,
+              "spread_z": -0.114984,
+              "ma20_slope": 0.128069,
+              "ma50_slope": 0.060271
+            }
+          ],
+          "blocked_signals": [
+            {
+              "bar_ts": "2026-03-27T19:09:23.694000+00:00",
+              "session": "NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -1.36817,
+              "spread_z": 0.535125,
+              "ma20_slope": -0.073352,
+              "ma50_slope": -0.074757
+            },
+            {
+              "bar_ts": "2026-03-27T22:16:10.178000+00:00",
+              "session": "Rollover",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -2.300879,
+              "spread_z": 4.303135,
+              "ma20_slope": -0.128803,
+              "ma50_slope": -0.100155
+            },
+            {
+              "bar_ts": "2026-03-30T01:07:33.862000+00:00",
+              "session": "Asia",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": true,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -2.529804,
+              "spread_z": 0.55444,
+              "ma20_slope": -0.176459,
+              "ma50_slope": -0.120622
+            },
+            {
+              "bar_ts": "2026-03-30T10:23:59.591000+00:00",
+              "session": "London",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -1.70652,
+              "spread_z": 0.009364,
+              "ma20_slope": -0.058446,
+              "ma50_slope": -0.099913
+            },
+            {
+              "bar_ts": "2026-03-30T11:24:30.138000+00:00",
+              "session": "London",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -1.521331,
+              "spread_z": 0.484668,
+              "ma20_slope": -0.103279,
+              "ma50_slope": -0.086527
+            },
+            {
+              "bar_ts": "2026-03-30T12:22:41.451000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -1.405568,
+              "spread_z": 0.571077,
+              "ma20_slope": -0.118761,
+              "ma50_slope": -0.092182
+            },
+            {
+              "bar_ts": "2026-03-30T14:31:12.417000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -1.998137,
+              "spread_z": 0.333686,
+              "ma20_slope": -0.177373,
+              "ma50_slope": -0.115484
+            },
+            {
+              "bar_ts": "2026-03-30T15:17:11.894000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -1.527905,
+              "spread_z": 0.591345,
+              "ma20_slope": -0.176603,
+              "ma50_slope": -0.093127
+            },
+            {
+              "bar_ts": "2026-03-30T15:55:14.406000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": false
+              },
+              "price_z": -1.856855,
+              "spread_z": -0.29056,
+              "ma20_slope": -0.187609,
+              "ma50_slope": -0.066721
+            },
+            {
+              "bar_ts": "2026-03-30T16:39:17.896000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -2.292242,
+              "spread_z": -0.427086,
+              "ma20_slope": -0.206697,
+              "ma50_slope": -0.092946
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "asym_long_-1.20_short_1.80",
+      "rule_family": "mean_reversion",
+      "rule_params": {
+        "threshold": 1.5,
+        "sl_value": 1.5,
+        "tp_value": 3.0,
+        "max_spread_z": 0.5,
+        "max_time_delta_z": 2.0,
+        "max_abs_ma20_slope": 0.15,
+        "max_abs_ma50_slope": 0.08,
+        "long_threshold": -1.2,
+        "short_threshold": 1.8
+      },
+      "holdout_metrics": {
+        "final_equity": 947.7136312831993,
+        "total_return": -0.05228636871680067,
+        "timed_sharpe": -0.02294967157811145,
+        "max_drawdown": 0.07249325481543932,
+        "steps": 2016,
+        "profit_factor": 0.7353883120399947,
+        "expectancy": -0.7689171870117745,
+        "expectancy_usd": -0.7689171870117745,
+        "expectancy_pips": -0.7866859108696114,
+        "win_rate": 0.5147058823529411,
+        "trade_count": 68.0,
+        "gross_pnl_usd": 6.9730382906700825,
+        "net_pnl_usd": -52.286368716800666,
+        "gross_profit_usd": 145.31022695853278,
+        "gross_loss_usd": 197.59659567533345,
+        "total_transaction_cost_usd": 59.259407007469996,
+        "total_commission_usd": 36.25999999999999,
+        "total_spread_slippage_cost_usd": 22.99940700746994,
+        "total_spread_cost_usd": 10.049407007485039,
+        "total_slippage_cost_usd": 12.9499999999849,
+        "forced_close_count": 1,
+        "avg_holding_bars": 2.176470588235294,
+        "avg_win_usd": 4.151720770243794,
+        "avg_loss_usd": -5.987775626525256,
+        "win_loss_asymmetry": 0.6933661227805665,
+        "metrics_reconciliation": {
+          "passed": true,
+          "mismatch_fields": [],
+          "checks": {
+            "trade_count_vs_trade_log": {
+              "passed": true,
+              "left": 68,
+              "right": 68
+            },
+            "trade_count_vs_diagnostics": {
+              "passed": true,
+              "left": 68,
+              "right": 68
+            },
+            "forced_close_count_vs_diagnostics": {
+              "passed": true,
+              "left": 1,
+              "right": 1
+            },
+            "executed_order_count_vs_execution_log": {
+              "passed": true,
+              "left": 136,
+              "right": 136
+            },
+            "gross_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 6.9730382906700825,
+              "right": 6.9730382906700825,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "net_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -52.286368716800666,
+              "right": -52.28636871679989,
+              "abs_diff": 7.744915819785092e-13,
+              "tolerance": 1e-06
+            },
+            "total_transaction_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 59.259407007469996,
+              "right": 59.259407007469996,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_commission_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 36.25999999999999,
+              "right": 36.25999999999999,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 22.99940700746994,
+              "right": 22.99940700746994,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 10.049407007485039,
+              "right": 10.049407007485039,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 12.9499999999849,
+              "right": 12.9499999999849,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            }
+          }
+        },
+        "metric_reconciliation": {
+          "passed": true,
+          "mismatch_fields": [],
+          "checks": {
+            "trade_count_vs_trade_log": {
+              "passed": true,
+              "left": 68,
+              "right": 68
+            },
+            "trade_count_vs_diagnostics": {
+              "passed": true,
+              "left": 68,
+              "right": 68
+            },
+            "forced_close_count_vs_diagnostics": {
+              "passed": true,
+              "left": 1,
+              "right": 1
+            },
+            "executed_order_count_vs_execution_log": {
+              "passed": true,
+              "left": 136,
+              "right": 136
+            },
+            "gross_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 6.9730382906700825,
+              "right": 6.9730382906700825,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "net_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -52.286368716800666,
+              "right": -52.28636871679989,
+              "abs_diff": 7.744915819785092e-13,
+              "tolerance": 1e-06
+            },
+            "total_transaction_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 59.259407007469996,
+              "right": 59.259407007469996,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_commission_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 36.25999999999999,
+              "right": 36.25999999999999,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 22.99940700746994,
+              "right": 22.99940700746994,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 10.049407007485039,
+              "right": 10.049407007485039,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 12.9499999999849,
+              "right": 12.9499999999849,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            }
+          }
+        },
+        "executed_order_count": 136,
+        "validation_status": {
+          "passed": true,
+          "reason": "Accounting reconciliation passed.",
+          "mismatches": []
+        },
+        "accounting_gap_detected": false
+      },
+      "recent_replay_metrics": {
+        "bars_processed": 377,
+        "would_open_count": 12,
+        "would_close_count": 11,
+        "long_open_count": 6,
+        "short_open_count": 6,
+        "signal_count": 23,
+        "live_trades_per_bar": 0.03183023872679045,
+        "long_short_ratio": 1.0,
+        "guard_failure_counts": {
+          "spread": 57,
+          "time_delta": 4,
+          "ma20": 122,
+          "ma50": 170
+        },
+        "signal_breakdown": {
+          "raw_long": 62,
+          "raw_short": 40,
+          "guarded_long": 14,
+          "guarded_short": 9
+        },
+        "opens_by_session": {
+          "London": 5,
+          "London/NY": 4,
+          "NY": 3
+        },
+        "signals_by_session": {
+          "London/NY": 8,
+          "London": 6,
+          "Asia": 4,
+          "NY": 4,
+          "Rollover": 1
+        },
+        "reason_counts": {
+          "session": 5,
+          "spread": 0,
+          "no_signal": 343,
+          "authorized": 18
+        },
+        "examples": {
+          "authorized_opens": [
+            {
+              "bar_ts": "2026-03-31T14:41:12.680000+00:00",
+              "session": "London/NY",
+              "signal": -1,
+              "price_z": 2.912444,
+              "spread_z": 0.313201,
+              "ma20_slope": 0.080059,
+              "ma50_slope": -0.027332
+            },
+            {
+              "bar_ts": "2026-04-06T10:00:26.708000+00:00",
+              "session": "London",
+              "signal": -1,
+              "price_z": 2.679507,
+              "spread_z": -0.253047,
+              "ma20_slope": 0.070038,
+              "ma50_slope": -0.070281
+            },
+            {
+              "bar_ts": "2026-04-07T07:08:00.483000+00:00",
+              "session": "London",
+              "signal": 1,
+              "price_z": -1.204162,
+              "spread_z": -0.165477,
+              "ma20_slope": 0.035418,
+              "ma50_slope": 0.010904
+            },
+            {
+              "bar_ts": "2026-04-07T11:09:12.412000+00:00",
+              "session": "London",
+              "signal": -1,
+              "price_z": 1.916308,
+              "spread_z": -0.53884,
+              "ma20_slope": 0.022641,
+              "ma50_slope": 0.057225
+            },
+            {
+              "bar_ts": "2026-04-13T08:28:47.062000+00:00",
+              "session": "London",
+              "signal": 1,
+              "price_z": -1.291278,
+              "spread_z": 0.196373,
+              "ma20_slope": -0.020724,
+              "ma50_slope": -0.007009
+            },
+            {
+              "bar_ts": "2026-04-13T19:35:55.007000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.957622,
+              "spread_z": -0.392403,
+              "ma20_slope": -0.000505,
+              "ma50_slope": 0.071046
+            },
+            {
+              "bar_ts": "2026-04-15T12:36:00.775000+00:00",
+              "session": "London/NY",
+              "signal": 1,
+              "price_z": -2.342669,
+              "spread_z": -0.203778,
+              "ma20_slope": -0.034734,
+              "ma50_slope": 0.068288
+            },
+            {
+              "bar_ts": "2026-04-16T15:46:33.370000+00:00",
+              "session": "London/NY",
+              "signal": 1,
+              "price_z": -1.47267,
+              "spread_z": 0.194488,
+              "ma20_slope": -0.015726,
+              "ma50_slope": 0.02721
+            },
+            {
+              "bar_ts": "2026-04-16T19:05:50.043000+00:00",
+              "session": "NY",
+              "signal": 1,
+              "price_z": -1.214365,
+              "spread_z": -0.174714,
+              "ma20_slope": -0.106293,
+              "ma50_slope": 0.022516
+            },
+            {
+              "bar_ts": "2026-04-17T14:14:03.996000+00:00",
+              "session": "London/NY",
+              "signal": -1,
+              "price_z": 2.256537,
+              "spread_z": 0.26582,
+              "ma20_slope": 0.094482,
+              "ma50_slope": 0.003581
+            }
+          ],
+          "blocked_signals": [
+            {
+              "bar_ts": "2026-03-27T19:09:23.694000+00:00",
+              "session": "NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -1.36817,
+              "spread_z": 0.535125,
+              "ma20_slope": -0.073352,
+              "ma50_slope": -0.074757
+            },
+            {
+              "bar_ts": "2026-03-27T22:16:10.178000+00:00",
+              "session": "Rollover",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -2.300879,
+              "spread_z": 4.303135,
+              "ma20_slope": -0.128803,
+              "ma50_slope": -0.100155
+            },
+            {
+              "bar_ts": "2026-03-30T01:07:33.862000+00:00",
+              "session": "Asia",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": true,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -2.529804,
+              "spread_z": 0.55444,
+              "ma20_slope": -0.176459,
+              "ma50_slope": -0.120622
+            },
+            {
+              "bar_ts": "2026-03-30T10:23:59.591000+00:00",
+              "session": "London",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -1.70652,
+              "spread_z": 0.009364,
+              "ma20_slope": -0.058446,
+              "ma50_slope": -0.099913
+            },
+            {
+              "bar_ts": "2026-03-30T11:24:30.138000+00:00",
+              "session": "London",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -1.521331,
+              "spread_z": 0.484668,
+              "ma20_slope": -0.103279,
+              "ma50_slope": -0.086527
+            },
+            {
+              "bar_ts": "2026-03-30T12:22:41.451000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -1.405568,
+              "spread_z": 0.571077,
+              "ma20_slope": -0.118761,
+              "ma50_slope": -0.092182
+            },
+            {
+              "bar_ts": "2026-03-30T14:31:12.417000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -1.998137,
+              "spread_z": 0.333686,
+              "ma20_slope": -0.177373,
+              "ma50_slope": -0.115484
+            },
+            {
+              "bar_ts": "2026-03-30T15:17:11.894000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -1.527905,
+              "spread_z": 0.591345,
+              "ma20_slope": -0.176603,
+              "ma50_slope": -0.093127
+            },
+            {
+              "bar_ts": "2026-03-30T15:55:14.406000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": false
+              },
+              "price_z": -1.856855,
+              "spread_z": -0.29056,
+              "ma20_slope": -0.187609,
+              "ma50_slope": -0.066721
+            },
+            {
+              "bar_ts": "2026-03-30T16:39:17.896000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -2.292242,
+              "spread_z": -0.427086,
+              "ma20_slope": -0.206697,
+              "ma50_slope": -0.092946
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "relax_ma50_0.10",
+      "rule_family": "mean_reversion",
+      "rule_params": {
+        "threshold": 1.5,
+        "sl_value": 1.5,
+        "tp_value": 3.0,
+        "max_spread_z": 0.5,
+        "max_time_delta_z": 2.0,
+        "max_abs_ma20_slope": 0.15,
+        "max_abs_ma50_slope": 0.1
+      },
+      "holdout_metrics": {
+        "final_equity": 948.72894288875,
+        "total_return": -0.051271057111250004,
+        "timed_sharpe": -0.022582680237253884,
+        "max_drawdown": 0.07903498136793743,
+        "steps": 2016,
+        "profit_factor": 0.6712218135207358,
+        "expectancy": -1.0053148453186276,
+        "expectancy_usd": -1.0053148453186276,
+        "expectancy_pips": -0.7169434418072436,
+        "win_rate": 0.5098039215686274,
+        "trade_count": 51.0,
+        "gross_pnl_usd": -6.96514211767596,
+        "net_pnl_usd": -51.27105711125,
+        "gross_profit_usd": 104.6731606614934,
+        "gross_loss_usd": 155.9442177727434,
+        "total_transaction_cost_usd": 44.305914993573666,
+        "total_commission_usd": 26.59999999999999,
+        "total_spread_slippage_cost_usd": 17.705914993573657,
+        "total_spread_cost_usd": 8.205914993584733,
+        "total_slippage_cost_usd": 9.499999999988924,
+        "forced_close_count": 0,
+        "avg_holding_bars": 2.215686274509804,
+        "avg_win_usd": 4.025890794672823,
+        "avg_loss_usd": -6.237768710909736,
+        "win_loss_asymmetry": 0.6454055899237845,
+        "metrics_reconciliation": {
+          "passed": true,
+          "mismatch_fields": [],
+          "checks": {
+            "trade_count_vs_trade_log": {
+              "passed": true,
+              "left": 51,
+              "right": 51
+            },
+            "trade_count_vs_diagnostics": {
+              "passed": true,
+              "left": 51,
+              "right": 51
+            },
+            "forced_close_count_vs_diagnostics": {
+              "passed": true,
+              "left": 0,
+              "right": 0
+            },
+            "executed_order_count_vs_execution_log": {
+              "passed": true,
+              "left": 102,
+              "right": 102
+            },
+            "gross_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -6.96514211767596,
+              "right": -6.96514211767596,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "net_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -51.27105711125,
+              "right": -51.27105711124964,
+              "abs_diff": 3.623767952376511e-13,
+              "tolerance": 1e-06
+            },
+            "total_transaction_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 44.305914993573666,
+              "right": 44.305914993573666,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_commission_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 26.59999999999999,
+              "right": 26.59999999999999,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 17.705914993573657,
+              "right": 17.705914993573657,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 8.205914993584733,
+              "right": 8.205914993584733,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 9.499999999988924,
+              "right": 9.499999999988924,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            }
+          }
+        },
+        "metric_reconciliation": {
+          "passed": true,
+          "mismatch_fields": [],
+          "checks": {
+            "trade_count_vs_trade_log": {
+              "passed": true,
+              "left": 51,
+              "right": 51
+            },
+            "trade_count_vs_diagnostics": {
+              "passed": true,
+              "left": 51,
+              "right": 51
+            },
+            "forced_close_count_vs_diagnostics": {
+              "passed": true,
+              "left": 0,
+              "right": 0
+            },
+            "executed_order_count_vs_execution_log": {
+              "passed": true,
+              "left": 102,
+              "right": 102
+            },
+            "gross_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -6.96514211767596,
+              "right": -6.96514211767596,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "net_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -51.27105711125,
+              "right": -51.27105711124964,
+              "abs_diff": 3.623767952376511e-13,
+              "tolerance": 1e-06
+            },
+            "total_transaction_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 44.305914993573666,
+              "right": 44.305914993573666,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_commission_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 26.59999999999999,
+              "right": 26.59999999999999,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 17.705914993573657,
+              "right": 17.705914993573657,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 8.205914993584733,
+              "right": 8.205914993584733,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 9.499999999988924,
+              "right": 9.499999999988924,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            }
+          }
+        },
+        "executed_order_count": 102,
+        "validation_status": {
+          "passed": true,
+          "reason": "Accounting reconciliation passed.",
+          "mismatches": []
+        },
+        "accounting_gap_detected": false
+      },
+      "recent_replay_metrics": {
+        "bars_processed": 377,
+        "would_open_count": 17,
+        "would_close_count": 16,
+        "long_open_count": 4,
+        "short_open_count": 13,
+        "signal_count": 32,
+        "live_trades_per_bar": 0.04509283819628647,
+        "long_short_ratio": 0.3076923076923077,
+        "guard_failure_counts": {
+          "spread": 57,
+          "time_delta": 4,
+          "ma20": 122,
+          "ma50": 126
+        },
+        "signal_breakdown": {
+          "raw_long": 38,
+          "raw_short": 71,
+          "guarded_long": 12,
+          "guarded_short": 20
+        },
+        "opens_by_session": {
+          "NY": 7,
+          "London": 5,
+          "London/NY": 5
+        },
+        "signals_by_session": {
+          "London/NY": 10,
+          "NY": 9,
+          "London": 8,
+          "Asia": 3,
+          "Rollover": 2
+        },
+        "reason_counts": {
+          "session": 5,
+          "spread": 0,
+          "no_signal": 329,
+          "authorized": 27
+        },
+        "examples": {
+          "authorized_opens": [
+            {
+              "bar_ts": "2026-03-30T10:23:59.591000+00:00",
+              "session": "London",
+              "signal": 1,
+              "price_z": -1.70652,
+              "spread_z": 0.009364,
+              "ma20_slope": -0.058446,
+              "ma50_slope": -0.099913
+            },
+            {
+              "bar_ts": "2026-03-31T14:06:25.664000+00:00",
+              "session": "London/NY",
+              "signal": -1,
+              "price_z": 1.62424,
+              "spread_z": -0.527755,
+              "ma20_slope": -0.010289,
+              "ma50_slope": -0.051353
+            },
+            {
+              "bar_ts": "2026-04-03T18:16:12.150000+00:00",
+              "session": "NY",
+              "signal": 1,
+              "price_z": -1.569176,
+              "spread_z": 0.12726,
+              "ma20_slope": -0.001316,
+              "ma50_slope": -0.098862
+            },
+            {
+              "bar_ts": "2026-04-06T10:00:26.708000+00:00",
+              "session": "London",
+              "signal": -1,
+              "price_z": 2.679507,
+              "spread_z": -0.253047,
+              "ma20_slope": 0.070038,
+              "ma50_slope": -0.070281
+            },
+            {
+              "bar_ts": "2026-04-06T17:06:53.868000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.504308,
+              "spread_z": -0.280153,
+              "ma20_slope": 0.062048,
+              "ma50_slope": -0.036834
+            },
+            {
+              "bar_ts": "2026-04-07T11:09:12.412000+00:00",
+              "session": "London",
+              "signal": -1,
+              "price_z": 1.916308,
+              "spread_z": -0.53884,
+              "ma20_slope": 0.022641,
+              "ma50_slope": 0.057225
+            },
+            {
+              "bar_ts": "2026-04-07T17:01:46.939000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.777052,
+              "spread_z": 0.44151,
+              "ma20_slope": 0.111606,
+              "ma50_slope": 0.04217
+            },
+            {
+              "bar_ts": "2026-04-07T18:28:46.560000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.569439,
+              "spread_z": 0.458447,
+              "ma20_slope": 0.113359,
+              "ma50_slope": 0.054527
+            },
+            {
+              "bar_ts": "2026-04-10T13:01:19.072000+00:00",
+              "session": "London/NY",
+              "signal": -1,
+              "price_z": 1.766391,
+              "spread_z": 0.425055,
+              "ma20_slope": 0.147435,
+              "ma50_slope": 0.033564
+            },
+            {
+              "bar_ts": "2026-04-10T15:59:15.311000+00:00",
+              "session": "London/NY",
+              "signal": -1,
+              "price_z": 1.673076,
+              "spread_z": 0.361089,
+              "ma20_slope": 0.102438,
+              "ma50_slope": 0.051081
+            }
+          ],
+          "blocked_signals": [
+            {
+              "bar_ts": "2026-03-27T22:16:10.178000+00:00",
+              "session": "Rollover",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -2.300879,
+              "spread_z": 4.303135,
+              "ma20_slope": -0.128803,
+              "ma50_slope": -0.100155
+            },
+            {
+              "bar_ts": "2026-03-30T01:07:33.862000+00:00",
+              "session": "Asia",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": true,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -2.529804,
+              "spread_z": 0.55444,
+              "ma20_slope": -0.176459,
+              "ma50_slope": -0.120622
+            },
+            {
+              "bar_ts": "2026-03-30T11:24:30.138000+00:00",
+              "session": "London",
+              "raw_price_signal": 1,
+              "signal": 1,
+              "reason": "authorized",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -1.521331,
+              "spread_z": 0.484668,
+              "ma20_slope": -0.103279,
+              "ma50_slope": -0.086527
+            },
+            {
+              "bar_ts": "2026-03-30T14:31:12.417000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -1.998137,
+              "spread_z": 0.333686,
+              "ma20_slope": -0.177373,
+              "ma50_slope": -0.115484
+            },
+            {
+              "bar_ts": "2026-03-30T15:17:11.894000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": false
+              },
+              "price_z": -1.527905,
+              "spread_z": 0.591345,
+              "ma20_slope": -0.176603,
+              "ma50_slope": -0.093127
+            },
+            {
+              "bar_ts": "2026-03-30T15:55:14.406000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": false
+              },
+              "price_z": -1.856855,
+              "spread_z": -0.29056,
+              "ma20_slope": -0.187609,
+              "ma50_slope": -0.066721
+            },
+            {
+              "bar_ts": "2026-03-30T16:39:17.896000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": false
+              },
+              "price_z": -2.292242,
+              "spread_z": -0.427086,
+              "ma20_slope": -0.206697,
+              "ma50_slope": -0.092946
+            },
+            {
+              "bar_ts": "2026-03-30T17:12:48.362000+00:00",
+              "session": "NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -1.81937,
+              "spread_z": -0.531842,
+              "ma20_slope": -0.180587,
+              "ma50_slope": -0.106447
+            },
+            {
+              "bar_ts": "2026-03-30T17:50:05.892000+00:00",
+              "session": "NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -2.132447,
+              "spread_z": -0.230521,
+              "ma20_slope": -0.190767,
+              "ma50_slope": -0.119701
+            },
+            {
+              "bar_ts": "2026-03-30T18:23:14.270000+00:00",
+              "session": "NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": true
+              },
+              "price_z": -1.802883,
+              "spread_z": 0.518472,
+              "ma20_slope": -0.199316,
+              "ma50_slope": -0.126456
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "relax_ma50_0.15",
+      "rule_family": "mean_reversion",
+      "rule_params": {
+        "threshold": 1.5,
+        "sl_value": 1.5,
+        "tp_value": 3.0,
+        "max_spread_z": 0.5,
+        "max_time_delta_z": 2.0,
+        "max_abs_ma20_slope": 0.15,
+        "max_abs_ma50_slope": 0.15
+      },
+      "holdout_metrics": {
+        "final_equity": 949.9299807386262,
+        "total_return": -0.05007001926137377,
+        "timed_sharpe": -0.027106546243466572,
+        "max_drawdown": 0.07786909109539963,
+        "steps": 2016,
+        "profit_factor": 0.6560815493931667,
+        "expectancy": -0.9817650835563485,
+        "expectancy_usd": -0.9817650835563485,
+        "expectancy_pips": -0.72805717856314,
+        "win_rate": 0.5294117647058824,
+        "trade_count": 51.0,
+        "gross_pnl_usd": -6.306415278628741,
+        "net_pnl_usd": -50.07001926137377,
+        "gross_profit_usd": 95.51687546040341,
+        "gross_loss_usd": 145.58689472177718,
+        "total_transaction_cost_usd": 43.7636039827448,
+        "total_commission_usd": 26.459999999999994,
+        "total_spread_slippage_cost_usd": 17.303603982744775,
+        "total_spread_cost_usd": 7.853603982755792,
+        "total_slippage_cost_usd": 9.44999999998898,
+        "forced_close_count": 1,
+        "avg_holding_bars": 2.1372549019607843,
+        "avg_win_usd": 3.537662054089015,
+        "avg_loss_usd": -6.066120613407382,
+        "win_loss_asymmetry": 0.5831835994605926,
+        "metrics_reconciliation": {
+          "passed": true,
+          "mismatch_fields": [],
+          "checks": {
+            "trade_count_vs_trade_log": {
+              "passed": true,
+              "left": 51,
+              "right": 51
+            },
+            "trade_count_vs_diagnostics": {
+              "passed": true,
+              "left": 51,
+              "right": 51
+            },
+            "forced_close_count_vs_diagnostics": {
+              "passed": true,
+              "left": 1,
+              "right": 1
+            },
+            "executed_order_count_vs_execution_log": {
+              "passed": true,
+              "left": 102,
+              "right": 102
+            },
+            "gross_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -6.306415278628741,
+              "right": -6.306415278628741,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "net_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -50.07001926137377,
+              "right": -50.07001926137356,
+              "abs_diff": 2.1316282072803006e-13,
+              "tolerance": 1e-06
+            },
+            "total_transaction_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 43.7636039827448,
+              "right": 43.7636039827448,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_commission_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 26.459999999999994,
+              "right": 26.459999999999994,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 17.303603982744775,
+              "right": 17.303603982744775,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 7.853603982755792,
+              "right": 7.853603982755792,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 9.44999999998898,
+              "right": 9.44999999998898,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            }
+          }
+        },
+        "metric_reconciliation": {
+          "passed": true,
+          "mismatch_fields": [],
+          "checks": {
+            "trade_count_vs_trade_log": {
+              "passed": true,
+              "left": 51,
+              "right": 51
+            },
+            "trade_count_vs_diagnostics": {
+              "passed": true,
+              "left": 51,
+              "right": 51
+            },
+            "forced_close_count_vs_diagnostics": {
+              "passed": true,
+              "left": 1,
+              "right": 1
+            },
+            "executed_order_count_vs_execution_log": {
+              "passed": true,
+              "left": 102,
+              "right": 102
+            },
+            "gross_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -6.306415278628741,
+              "right": -6.306415278628741,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "net_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -50.07001926137377,
+              "right": -50.07001926137356,
+              "abs_diff": 2.1316282072803006e-13,
+              "tolerance": 1e-06
+            },
+            "total_transaction_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 43.7636039827448,
+              "right": 43.7636039827448,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_commission_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 26.459999999999994,
+              "right": 26.459999999999994,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 17.303603982744775,
+              "right": 17.303603982744775,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 7.853603982755792,
+              "right": 7.853603982755792,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 9.44999999998898,
+              "right": 9.44999999998898,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            }
+          }
+        },
+        "executed_order_count": 102,
+        "validation_status": {
+          "passed": true,
+          "reason": "Accounting reconciliation passed.",
+          "mismatches": []
+        },
+        "accounting_gap_detected": false
+      },
+      "recent_replay_metrics": {
+        "bars_processed": 377,
+        "would_open_count": 19,
+        "would_close_count": 18,
+        "long_open_count": 5,
+        "short_open_count": 14,
+        "signal_count": 39,
+        "live_trades_per_bar": 0.050397877984084884,
+        "long_short_ratio": 0.35714285714285715,
+        "guard_failure_counts": {
+          "spread": 57,
+          "time_delta": 4,
+          "ma20": 122,
+          "ma50": 48
+        },
+        "signal_breakdown": {
+          "raw_long": 38,
+          "raw_short": 71,
+          "guarded_long": 16,
+          "guarded_short": 23
+        },
+        "opens_by_session": {
+          "NY": 9,
+          "London": 5,
+          "London/NY": 5
+        },
+        "signals_by_session": {
+          "NY": 14,
+          "London/NY": 10,
+          "London": 8,
+          "Asia": 4,
+          "Rollover": 3
+        },
+        "reason_counts": {
+          "session": 7,
+          "spread": 0,
+          "no_signal": 320,
+          "authorized": 32
+        },
+        "examples": {
+          "authorized_opens": [
+            {
+              "bar_ts": "2026-03-30T10:23:59.591000+00:00",
+              "session": "London",
+              "signal": 1,
+              "price_z": -1.70652,
+              "spread_z": 0.009364,
+              "ma20_slope": -0.058446,
+              "ma50_slope": -0.099913
+            },
+            {
+              "bar_ts": "2026-03-31T14:06:25.664000+00:00",
+              "session": "London/NY",
+              "signal": -1,
+              "price_z": 1.62424,
+              "spread_z": -0.527755,
+              "ma20_slope": -0.010289,
+              "ma50_slope": -0.051353
+            },
+            {
+              "bar_ts": "2026-04-03T18:16:12.150000+00:00",
+              "session": "NY",
+              "signal": 1,
+              "price_z": -1.569176,
+              "spread_z": 0.12726,
+              "ma20_slope": -0.001316,
+              "ma50_slope": -0.098862
+            },
+            {
+              "bar_ts": "2026-04-06T10:00:26.708000+00:00",
+              "session": "London",
+              "signal": -1,
+              "price_z": 2.679507,
+              "spread_z": -0.253047,
+              "ma20_slope": 0.070038,
+              "ma50_slope": -0.070281
+            },
+            {
+              "bar_ts": "2026-04-06T17:06:53.868000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.504308,
+              "spread_z": -0.280153,
+              "ma20_slope": 0.062048,
+              "ma50_slope": -0.036834
+            },
+            {
+              "bar_ts": "2026-04-07T11:09:12.412000+00:00",
+              "session": "London",
+              "signal": -1,
+              "price_z": 1.916308,
+              "spread_z": -0.53884,
+              "ma20_slope": 0.022641,
+              "ma50_slope": 0.057225
+            },
+            {
+              "bar_ts": "2026-04-07T17:01:46.939000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.777052,
+              "spread_z": 0.44151,
+              "ma20_slope": 0.111606,
+              "ma50_slope": 0.04217
+            },
+            {
+              "bar_ts": "2026-04-07T18:28:46.560000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.569439,
+              "spread_z": 0.458447,
+              "ma20_slope": 0.113359,
+              "ma50_slope": 0.054527
+            },
+            {
+              "bar_ts": "2026-04-08T20:30:27.344000+00:00",
+              "session": "NY",
+              "signal": 1,
+              "price_z": -2.171904,
+              "spread_z": -0.450078,
+              "ma20_slope": -0.085245,
+              "ma50_slope": 0.135968
+            },
+            {
+              "bar_ts": "2026-04-09T17:55:24.362000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.711188,
+              "spread_z": -0.573495,
+              "ma20_slope": 0.027782,
+              "ma50_slope": 0.121729
+            }
+          ],
+          "blocked_signals": [
+            {
+              "bar_ts": "2026-03-27T22:16:10.178000+00:00",
+              "session": "Rollover",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -2.300879,
+              "spread_z": 4.303135,
+              "ma20_slope": -0.128803,
+              "ma50_slope": -0.100155
+            },
+            {
+              "bar_ts": "2026-03-30T01:07:33.862000+00:00",
+              "session": "Asia",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": true,
+                "ma20": true,
+                "ma50": false
+              },
+              "price_z": -2.529804,
+              "spread_z": 0.55444,
+              "ma20_slope": -0.176459,
+              "ma50_slope": -0.120622
+            },
+            {
+              "bar_ts": "2026-03-30T11:24:30.138000+00:00",
+              "session": "London",
+              "raw_price_signal": 1,
+              "signal": 1,
+              "reason": "authorized",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -1.521331,
+              "spread_z": 0.484668,
+              "ma20_slope": -0.103279,
+              "ma50_slope": -0.086527
+            },
+            {
+              "bar_ts": "2026-03-30T14:31:12.417000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": false
+              },
+              "price_z": -1.998137,
+              "spread_z": 0.333686,
+              "ma20_slope": -0.177373,
+              "ma50_slope": -0.115484
+            },
+            {
+              "bar_ts": "2026-03-30T15:17:11.894000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": false
+              },
+              "price_z": -1.527905,
+              "spread_z": 0.591345,
+              "ma20_slope": -0.176603,
+              "ma50_slope": -0.093127
+            },
+            {
+              "bar_ts": "2026-03-30T15:55:14.406000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": false
+              },
+              "price_z": -1.856855,
+              "spread_z": -0.29056,
+              "ma20_slope": -0.187609,
+              "ma50_slope": -0.066721
+            },
+            {
+              "bar_ts": "2026-03-30T16:39:17.896000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": false
+              },
+              "price_z": -2.292242,
+              "spread_z": -0.427086,
+              "ma20_slope": -0.206697,
+              "ma50_slope": -0.092946
+            },
+            {
+              "bar_ts": "2026-03-30T17:12:48.362000+00:00",
+              "session": "NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": false
+              },
+              "price_z": -1.81937,
+              "spread_z": -0.531842,
+              "ma20_slope": -0.180587,
+              "ma50_slope": -0.106447
+            },
+            {
+              "bar_ts": "2026-03-30T17:50:05.892000+00:00",
+              "session": "NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": false
+              },
+              "price_z": -2.132447,
+              "spread_z": -0.230521,
+              "ma20_slope": -0.190767,
+              "ma50_slope": -0.119701
+            },
+            {
+              "bar_ts": "2026-03-30T18:23:14.270000+00:00",
+              "session": "NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": false
+              },
+              "price_z": -1.802883,
+              "spread_z": 0.518472,
+              "ma20_slope": -0.199316,
+              "ma50_slope": -0.126456
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "relax_ma20_0.20_ma50_0.10",
+      "rule_family": "mean_reversion",
+      "rule_params": {
+        "threshold": 1.5,
+        "sl_value": 1.5,
+        "tp_value": 3.0,
+        "max_spread_z": 0.5,
+        "max_time_delta_z": 2.0,
+        "max_abs_ma20_slope": 0.2,
+        "max_abs_ma50_slope": 0.1
+      },
+      "holdout_metrics": {
+        "final_equity": 943.8839273401463,
+        "total_return": -0.056116072659853675,
+        "timed_sharpe": -0.022828161505027027,
+        "max_drawdown": 0.08373821074492467,
+        "steps": 2016,
+        "profit_factor": 0.6316604417372922,
+        "expectancy": -1.039186530738031,
+        "expectancy_usd": -1.039186530738031,
+        "expectancy_pips": -0.9154492106307662,
+        "win_rate": 0.46296296296296297,
+        "trade_count": 54.0,
+        "gross_pnl_usd": -9.402489662688083,
+        "net_pnl_usd": -56.11607265985367,
+        "gross_profit_usd": 96.2326810947742,
+        "gross_loss_usd": 152.34875375462786,
+        "total_transaction_cost_usd": 46.713582997165226,
+        "total_commission_usd": 27.999999999999993,
+        "total_spread_slippage_cost_usd": 18.71358299716519,
+        "total_spread_cost_usd": 8.71358299717685,
+        "total_slippage_cost_usd": 9.99999999998834,
+        "forced_close_count": 1,
+        "avg_holding_bars": 2.4074074074074074,
+        "avg_win_usd": 3.849307243790968,
+        "avg_loss_usd": -5.25340530188372,
+        "win_loss_asymmetry": 0.732726112415259,
+        "metrics_reconciliation": {
+          "passed": true,
+          "mismatch_fields": [],
+          "checks": {
+            "trade_count_vs_trade_log": {
+              "passed": true,
+              "left": 54,
+              "right": 54
+            },
+            "trade_count_vs_diagnostics": {
+              "passed": true,
+              "left": 54,
+              "right": 54
+            },
+            "forced_close_count_vs_diagnostics": {
+              "passed": true,
+              "left": 1,
+              "right": 1
+            },
+            "executed_order_count_vs_execution_log": {
+              "passed": true,
+              "left": 108,
+              "right": 108
+            },
+            "gross_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -9.402489662688083,
+              "right": -9.402489662688083,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "net_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -56.11607265985367,
+              "right": -56.116072659853295,
+              "abs_diff": 3.765876499528531e-13,
+              "tolerance": 1e-06
+            },
+            "total_transaction_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 46.713582997165226,
+              "right": 46.713582997165226,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_commission_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 27.999999999999993,
+              "right": 27.999999999999993,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 18.71358299716519,
+              "right": 18.71358299716519,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 8.71358299717685,
+              "right": 8.71358299717685,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 9.99999999998834,
+              "right": 9.99999999998834,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            }
+          }
+        },
+        "metric_reconciliation": {
+          "passed": true,
+          "mismatch_fields": [],
+          "checks": {
+            "trade_count_vs_trade_log": {
+              "passed": true,
+              "left": 54,
+              "right": 54
+            },
+            "trade_count_vs_diagnostics": {
+              "passed": true,
+              "left": 54,
+              "right": 54
+            },
+            "forced_close_count_vs_diagnostics": {
+              "passed": true,
+              "left": 1,
+              "right": 1
+            },
+            "executed_order_count_vs_execution_log": {
+              "passed": true,
+              "left": 108,
+              "right": 108
+            },
+            "gross_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -9.402489662688083,
+              "right": -9.402489662688083,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "net_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -56.11607265985367,
+              "right": -56.116072659853295,
+              "abs_diff": 3.765876499528531e-13,
+              "tolerance": 1e-06
+            },
+            "total_transaction_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 46.713582997165226,
+              "right": 46.713582997165226,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_commission_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 27.999999999999993,
+              "right": 27.999999999999993,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 18.71358299716519,
+              "right": 18.71358299716519,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 8.71358299717685,
+              "right": 8.71358299717685,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 9.99999999998834,
+              "right": 9.99999999998834,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            }
+          }
+        },
+        "executed_order_count": 108,
+        "validation_status": {
+          "passed": true,
+          "reason": "Accounting reconciliation passed.",
+          "mismatches": []
+        },
+        "accounting_gap_detected": false
+      },
+      "recent_replay_metrics": {
+        "bars_processed": 377,
+        "would_open_count": 23,
+        "would_close_count": 22,
+        "long_open_count": 5,
+        "short_open_count": 18,
+        "signal_count": 41,
+        "live_trades_per_bar": 0.0610079575596817,
+        "long_short_ratio": 0.2777777777777778,
+        "guard_failure_counts": {
+          "spread": 57,
+          "time_delta": 4,
+          "ma20": 82,
+          "ma50": 126
+        },
+        "signal_breakdown": {
+          "raw_long": 38,
+          "raw_short": 71,
+          "guarded_long": 15,
+          "guarded_short": 26
+        },
+        "opens_by_session": {
+          "NY": 10,
+          "London/NY": 7,
+          "London": 6
+        },
+        "signals_by_session": {
+          "London/NY": 13,
+          "NY": 12,
+          "London": 9,
+          "Asia": 5,
+          "Rollover": 2
+        },
+        "reason_counts": {
+          "session": 7,
+          "spread": 0,
+          "no_signal": 314,
+          "authorized": 34
+        },
+        "examples": {
+          "authorized_opens": [
+            {
+              "bar_ts": "2026-03-30T10:23:59.591000+00:00",
+              "session": "London",
+              "signal": 1,
+              "price_z": -1.70652,
+              "spread_z": 0.009364,
+              "ma20_slope": -0.058446,
+              "ma50_slope": -0.099913
+            },
+            {
+              "bar_ts": "2026-03-30T15:55:14.406000+00:00",
+              "session": "London/NY",
+              "signal": 1,
+              "price_z": -1.856855,
+              "spread_z": -0.29056,
+              "ma20_slope": -0.187609,
+              "ma50_slope": -0.066721
+            },
+            {
+              "bar_ts": "2026-03-31T14:06:25.664000+00:00",
+              "session": "London/NY",
+              "signal": -1,
+              "price_z": 1.62424,
+              "spread_z": -0.527755,
+              "ma20_slope": -0.010289,
+              "ma50_slope": -0.051353
+            },
+            {
+              "bar_ts": "2026-03-31T17:40:29.018000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.597277,
+              "spread_z": -0.828581,
+              "ma20_slope": 0.189934,
+              "ma50_slope": -0.002995
+            },
+            {
+              "bar_ts": "2026-03-31T19:38:44.847000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.637401,
+              "spread_z": -1.022293,
+              "ma20_slope": 0.194169,
+              "ma50_slope": 0.014001
+            },
+            {
+              "bar_ts": "2026-04-01T09:38:24.810000+00:00",
+              "session": "London",
+              "signal": -1,
+              "price_z": 1.741371,
+              "spread_z": -0.651921,
+              "ma20_slope": 0.198314,
+              "ma50_slope": 0.095762
+            },
+            {
+              "bar_ts": "2026-04-03T18:16:12.150000+00:00",
+              "session": "NY",
+              "signal": 1,
+              "price_z": -1.569176,
+              "spread_z": 0.12726,
+              "ma20_slope": -0.001316,
+              "ma50_slope": -0.098862
+            },
+            {
+              "bar_ts": "2026-04-06T10:00:26.708000+00:00",
+              "session": "London",
+              "signal": -1,
+              "price_z": 2.679507,
+              "spread_z": -0.253047,
+              "ma20_slope": 0.070038,
+              "ma50_slope": -0.070281
+            },
+            {
+              "bar_ts": "2026-04-06T17:06:53.868000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.504308,
+              "spread_z": -0.280153,
+              "ma20_slope": 0.062048,
+              "ma50_slope": -0.036834
+            },
+            {
+              "bar_ts": "2026-04-07T11:09:12.412000+00:00",
+              "session": "London",
+              "signal": -1,
+              "price_z": 1.916308,
+              "spread_z": -0.53884,
+              "ma20_slope": 0.022641,
+              "ma50_slope": 0.057225
+            }
+          ],
+          "blocked_signals": [
+            {
+              "bar_ts": "2026-03-27T22:16:10.178000+00:00",
+              "session": "Rollover",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -2.300879,
+              "spread_z": 4.303135,
+              "ma20_slope": -0.128803,
+              "ma50_slope": -0.100155
+            },
+            {
+              "bar_ts": "2026-03-30T01:07:33.862000+00:00",
+              "session": "Asia",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": true,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -2.529804,
+              "spread_z": 0.55444,
+              "ma20_slope": -0.176459,
+              "ma50_slope": -0.120622
+            },
+            {
+              "bar_ts": "2026-03-30T11:24:30.138000+00:00",
+              "session": "London",
+              "raw_price_signal": 1,
+              "signal": 1,
+              "reason": "authorized",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -1.521331,
+              "spread_z": 0.484668,
+              "ma20_slope": -0.103279,
+              "ma50_slope": -0.086527
+            },
+            {
+              "bar_ts": "2026-03-30T14:31:12.417000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -1.998137,
+              "spread_z": 0.333686,
+              "ma20_slope": -0.177373,
+              "ma50_slope": -0.115484
+            },
+            {
+              "bar_ts": "2026-03-30T15:17:11.894000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -1.527905,
+              "spread_z": 0.591345,
+              "ma20_slope": -0.176603,
+              "ma50_slope": -0.093127
+            },
+            {
+              "bar_ts": "2026-03-30T16:39:17.896000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "authorized_exit",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": false
+              },
+              "price_z": -2.292242,
+              "spread_z": -0.427086,
+              "ma20_slope": -0.206697,
+              "ma50_slope": -0.092946
+            },
+            {
+              "bar_ts": "2026-03-30T17:12:48.362000+00:00",
+              "session": "NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -1.81937,
+              "spread_z": -0.531842,
+              "ma20_slope": -0.180587,
+              "ma50_slope": -0.106447
+            },
+            {
+              "bar_ts": "2026-03-30T17:50:05.892000+00:00",
+              "session": "NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -2.132447,
+              "spread_z": -0.230521,
+              "ma20_slope": -0.190767,
+              "ma50_slope": -0.119701
+            },
+            {
+              "bar_ts": "2026-03-30T18:23:14.270000+00:00",
+              "session": "NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -1.802883,
+              "spread_z": 0.518472,
+              "ma20_slope": -0.199316,
+              "ma50_slope": -0.126456
+            },
+            {
+              "bar_ts": "2026-03-31T14:41:12.680000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": -1,
+              "signal": -1,
+              "reason": "authorized",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": 2.912444,
+              "spread_z": 0.313201,
+              "ma20_slope": 0.080059,
+              "ma50_slope": -0.027332
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "relax_ma20_0.25_ma50_0.15",
+      "rule_family": "mean_reversion",
+      "rule_params": {
+        "threshold": 1.5,
+        "sl_value": 1.5,
+        "tp_value": 3.0,
+        "max_spread_z": 0.5,
+        "max_time_delta_z": 2.0,
+        "max_abs_ma20_slope": 0.25,
+        "max_abs_ma50_slope": 0.15
+      },
+      "holdout_metrics": {
+        "final_equity": 948.9393527525015,
+        "total_return": -0.051060647247498536,
+        "timed_sharpe": -0.026096380264139858,
+        "max_drawdown": 0.07328032931742334,
+        "steps": 2016,
+        "profit_factor": 0.5362841406582058,
+        "expectancy": -1.547292340833289,
+        "expectancy_usd": -1.547292340833289,
+        "expectancy_pips": -1.9547095478095025,
+        "win_rate": 0.48484848484848486,
+        "trade_count": 33.0,
+        "gross_pnl_usd": -23.933557275542803,
+        "net_pnl_usd": -51.06064724749854,
+        "gross_profit_usd": 59.05128060412778,
+        "gross_loss_usd": 110.11192785162632,
+        "total_transaction_cost_usd": 27.127089971955566,
+        "total_commission_usd": 16.100000000000005,
+        "total_spread_slippage_cost_usd": 11.027089971955562,
+        "total_spread_cost_usd": 5.277089971962261,
+        "total_slippage_cost_usd": 5.749999999993301,
+        "forced_close_count": 1,
+        "avg_holding_bars": 2.1515151515151514,
+        "avg_win_usd": 3.6907050377579864,
+        "avg_loss_usd": -6.477172226566254,
+        "win_loss_asymmetry": 0.5698018994493437,
+        "metrics_reconciliation": {
+          "passed": true,
+          "mismatch_fields": [],
+          "checks": {
+            "trade_count_vs_trade_log": {
+              "passed": true,
+              "left": 33,
+              "right": 33
+            },
+            "trade_count_vs_diagnostics": {
+              "passed": true,
+              "left": 33,
+              "right": 33
+            },
+            "forced_close_count_vs_diagnostics": {
+              "passed": true,
+              "left": 1,
+              "right": 1
+            },
+            "executed_order_count_vs_execution_log": {
+              "passed": true,
+              "left": 66,
+              "right": 66
+            },
+            "gross_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -23.933557275542803,
+              "right": -23.933557275542803,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "net_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -51.06064724749854,
+              "right": -51.060647247498395,
+              "abs_diff": 1.4210854715202004e-13,
+              "tolerance": 1e-06
+            },
+            "total_transaction_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 27.127089971955566,
+              "right": 27.127089971955566,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_commission_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 16.100000000000005,
+              "right": 16.100000000000005,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 11.027089971955562,
+              "right": 11.027089971955562,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 5.277089971962261,
+              "right": 5.277089971962261,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 5.749999999993301,
+              "right": 5.749999999993301,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            }
+          }
+        },
+        "metric_reconciliation": {
+          "passed": true,
+          "mismatch_fields": [],
+          "checks": {
+            "trade_count_vs_trade_log": {
+              "passed": true,
+              "left": 33,
+              "right": 33
+            },
+            "trade_count_vs_diagnostics": {
+              "passed": true,
+              "left": 33,
+              "right": 33
+            },
+            "forced_close_count_vs_diagnostics": {
+              "passed": true,
+              "left": 1,
+              "right": 1
+            },
+            "executed_order_count_vs_execution_log": {
+              "passed": true,
+              "left": 66,
+              "right": 66
+            },
+            "gross_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -23.933557275542803,
+              "right": -23.933557275542803,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "net_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -51.06064724749854,
+              "right": -51.060647247498395,
+              "abs_diff": 1.4210854715202004e-13,
+              "tolerance": 1e-06
+            },
+            "total_transaction_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 27.127089971955566,
+              "right": 27.127089971955566,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_commission_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 16.100000000000005,
+              "right": 16.100000000000005,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 11.027089971955562,
+              "right": 11.027089971955562,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 5.277089971962261,
+              "right": 5.277089971962261,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 5.749999999993301,
+              "right": 5.749999999993301,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            }
+          }
+        },
+        "executed_order_count": 66,
+        "validation_status": {
+          "passed": true,
+          "reason": "Accounting reconciliation passed.",
+          "mismatches": []
+        },
+        "accounting_gap_detected": false
+      },
+      "recent_replay_metrics": {
+        "bars_processed": 377,
+        "would_open_count": 26,
+        "would_close_count": 25,
+        "long_open_count": 8,
+        "short_open_count": 18,
+        "signal_count": 69,
+        "live_trades_per_bar": 0.06896551724137931,
+        "long_short_ratio": 0.4444444444444444,
+        "guard_failure_counts": {
+          "spread": 57,
+          "time_delta": 4,
+          "ma20": 48,
+          "ma50": 48
+        },
+        "signal_breakdown": {
+          "raw_long": 38,
+          "raw_short": 71,
+          "guarded_long": 26,
+          "guarded_short": 43
+        },
+        "opens_by_session": {
+          "NY": 10,
+          "London": 8,
+          "London/NY": 8
+        },
+        "signals_by_session": {
+          "NY": 22,
+          "London/NY": 21,
+          "London": 15,
+          "Asia": 6,
+          "Rollover": 5
+        },
+        "reason_counts": {
+          "session": 11,
+          "spread": 0,
+          "no_signal": 283,
+          "authorized": 58
+        },
+        "examples": {
+          "authorized_opens": [
+            {
+              "bar_ts": "2026-03-30T10:23:59.591000+00:00",
+              "session": "London",
+              "signal": 1,
+              "price_z": -1.70652,
+              "spread_z": 0.009364,
+              "ma20_slope": -0.058446,
+              "ma50_slope": -0.099913
+            },
+            {
+              "bar_ts": "2026-03-30T14:31:12.417000+00:00",
+              "session": "London/NY",
+              "signal": 1,
+              "price_z": -1.998137,
+              "spread_z": 0.333686,
+              "ma20_slope": -0.177373,
+              "ma50_slope": -0.115484
+            },
+            {
+              "bar_ts": "2026-03-30T15:55:14.406000+00:00",
+              "session": "London/NY",
+              "signal": 1,
+              "price_z": -1.856855,
+              "spread_z": -0.29056,
+              "ma20_slope": -0.187609,
+              "ma50_slope": -0.066721
+            },
+            {
+              "bar_ts": "2026-03-31T14:06:25.664000+00:00",
+              "session": "London/NY",
+              "signal": -1,
+              "price_z": 1.62424,
+              "spread_z": -0.527755,
+              "ma20_slope": -0.010289,
+              "ma50_slope": -0.051353
+            },
+            {
+              "bar_ts": "2026-03-31T19:38:44.847000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.637401,
+              "spread_z": -1.022293,
+              "ma20_slope": 0.194169,
+              "ma50_slope": 0.014001
+            },
+            {
+              "bar_ts": "2026-04-01T09:01:34.924000+00:00",
+              "session": "London",
+              "signal": -1,
+              "price_z": 2.010057,
+              "spread_z": -0.305518,
+              "ma20_slope": 0.222728,
+              "ma50_slope": 0.081115
+            },
+            {
+              "bar_ts": "2026-04-01T11:11:24.568000+00:00",
+              "session": "London",
+              "signal": -1,
+              "price_z": 1.916638,
+              "spread_z": -0.301519,
+              "ma20_slope": 0.221689,
+              "ma50_slope": 0.123762
+            },
+            {
+              "bar_ts": "2026-04-01T13:12:29.435000+00:00",
+              "session": "London/NY",
+              "signal": -1,
+              "price_z": 1.622402,
+              "spread_z": -0.237419,
+              "ma20_slope": 0.200585,
+              "ma50_slope": 0.134647
+            },
+            {
+              "bar_ts": "2026-04-02T08:11:32.640000+00:00",
+              "session": "London",
+              "signal": 1,
+              "price_z": -2.254649,
+              "spread_z": -0.522308,
+              "ma20_slope": -0.244136,
+              "ma50_slope": 0.010462
+            },
+            {
+              "bar_ts": "2026-04-03T18:16:12.150000+00:00",
+              "session": "NY",
+              "signal": 1,
+              "price_z": -1.569176,
+              "spread_z": 0.12726,
+              "ma20_slope": -0.001316,
+              "ma50_slope": -0.098862
+            }
+          ],
+          "blocked_signals": [
+            {
+              "bar_ts": "2026-03-27T22:16:10.178000+00:00",
+              "session": "Rollover",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -2.300879,
+              "spread_z": 4.303135,
+              "ma20_slope": -0.128803,
+              "ma50_slope": -0.100155
+            },
+            {
+              "bar_ts": "2026-03-30T01:07:33.862000+00:00",
+              "session": "Asia",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": true,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -2.529804,
+              "spread_z": 0.55444,
+              "ma20_slope": -0.176459,
+              "ma50_slope": -0.120622
+            },
+            {
+              "bar_ts": "2026-03-30T11:24:30.138000+00:00",
+              "session": "London",
+              "raw_price_signal": 1,
+              "signal": 1,
+              "reason": "authorized",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -1.521331,
+              "spread_z": 0.484668,
+              "ma20_slope": -0.103279,
+              "ma50_slope": -0.086527
+            },
+            {
+              "bar_ts": "2026-03-30T15:17:11.894000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "authorized_exit",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -1.527905,
+              "spread_z": 0.591345,
+              "ma20_slope": -0.176603,
+              "ma50_slope": -0.093127
+            },
+            {
+              "bar_ts": "2026-03-30T16:39:17.896000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 1,
+              "reason": "authorized",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -2.292242,
+              "spread_z": -0.427086,
+              "ma20_slope": -0.206697,
+              "ma50_slope": -0.092946
+            },
+            {
+              "bar_ts": "2026-03-30T17:12:48.362000+00:00",
+              "session": "NY",
+              "raw_price_signal": 1,
+              "signal": 1,
+              "reason": "authorized",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -1.81937,
+              "spread_z": -0.531842,
+              "ma20_slope": -0.180587,
+              "ma50_slope": -0.106447
+            },
+            {
+              "bar_ts": "2026-03-30T17:50:05.892000+00:00",
+              "session": "NY",
+              "raw_price_signal": 1,
+              "signal": 1,
+              "reason": "authorized",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -2.132447,
+              "spread_z": -0.230521,
+              "ma20_slope": -0.190767,
+              "ma50_slope": -0.119701
+            },
+            {
+              "bar_ts": "2026-03-30T18:23:14.270000+00:00",
+              "session": "NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "authorized_exit",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -1.802883,
+              "spread_z": 0.518472,
+              "ma20_slope": -0.199316,
+              "ma50_slope": -0.126456
+            },
+            {
+              "bar_ts": "2026-03-31T14:41:12.680000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": -1,
+              "signal": -1,
+              "reason": "authorized",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": 2.912444,
+              "spread_z": 0.313201,
+              "ma20_slope": 0.080059,
+              "ma50_slope": -0.027332
+            },
+            {
+              "bar_ts": "2026-03-31T15:09:19.543000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": -1,
+              "signal": -1,
+              "reason": "authorized",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": 2.502439,
+              "spread_z": 0.411217,
+              "ma20_slope": 0.133497,
+              "ma50_slope": -0.021108
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "relax_spread_0.75_ma20_0.20_ma50_0.10",
+      "rule_family": "mean_reversion",
+      "rule_params": {
+        "threshold": 1.5,
+        "sl_value": 1.5,
+        "tp_value": 3.0,
+        "max_spread_z": 0.75,
+        "max_time_delta_z": 2.0,
+        "max_abs_ma20_slope": 0.2,
+        "max_abs_ma50_slope": 0.1
+      },
+      "holdout_metrics": {
+        "final_equity": 949.9855220446764,
+        "total_return": -0.05001447795532363,
+        "timed_sharpe": -0.027836703340173057,
+        "max_drawdown": 0.07781517516889108,
+        "steps": 2016,
+        "profit_factor": 0.6972219415344617,
+        "expectancy": -0.8477030161919259,
+        "expectancy_usd": -0.8477030161919259,
+        "expectancy_pips": -0.5375943507330387,
+        "win_rate": 0.5084745762711864,
+        "trade_count": 59.0,
+        "gross_pnl_usd": 1.225104045246674,
+        "net_pnl_usd": -50.01447795532363,
+        "gross_profit_usd": 115.1708006900119,
+        "gross_loss_usd": 165.18527864533553,
+        "total_transaction_cost_usd": 51.239582000570095,
+        "total_commission_usd": 30.799999999999986,
+        "total_spread_slippage_cost_usd": 20.439582000570056,
+        "total_spread_cost_usd": 9.439582000582883,
+        "total_slippage_cost_usd": 10.999999999987171,
+        "forced_close_count": 1,
+        "avg_holding_bars": 2.3220338983050848,
+        "avg_win_usd": 3.8390266896670635,
+        "avg_loss_usd": -5.696044091218466,
+        "win_loss_asymmetry": 0.6739812101499798,
+        "metrics_reconciliation": {
+          "passed": true,
+          "mismatch_fields": [],
+          "checks": {
+            "trade_count_vs_trade_log": {
+              "passed": true,
+              "left": 59,
+              "right": 59
+            },
+            "trade_count_vs_diagnostics": {
+              "passed": true,
+              "left": 59,
+              "right": 59
+            },
+            "forced_close_count_vs_diagnostics": {
+              "passed": true,
+              "left": 1,
+              "right": 1
+            },
+            "executed_order_count_vs_execution_log": {
+              "passed": true,
+              "left": 118,
+              "right": 118
+            },
+            "gross_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 1.225104045246674,
+              "right": 1.225104045246674,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "net_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -50.01447795532363,
+              "right": -50.0144779553234,
+              "abs_diff": 2.2737367544323206e-13,
+              "tolerance": 1e-06
+            },
+            "total_transaction_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 51.239582000570095,
+              "right": 51.239582000570095,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_commission_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 30.799999999999986,
+              "right": 30.799999999999986,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 20.439582000570056,
+              "right": 20.439582000570056,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 9.439582000582883,
+              "right": 9.439582000582883,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 10.999999999987171,
+              "right": 10.999999999987171,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            }
+          }
+        },
+        "metric_reconciliation": {
+          "passed": true,
+          "mismatch_fields": [],
+          "checks": {
+            "trade_count_vs_trade_log": {
+              "passed": true,
+              "left": 59,
+              "right": 59
+            },
+            "trade_count_vs_diagnostics": {
+              "passed": true,
+              "left": 59,
+              "right": 59
+            },
+            "forced_close_count_vs_diagnostics": {
+              "passed": true,
+              "left": 1,
+              "right": 1
+            },
+            "executed_order_count_vs_execution_log": {
+              "passed": true,
+              "left": 118,
+              "right": 118
+            },
+            "gross_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 1.225104045246674,
+              "right": 1.225104045246674,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "net_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -50.01447795532363,
+              "right": -50.0144779553234,
+              "abs_diff": 2.2737367544323206e-13,
+              "tolerance": 1e-06
+            },
+            "total_transaction_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 51.239582000570095,
+              "right": 51.239582000570095,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_commission_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 30.799999999999986,
+              "right": 30.799999999999986,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 20.439582000570056,
+              "right": 20.439582000570056,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 9.439582000582883,
+              "right": 9.439582000582883,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 10.999999999987171,
+              "right": 10.999999999987171,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            }
+          }
+        },
+        "executed_order_count": 118,
+        "validation_status": {
+          "passed": true,
+          "reason": "Accounting reconciliation passed.",
+          "mismatches": []
+        },
+        "accounting_gap_detected": false
+      },
+      "recent_replay_metrics": {
+        "bars_processed": 377,
+        "would_open_count": 25,
+        "would_close_count": 24,
+        "long_open_count": 5,
+        "short_open_count": 20,
+        "signal_count": 48,
+        "live_trades_per_bar": 0.06631299734748011,
+        "long_short_ratio": 0.25,
+        "guard_failure_counts": {
+          "spread": 38,
+          "time_delta": 4,
+          "ma20": 82,
+          "ma50": 126
+        },
+        "signal_breakdown": {
+          "raw_long": 38,
+          "raw_short": 71,
+          "guarded_long": 16,
+          "guarded_short": 32
+        },
+        "opens_by_session": {
+          "NY": 12,
+          "London": 7,
+          "London/NY": 6
+        },
+        "signals_by_session": {
+          "London/NY": 15,
+          "NY": 15,
+          "London": 11,
+          "Asia": 5,
+          "Rollover": 2
+        },
+        "reason_counts": {
+          "session": 7,
+          "spread": 0,
+          "no_signal": 305,
+          "authorized": 41
+        },
+        "examples": {
+          "authorized_opens": [
+            {
+              "bar_ts": "2026-03-30T10:23:59.591000+00:00",
+              "session": "London",
+              "signal": 1,
+              "price_z": -1.70652,
+              "spread_z": 0.009364,
+              "ma20_slope": -0.058446,
+              "ma50_slope": -0.099913
+            },
+            {
+              "bar_ts": "2026-03-30T15:17:11.894000+00:00",
+              "session": "London/NY",
+              "signal": 1,
+              "price_z": -1.527905,
+              "spread_z": 0.591345,
+              "ma20_slope": -0.176603,
+              "ma50_slope": -0.093127
+            },
+            {
+              "bar_ts": "2026-03-31T14:06:25.664000+00:00",
+              "session": "London/NY",
+              "signal": -1,
+              "price_z": 1.62424,
+              "spread_z": -0.527755,
+              "ma20_slope": -0.010289,
+              "ma50_slope": -0.051353
+            },
+            {
+              "bar_ts": "2026-03-31T17:40:29.018000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.597277,
+              "spread_z": -0.828581,
+              "ma20_slope": 0.189934,
+              "ma50_slope": -0.002995
+            },
+            {
+              "bar_ts": "2026-03-31T19:38:44.847000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.637401,
+              "spread_z": -1.022293,
+              "ma20_slope": 0.194169,
+              "ma50_slope": 0.014001
+            },
+            {
+              "bar_ts": "2026-04-01T09:38:24.810000+00:00",
+              "session": "London",
+              "signal": -1,
+              "price_z": 1.741371,
+              "spread_z": -0.651921,
+              "ma20_slope": 0.198314,
+              "ma50_slope": 0.095762
+            },
+            {
+              "bar_ts": "2026-04-03T18:16:12.150000+00:00",
+              "session": "NY",
+              "signal": 1,
+              "price_z": -1.569176,
+              "spread_z": 0.12726,
+              "ma20_slope": -0.001316,
+              "ma50_slope": -0.098862
+            },
+            {
+              "bar_ts": "2026-04-06T10:00:26.708000+00:00",
+              "session": "London",
+              "signal": -1,
+              "price_z": 2.679507,
+              "spread_z": -0.253047,
+              "ma20_slope": 0.070038,
+              "ma50_slope": -0.070281
+            },
+            {
+              "bar_ts": "2026-04-06T17:06:53.868000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.504308,
+              "spread_z": -0.280153,
+              "ma20_slope": 0.062048,
+              "ma50_slope": -0.036834
+            },
+            {
+              "bar_ts": "2026-04-07T11:09:12.412000+00:00",
+              "session": "London",
+              "signal": -1,
+              "price_z": 1.916308,
+              "spread_z": -0.53884,
+              "ma20_slope": 0.022641,
+              "ma50_slope": 0.057225
+            }
+          ],
+          "blocked_signals": [
+            {
+              "bar_ts": "2026-03-27T22:16:10.178000+00:00",
+              "session": "Rollover",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": true,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -2.300879,
+              "spread_z": 4.303135,
+              "ma20_slope": -0.128803,
+              "ma50_slope": -0.100155
+            },
+            {
+              "bar_ts": "2026-03-30T01:07:33.862000+00:00",
+              "session": "Asia",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": true,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -2.529804,
+              "spread_z": 0.55444,
+              "ma20_slope": -0.176459,
+              "ma50_slope": -0.120622
+            },
+            {
+              "bar_ts": "2026-03-30T11:24:30.138000+00:00",
+              "session": "London",
+              "raw_price_signal": 1,
+              "signal": 1,
+              "reason": "authorized",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -1.521331,
+              "spread_z": 0.484668,
+              "ma20_slope": -0.103279,
+              "ma50_slope": -0.086527
+            },
+            {
+              "bar_ts": "2026-03-30T14:31:12.417000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -1.998137,
+              "spread_z": 0.333686,
+              "ma20_slope": -0.177373,
+              "ma50_slope": -0.115484
+            },
+            {
+              "bar_ts": "2026-03-30T15:55:14.406000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 1,
+              "reason": "authorized",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -1.856855,
+              "spread_z": -0.29056,
+              "ma20_slope": -0.187609,
+              "ma50_slope": -0.066721
+            },
+            {
+              "bar_ts": "2026-03-30T16:39:17.896000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "authorized_exit",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": true,
+                "ma50": false
+              },
+              "price_z": -2.292242,
+              "spread_z": -0.427086,
+              "ma20_slope": -0.206697,
+              "ma50_slope": -0.092946
+            },
+            {
+              "bar_ts": "2026-03-30T17:12:48.362000+00:00",
+              "session": "NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -1.81937,
+              "spread_z": -0.531842,
+              "ma20_slope": -0.180587,
+              "ma50_slope": -0.106447
+            },
+            {
+              "bar_ts": "2026-03-30T17:50:05.892000+00:00",
+              "session": "NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -2.132447,
+              "spread_z": -0.230521,
+              "ma20_slope": -0.190767,
+              "ma50_slope": -0.119701
+            },
+            {
+              "bar_ts": "2026-03-30T18:23:14.270000+00:00",
+              "session": "NY",
+              "raw_price_signal": 1,
+              "signal": 0,
+              "reason": "no signal",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": true
+              },
+              "price_z": -1.802883,
+              "spread_z": 0.518472,
+              "ma20_slope": -0.199316,
+              "ma50_slope": -0.126456
+            },
+            {
+              "bar_ts": "2026-03-31T14:41:12.680000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": -1,
+              "signal": -1,
+              "reason": "authorized",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": 2.912444,
+              "spread_z": 0.313201,
+              "ma20_slope": 0.080059,
+              "ma50_slope": -0.027332
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "price_only_no_guards",
+      "rule_family": "price_mean_reversion",
+      "rule_params": {
+        "threshold": 1.5,
+        "long_threshold": -1.5,
+        "short_threshold": 1.5
+      },
+      "holdout_metrics": {
+        "final_equity": 949.2341211230828,
+        "total_return": -0.05076587887691721,
+        "timed_sharpe": -0.015556102140681625,
+        "max_drawdown": 0.10193184946901647,
+        "steps": 2016,
+        "profit_factor": 0.7794615541337797,
+        "expectancy": -0.619096083864844,
+        "expectancy_usd": -0.619096083864844,
+        "expectancy_pips": 0.11776521012956287,
+        "win_rate": 0.573170731707317,
+        "trade_count": 82.0,
+        "gross_pnl_usd": 19.867033144316267,
+        "net_pnl_usd": -50.76587887691721,
+        "gross_profit_usd": 179.4247288310561,
+        "gross_loss_usd": 230.1906077079733,
+        "total_transaction_cost_usd": 70.63291202123362,
+        "total_commission_usd": 42.42000000000004,
+        "total_spread_slippage_cost_usd": 28.21291202123355,
+        "total_spread_cost_usd": 13.06291202125122,
+        "total_slippage_cost_usd": 15.14999999998233,
+        "forced_close_count": 1,
+        "avg_holding_bars": 2.292682926829268,
+        "avg_win_usd": 3.8175474219373635,
+        "avg_loss_usd": -6.5768745059420946,
+        "win_loss_asymmetry": 0.5804500935038786,
+        "metrics_reconciliation": {
+          "passed": true,
+          "mismatch_fields": [],
+          "checks": {
+            "trade_count_vs_trade_log": {
+              "passed": true,
+              "left": 82,
+              "right": 82
+            },
+            "trade_count_vs_diagnostics": {
+              "passed": true,
+              "left": 82,
+              "right": 82
+            },
+            "forced_close_count_vs_diagnostics": {
+              "passed": true,
+              "left": 1,
+              "right": 1
+            },
+            "executed_order_count_vs_execution_log": {
+              "passed": true,
+              "left": 164,
+              "right": 164
+            },
+            "gross_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 19.867033144316267,
+              "right": 19.867033144316267,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "net_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -50.76587887691721,
+              "right": -50.76587887691734,
+              "abs_diff": 1.2789769243681803e-13,
+              "tolerance": 1e-06
+            },
+            "total_transaction_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 70.63291202123362,
+              "right": 70.63291202123362,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_commission_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 42.42000000000004,
+              "right": 42.42000000000004,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 28.21291202123355,
+              "right": 28.21291202123355,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 13.06291202125122,
+              "right": 13.06291202125122,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 15.14999999998233,
+              "right": 15.14999999998233,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            }
+          }
+        },
+        "metric_reconciliation": {
+          "passed": true,
+          "mismatch_fields": [],
+          "checks": {
+            "trade_count_vs_trade_log": {
+              "passed": true,
+              "left": 82,
+              "right": 82
+            },
+            "trade_count_vs_diagnostics": {
+              "passed": true,
+              "left": 82,
+              "right": 82
+            },
+            "forced_close_count_vs_diagnostics": {
+              "passed": true,
+              "left": 1,
+              "right": 1
+            },
+            "executed_order_count_vs_execution_log": {
+              "passed": true,
+              "left": 164,
+              "right": 164
+            },
+            "gross_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 19.867033144316267,
+              "right": 19.867033144316267,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "net_pnl_usd_vs_diagnostics": {
+              "passed": true,
+              "left": -50.76587887691721,
+              "right": -50.76587887691734,
+              "abs_diff": 1.2789769243681803e-13,
+              "tolerance": 1e-06
+            },
+            "total_transaction_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 70.63291202123362,
+              "right": 70.63291202123362,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_commission_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 42.42000000000004,
+              "right": 42.42000000000004,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 28.21291202123355,
+              "right": 28.21291202123355,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_spread_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 13.06291202125122,
+              "right": 13.06291202125122,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            },
+            "total_slippage_cost_usd_vs_diagnostics": {
+              "passed": true,
+              "left": 15.14999999998233,
+              "right": 15.14999999998233,
+              "abs_diff": 0.0,
+              "tolerance": 1e-06
+            }
+          }
+        },
+        "executed_order_count": 164,
+        "validation_status": {
+          "passed": true,
+          "reason": "Accounting reconciliation passed.",
+          "mismatches": []
+        },
+        "accounting_gap_detected": false
+      },
+      "recent_replay_metrics": {
+        "bars_processed": 377,
+        "would_open_count": 33,
+        "would_close_count": 32,
+        "long_open_count": 7,
+        "short_open_count": 26,
+        "signal_count": 109,
+        "live_trades_per_bar": 0.08753315649867374,
+        "long_short_ratio": 0.2692307692307692,
+        "guard_failure_counts": {
+          "spread": 0,
+          "time_delta": 0,
+          "ma20": 0,
+          "ma50": 0
+        },
+        "signal_breakdown": {
+          "raw_long": 38,
+          "raw_short": 71,
+          "guarded_long": 38,
+          "guarded_short": 71
+        },
+        "opens_by_session": {
+          "NY": 14,
+          "London": 10,
+          "London/NY": 9
+        },
+        "signals_by_session": {
+          "NY": 31,
+          "London/NY": 28,
+          "Asia": 18,
+          "London": 18,
+          "Rollover": 14
+        },
+        "reason_counts": {
+          "session": 32,
+          "spread": 0,
+          "no_signal": 236,
+          "authorized": 77
+        },
+        "examples": {
+          "authorized_opens": [
+            {
+              "bar_ts": "2026-03-30T10:23:59.591000+00:00",
+              "session": "London",
+              "signal": 1,
+              "price_z": -1.70652,
+              "spread_z": 0.009364,
+              "ma20_slope": -0.058446,
+              "ma50_slope": -0.099913
+            },
+            {
+              "bar_ts": "2026-03-30T14:31:12.417000+00:00",
+              "session": "London/NY",
+              "signal": 1,
+              "price_z": -1.998137,
+              "spread_z": 0.333686,
+              "ma20_slope": -0.177373,
+              "ma50_slope": -0.115484
+            },
+            {
+              "bar_ts": "2026-03-31T14:06:25.664000+00:00",
+              "session": "London/NY",
+              "signal": -1,
+              "price_z": 1.62424,
+              "spread_z": -0.527755,
+              "ma20_slope": -0.010289,
+              "ma50_slope": -0.051353
+            },
+            {
+              "bar_ts": "2026-03-31T19:38:44.847000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.637401,
+              "spread_z": -1.022293,
+              "ma20_slope": 0.194169,
+              "ma50_slope": 0.014001
+            },
+            {
+              "bar_ts": "2026-04-01T09:01:34.924000+00:00",
+              "session": "London",
+              "signal": -1,
+              "price_z": 2.010057,
+              "spread_z": -0.305518,
+              "ma20_slope": 0.222728,
+              "ma50_slope": 0.081115
+            },
+            {
+              "bar_ts": "2026-04-01T11:11:24.568000+00:00",
+              "session": "London",
+              "signal": -1,
+              "price_z": 1.916638,
+              "spread_z": -0.301519,
+              "ma20_slope": 0.221689,
+              "ma50_slope": 0.123762
+            },
+            {
+              "bar_ts": "2026-04-01T13:12:29.435000+00:00",
+              "session": "London/NY",
+              "signal": -1,
+              "price_z": 1.622402,
+              "spread_z": -0.237419,
+              "ma20_slope": 0.200585,
+              "ma50_slope": 0.134647
+            },
+            {
+              "bar_ts": "2026-04-01T17:36:58.454000+00:00",
+              "session": "NY",
+              "signal": -1,
+              "price_z": 1.627214,
+              "spread_z": -0.334561,
+              "ma20_slope": 0.153048,
+              "ma50_slope": 0.195072
+            },
+            {
+              "bar_ts": "2026-04-02T08:11:32.640000+00:00",
+              "session": "London",
+              "signal": 1,
+              "price_z": -2.254649,
+              "spread_z": -0.522308,
+              "ma20_slope": -0.244136,
+              "ma50_slope": 0.010462
+            },
+            {
+              "bar_ts": "2026-04-03T18:16:12.150000+00:00",
+              "session": "NY",
+              "signal": 1,
+              "price_z": -1.569176,
+              "spread_z": 0.12726,
+              "ma20_slope": -0.001316,
+              "ma50_slope": -0.098862
+            }
+          ],
+          "blocked_signals": [
+            {
+              "bar_ts": "2026-03-27T22:16:10.178000+00:00",
+              "session": "Rollover",
+              "raw_price_signal": 1,
+              "signal": 1,
+              "reason": "session blocked",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -2.300879,
+              "spread_z": 4.303135,
+              "ma20_slope": -0.128803,
+              "ma50_slope": -0.100155
+            },
+            {
+              "bar_ts": "2026-03-30T01:07:33.862000+00:00",
+              "session": "Asia",
+              "raw_price_signal": 1,
+              "signal": 1,
+              "reason": "session blocked",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -2.529804,
+              "spread_z": 0.55444,
+              "ma20_slope": -0.176459,
+              "ma50_slope": -0.120622
+            },
+            {
+              "bar_ts": "2026-03-30T11:24:30.138000+00:00",
+              "session": "London",
+              "raw_price_signal": 1,
+              "signal": 1,
+              "reason": "authorized",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -1.521331,
+              "spread_z": 0.484668,
+              "ma20_slope": -0.103279,
+              "ma50_slope": -0.086527
+            },
+            {
+              "bar_ts": "2026-03-30T15:17:11.894000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 1,
+              "reason": "authorized",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -1.527905,
+              "spread_z": 0.591345,
+              "ma20_slope": -0.176603,
+              "ma50_slope": -0.093127
+            },
+            {
+              "bar_ts": "2026-03-30T15:55:14.406000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 1,
+              "reason": "authorized",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -1.856855,
+              "spread_z": -0.29056,
+              "ma20_slope": -0.187609,
+              "ma50_slope": -0.066721
+            },
+            {
+              "bar_ts": "2026-03-30T16:39:17.896000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": 1,
+              "signal": 1,
+              "reason": "authorized",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -2.292242,
+              "spread_z": -0.427086,
+              "ma20_slope": -0.206697,
+              "ma50_slope": -0.092946
+            },
+            {
+              "bar_ts": "2026-03-30T17:12:48.362000+00:00",
+              "session": "NY",
+              "raw_price_signal": 1,
+              "signal": 1,
+              "reason": "authorized",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -1.81937,
+              "spread_z": -0.531842,
+              "ma20_slope": -0.180587,
+              "ma50_slope": -0.106447
+            },
+            {
+              "bar_ts": "2026-03-30T17:50:05.892000+00:00",
+              "session": "NY",
+              "raw_price_signal": 1,
+              "signal": 1,
+              "reason": "authorized",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -2.132447,
+              "spread_z": -0.230521,
+              "ma20_slope": -0.190767,
+              "ma50_slope": -0.119701
+            },
+            {
+              "bar_ts": "2026-03-30T18:23:14.270000+00:00",
+              "session": "NY",
+              "raw_price_signal": 1,
+              "signal": 1,
+              "reason": "authorized",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": -1.802883,
+              "spread_z": 0.518472,
+              "ma20_slope": -0.199316,
+              "ma50_slope": -0.126456
+            },
+            {
+              "bar_ts": "2026-03-31T14:41:12.680000+00:00",
+              "session": "London/NY",
+              "raw_price_signal": -1,
+              "signal": -1,
+              "reason": "authorized",
+              "guard_failures": {
+                "spread": false,
+                "time_delta": false,
+                "ma20": false,
+                "ma50": false
+              },
+              "price_z": 2.912444,
+              "spread_z": 0.313201,
+              "ma20_slope": 0.080059,
+              "ma50_slope": -0.027332
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

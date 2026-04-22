@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import joblib
 import numpy as np
 import pandas as pd
 from sklearn.tree import DecisionTreeRegressor
@@ -30,9 +31,9 @@ class BaselineAlphaGate:
     probability_threshold: float = 0.55
     probability_margin: float = 0.05
     min_edge_pips: float = 0.0
-    long_model: Pipeline | None = None
-    short_model: Pipeline | None = None
-    signed_model: Pipeline | None = None
+    long_model: Any | None = None
+    short_model: Any | None = None
+    signed_model: Any | None = None
     fit_trade_count: float = 0.0
     fit_long_trade_count: float = 0.0
     fit_short_trade_count: float = 0.0
@@ -41,20 +42,28 @@ class BaselineAlphaGate:
     fit_quality_passed: bool = False
 
     def score_row(self, row: pd.Series | dict[str, Any]) -> dict[str, float]:
-        features = np.asarray(
-            [[float((row.get(col, 0.0) if hasattr(row, "get") else 0.0)) for col in self.feature_cols]],
-            dtype=np.float64,
-        )
+        feature_values = [float((row.get(col, 0.0) if hasattr(row, "get") else 0.0)) for col in self.feature_cols]
+        features = np.asarray([feature_values], dtype=np.float64)
+        feature_frame = pd.DataFrame([feature_values], columns=list(self.feature_cols))
         scores = {
             "long_score": 0.0,
             "short_score": 0.0,
             "signed_score": 0.0,
         }
         if self.long_model is not None and self.short_model is not None:
-            scores["long_score"] = float(self.long_model.predict_proba(features)[0, 1])
-            scores["short_score"] = float(self.short_model.predict_proba(features)[0, 1])
+            long_input = feature_frame if hasattr(self.long_model, "feature_names_in_") else features
+            short_input = feature_frame if hasattr(self.short_model, "feature_names_in_") else features
+            if hasattr(long_input, "columns") and hasattr(self.long_model, "feature_names_in_"):
+                long_input = long_input.loc[:, list(self.long_model.feature_names_in_)]
+            if hasattr(short_input, "columns") and hasattr(self.short_model, "feature_names_in_"):
+                short_input = short_input.loc[:, list(self.short_model.feature_names_in_)]
+            scores["long_score"] = float(self.long_model.predict_proba(long_input)[0, 1])
+            scores["short_score"] = float(self.short_model.predict_proba(short_input)[0, 1])
         if self.signed_model is not None:
-            scores["signed_score"] = float(self.signed_model.predict(features)[0])
+            signed_input = feature_frame if hasattr(self.signed_model, "feature_names_in_") else features
+            if hasattr(signed_input, "columns") and hasattr(self.signed_model, "feature_names_in_"):
+                signed_input = signed_input.loc[:, list(self.signed_model.feature_names_in_)]
+            scores["signed_score"] = float(self.signed_model.predict(signed_input)[0])
         return scores
 
     def allowed_directions(
@@ -65,7 +74,7 @@ class BaselineAlphaGate:
         margin_override: float | None = None,
     ) -> tuple[bool, bool, dict[str, float]]:
         scores = self.score_row(row)
-        if self.model_kind == "logistic_pair":
+        if self.model_kind in {"logistic_pair", "xgboost_pair", "lightgbm_pair"}:
             long_score = float(scores["long_score"])
             short_score = float(scores["short_score"])
             effective_threshold = float(
@@ -87,6 +96,20 @@ class BaselineAlphaGate:
             allow_short = signed_score <= -float(self.min_edge_pips)
             return bool(allow_long), bool(allow_short), scores
         return False, False, scores
+
+
+def save_baseline_alpha_gate(gate: BaselineAlphaGate, path: str | Path) -> Path:
+    out_path = Path(path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(gate, out_path)
+    return out_path
+
+
+def load_baseline_alpha_gate(path: str | Path) -> BaselineAlphaGate:
+    gate = joblib.load(Path(path))
+    if not isinstance(gate, BaselineAlphaGate):
+        raise RuntimeError(f"Loaded object is not BaselineAlphaGate: {type(gate).__name__}")
+    return gate
 
 
 def _ensure_cost_columns(frame: pd.DataFrame) -> pd.DataFrame:
@@ -308,21 +331,74 @@ def _alpha_gate_quality_report(
     }
 
 
-def _fit_probability_pair(x_train: np.ndarray, frame_train: pd.DataFrame) -> tuple[Pipeline | None, Pipeline | None]:
+def _build_pair_classifier(model_kind: str) -> Any | None:
+    if model_kind == "logistic_pair":
+        return LogisticRegression(max_iter=1000, class_weight="balanced")
+    if model_kind == "xgboost_pair":
+        try:
+            from xgboost import XGBClassifier
+        except Exception:
+            return None
+        return XGBClassifier(
+            n_estimators=200,
+            max_depth=4,
+            learning_rate=0.05,
+            subsample=0.9,
+            colsample_bytree=0.9,
+            reg_lambda=1.0,
+            objective="binary:logistic",
+            eval_metric="logloss",
+            random_state=42,
+            n_jobs=1,
+            verbosity=0,
+        )
+    if model_kind == "lightgbm_pair":
+        try:
+            from lightgbm import LGBMClassifier
+        except Exception:
+            return None
+        return LGBMClassifier(
+            n_estimators=200,
+            learning_rate=0.05,
+            num_leaves=31,
+            class_weight="balanced",
+            random_state=42,
+            n_jobs=1,
+            verbosity=-1,
+        )
+    return None
+
+
+def _fit_probability_pair(
+    x_train: pd.DataFrame,
+    frame_train: pd.DataFrame,
+    *,
+    model_kind: str,
+) -> tuple[Any | None, Any | None]:
     if frame_train["long_target"].nunique() < 2 or frame_train["short_target"].nunique() < 2:
         return None, None
-    long_model = Pipeline(
-        steps=[
-            ("scaler", StandardScaler()),
-            ("model", LogisticRegression(max_iter=1000, class_weight="balanced")),
-        ]
-    )
-    short_model = Pipeline(
-        steps=[
-            ("scaler", StandardScaler()),
-            ("model", LogisticRegression(max_iter=1000, class_weight="balanced")),
-        ]
-    )
+    long_classifier = _build_pair_classifier(model_kind)
+    short_classifier = _build_pair_classifier(model_kind)
+    if long_classifier is None or short_classifier is None:
+        return None, None
+    if model_kind == "logistic_pair":
+        long_model = Pipeline(
+            steps=[
+                ("scaler", StandardScaler()),
+                ("model", long_classifier),
+            ]
+        )
+        short_model = Pipeline(
+            steps=[
+                ("scaler", StandardScaler()),
+                ("model", short_classifier),
+            ]
+        )
+    else:
+        # Tree-based classifiers do not need scaling, and fitting them directly on
+        # named DataFrames preserves feature-name parity through predict_proba.
+        long_model = long_classifier
+        short_model = short_classifier
     long_model.fit(x_train, frame_train["long_target"].to_numpy(dtype=np.int8))
     short_model.fit(x_train, frame_train["short_target"].to_numpy(dtype=np.int8))
     return long_model, short_model
@@ -344,6 +420,26 @@ def fit_baseline_alpha_gate(
     min_directional_trade_count: int = 4,
     max_single_direction_fraction: float = 0.90,
 ) -> BaselineAlphaGate | None:
+    """Fit a lightweight AlphaGate classifier on the provided training frame.
+
+    Returns None if the training frame is too small to produce a meaningful
+    classifier — this prevents logistic_pair from being fit on <100 samples
+    and producing a degenerate model that memorises the training set and
+    produces 0 trades on the holdout (observed in bakeoff 2026-04-14).
+    """
+    # ── Minimum sample size guard (Finding #3: AlphaGate overfitting) ──────
+    MIN_ALPHA_GATE_TRAIN_SAMPLES = 100
+    if train_frame is None or len(train_frame) < MIN_ALPHA_GATE_TRAIN_SAMPLES:
+        import warnings
+        warnings.warn(
+            f"fit_baseline_alpha_gate: training frame has only {len(train_frame) if train_frame is not None else 0} rows "
+            f"(minimum required: {MIN_ALPHA_GATE_TRAIN_SAMPLES}). "
+            "Refusing to fit — the resulting model would overfit to the training set. "
+            "Accumulate more trade history before enabling AlphaGate.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return None
     prepared_train = _prepare_targets(
         train_frame,
         symbol=symbol,
@@ -356,13 +452,26 @@ def fit_baseline_alpha_gate(
     if prepared_train.empty:
         return None
 
-    x_train = prepared_train.loc[:, feature_cols].to_numpy(dtype=np.float64)
+    x_train = prepared_train.loc[:, feature_cols].copy()
+    x_train_array = x_train.to_numpy(dtype=np.float64)
     preference = str(model_preference or "auto").strip().lower()
-    if preference in {"auto", "logistic_pair"}:
-        logistic_long, logistic_short = _fit_probability_pair(x_train, prepared_train)
-        if logistic_long is not None and logistic_short is not None:
-            long_train = np.asarray(logistic_long.predict_proba(x_train)[:, 1], dtype=np.float64)
-            short_train = np.asarray(logistic_short.predict_proba(x_train)[:, 1], dtype=np.float64)
+    pair_preferences: tuple[str, ...]
+    if preference == "auto":
+        pair_preferences = ("logistic_pair", "xgboost_pair", "lightgbm_pair")
+    else:
+        pair_preferences = (preference,)
+
+    for pair_model_kind in pair_preferences:
+        if pair_model_kind not in {"logistic_pair", "xgboost_pair", "lightgbm_pair"}:
+            continue
+        pair_long_model, pair_short_model = _fit_probability_pair(
+            x_train,
+            prepared_train,
+            model_kind=pair_model_kind,
+        )
+        if pair_long_model is not None and pair_short_model is not None:
+            long_train = np.asarray(pair_long_model.predict_proba(x_train)[:, 1], dtype=np.float64)
+            short_train = np.asarray(pair_short_model.predict_proba(x_train)[:, 1], dtype=np.float64)
             selected = _choose_probability_threshold(
                 frame=prepared_train,
                 symbol=symbol,
@@ -383,12 +492,12 @@ def fit_baseline_alpha_gate(
                 return BaselineAlphaGate(
                     symbol=str(symbol).upper(),
                     feature_cols=tuple(feature_cols),
-                    model_kind="logistic_pair",
+                    model_kind=pair_model_kind,
                     probability_threshold=float(selected["threshold"]),
                     probability_margin=float(probability_margin),
                     min_edge_pips=float(min_edge_pips),
-                    long_model=logistic_long,
-                    short_model=logistic_short,
+                    long_model=pair_long_model,
+                    short_model=pair_short_model,
                     fit_trade_count=float(quality["trade_count"]),
                     fit_long_trade_count=float(quality["long_trade_count"]),
                     fit_short_trade_count=float(quality["short_trade_count"]),
@@ -396,16 +505,16 @@ def fit_baseline_alpha_gate(
                     fit_profit_factor=float(selected_metrics.get("profit_factor", 0.0)),
                     fit_quality_passed=True,
                 )
-            if preference == "logistic_pair":
+            if preference == pair_model_kind:
                 return BaselineAlphaGate(
                     symbol=str(symbol).upper(),
                     feature_cols=tuple(feature_cols),
-                    model_kind="logistic_pair",
+                    model_kind=pair_model_kind,
                     probability_threshold=float(selected["threshold"]),
                     probability_margin=float(probability_margin),
                     min_edge_pips=float(min_edge_pips),
-                    long_model=logistic_long,
-                    short_model=logistic_short,
+                    long_model=pair_long_model,
+                    short_model=pair_short_model,
                     fit_trade_count=float(quality["trade_count"]),
                     fit_long_trade_count=float(quality["long_trade_count"]),
                     fit_short_trade_count=float(quality["short_trade_count"]),
@@ -413,13 +522,13 @@ def fit_baseline_alpha_gate(
                     fit_profit_factor=float(dict(selected["metrics"] or {}).get("profit_factor", 0.0)),
                     fit_quality_passed=False,
                 )
-        if preference == "logistic_pair":
+        if preference == pair_model_kind:
             return None
 
     if preference in {"auto", "ridge_signed_target", "ridge"}:
         ridge = Pipeline(steps=[("scaler", StandardScaler()), ("model", Ridge(alpha=1.0))])
-        ridge.fit(x_train, prepared_train["signed_target"].to_numpy(dtype=np.float64))
-        ridge_train = np.asarray(ridge.predict(x_train), dtype=np.float64)
+        ridge.fit(x_train_array, prepared_train["signed_target"].to_numpy(dtype=np.float64))
+        ridge_train = np.asarray(ridge.predict(x_train_array), dtype=np.float64)
         ridge_signals = np.zeros(len(prepared_train), dtype=np.int8)
         ridge_signals[ridge_train >= min_edge_pips] = 1
         ridge_signals[ridge_train <= -min_edge_pips] = -1
@@ -534,9 +643,15 @@ def run_edge_baseline_research(
             fold_payload["blockers"] = ["Insufficient samples after cost-adjusted target construction."]
             fold_reports.append(fold_payload)
             continue
-        x_train = prepared_train.loc[:, feature_cols].to_numpy(dtype=np.float64)
-        x_val = prepared_val.loc[:, feature_cols].to_numpy(dtype=np.float64)
-        logistic_long, logistic_short = _fit_probability_pair(x_train, prepared_train)
+        x_train = prepared_train.loc[:, feature_cols].copy()
+        x_val = prepared_val.loc[:, feature_cols].copy()
+        x_train_array = x_train.to_numpy(dtype=np.float64)
+        x_val_array = x_val.to_numpy(dtype=np.float64)
+        logistic_long, logistic_short = _fit_probability_pair(
+            x_train,
+            prepared_train,
+            model_kind="logistic_pair",
+        )
         if logistic_long is not None and logistic_short is not None:
             long_val = logistic_long.predict_proba(x_val)[:, 1]
             short_val = logistic_short.predict_proba(x_val)[:, 1]
@@ -551,8 +666,8 @@ def run_edge_baseline_research(
             )
 
         ridge = Pipeline(steps=[("scaler", StandardScaler()), ("model", Ridge(alpha=1.0))])
-        ridge.fit(x_train, prepared_train["signed_target"].to_numpy(dtype=np.float64))
-        ridge_val = np.asarray(ridge.predict(x_val), dtype=np.float64)
+        ridge.fit(x_train_array, prepared_train["signed_target"].to_numpy(dtype=np.float64))
+        ridge_val = np.asarray(ridge.predict(x_val_array), dtype=np.float64)
         ridge_signals = np.zeros(len(prepared_val), dtype=np.int8)
         ridge_signals[ridge_val >= min_edge_pips] = 1
         ridge_signals[ridge_val <= -min_edge_pips] = -1
@@ -561,8 +676,8 @@ def run_edge_baseline_research(
             "metrics": _simulate_signals(prepared_val, ridge_signals, symbol=symbol, horizon_bars=horizon_bars),
         }
         tree = DecisionTreeRegressor(max_depth=3, random_state=42)
-        tree.fit(x_train, prepared_train["signed_target"].to_numpy(dtype=np.float64))
-        tree_val = np.asarray(tree.predict(x_val), dtype=np.float64)
+        tree.fit(x_train_array, prepared_train["signed_target"].to_numpy(dtype=np.float64))
+        tree_val = np.asarray(tree.predict(x_val_array), dtype=np.float64)
         tree_signals = np.zeros(len(prepared_val), dtype=np.int8)
         tree_signals[tree_val >= min_edge_pips] = 1
         tree_signals[tree_val <= -min_edge_pips] = -1
@@ -618,9 +733,15 @@ def run_edge_baseline_research(
     if prepared_trainable.empty or prepared_holdout.empty:
         blockers.append("Insufficient trainable or holdout samples after cost-adjusted target construction.")
     else:
-        x_trainable = prepared_trainable.loc[:, feature_cols].to_numpy(dtype=np.float64)
-        x_holdout = prepared_holdout.loc[:, feature_cols].to_numpy(dtype=np.float64)
-        logistic_long, logistic_short = _fit_probability_pair(x_trainable, prepared_trainable)
+        x_trainable = prepared_trainable.loc[:, feature_cols].copy()
+        x_holdout = prepared_holdout.loc[:, feature_cols].copy()
+        x_trainable_array = x_trainable.to_numpy(dtype=np.float64)
+        x_holdout_array = x_holdout.to_numpy(dtype=np.float64)
+        logistic_long, logistic_short = _fit_probability_pair(
+            x_trainable,
+            prepared_trainable,
+            model_kind="logistic_pair",
+        )
         if logistic_long is not None and logistic_short is not None:
             long_holdout = logistic_long.predict_proba(x_holdout)[:, 1]
             short_holdout = logistic_short.predict_proba(x_holdout)[:, 1]
@@ -641,8 +762,8 @@ def run_edge_baseline_research(
                 passing_models.append("logistic_pair")
 
         ridge = Pipeline(steps=[("scaler", StandardScaler()), ("model", Ridge(alpha=1.0))])
-        ridge.fit(x_trainable, prepared_trainable["signed_target"].to_numpy(dtype=np.float64))
-        ridge_holdout = np.asarray(ridge.predict(x_holdout), dtype=np.float64)
+        ridge.fit(x_trainable_array, prepared_trainable["signed_target"].to_numpy(dtype=np.float64))
+        ridge_holdout = np.asarray(ridge.predict(x_holdout_array), dtype=np.float64)
         ridge_signals = np.zeros(len(prepared_holdout), dtype=np.int8)
         ridge_signals[ridge_holdout >= min_edge_pips] = 1
         ridge_signals[ridge_holdout <= -min_edge_pips] = -1
@@ -655,8 +776,8 @@ def run_edge_baseline_research(
             passing_models.append("ridge_signed_target")
 
         tree = DecisionTreeRegressor(max_depth=3, random_state=42)
-        tree.fit(x_trainable, prepared_trainable["signed_target"].to_numpy(dtype=np.float64))
-        tree_holdout = np.asarray(tree.predict(x_holdout), dtype=np.float64)
+        tree.fit(x_trainable_array, prepared_trainable["signed_target"].to_numpy(dtype=np.float64))
+        tree_holdout = np.asarray(tree.predict(x_holdout_array), dtype=np.float64)
         tree_signals = np.zeros(len(prepared_holdout), dtype=np.int8)
         tree_signals[tree_holdout >= min_edge_pips] = 1
         tree_signals[tree_holdout <= -min_edge_pips] = -1

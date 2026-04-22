@@ -1,0 +1,229 @@
+{
+  "symbol": "GBPUSD",
+  "ticks_per_bar": 10000,
+  "manifest_hash": "814777123cf53e7a58180d973352aaaff9db3a4b5f09c6b0939d1361af72ad9a",
+  "logic_hash": "e1c9bf0fb26a5124a4e774a846ff37a424a7c08d8b9d9a6eaeff740ea4a0e185",
+  "evaluator_hash": "693309d0d5a9cb1aa731272f232f17a617df45d0162a3f0d45fa61bebc7e403f",
+  "release_stage": "paper_live_candidate",
+  "anchor_status": "demoted",
+  "replay_metrics": {
+    "net_pnl_usd": 4.09420261576463,
+    "gross_pnl_usd": 6.454944610595703,
+    "total_cost_usd": 2.3607419948310113,
+    "profit_factor": 2.28556749370435,
+    "expectancy_usd": 1.0235506539411574,
+    "trade_count": 4,
+    "win_rate": 0.5,
+    "long_count": 2,
+    "short_count": 2,
+    "replay_bars": 1054,
+    "trades_per_bar": 0.003795066413662239,
+    "validation_passed": true
+  },
+  "baseline_comparison": {
+    "mandatory_baselines": {
+      "runtime_flat": {
+        "net_pnl_usd": 0.0,
+        "gross_pnl_usd": 0.0,
+        "total_cost_usd": 0.0,
+        "profit_factor": 0.0,
+        "expectancy_usd": 0.0,
+        "trade_count": 0,
+        "win_rate": 0.0,
+        "long_count": 0,
+        "short_count": 0
+      },
+      "runtime_always_short": {
+        "net_pnl_usd": -52.91013683675931,
+        "gross_pnl_usd": -40.480982335068475,
+        "total_cost_usd": 12.429154501690988,
+        "profit_factor": 0.6798468629710358,
+        "expectancy_usd": -2.3004407320330134,
+        "trade_count": 23,
+        "win_rate": 0.2608695652173913,
+        "long_count": 0,
+        "short_count": 23
+      },
+      "runtime_trend": {
+        "net_pnl_usd": -53.3031125504898,
+        "gross_pnl_usd": -21.285162559580694,
+        "total_cost_usd": 32.01794999090886,
+        "profit_factor": 0.765948100119638,
+        "expectancy_usd": -0.9870946768609222,
+        "trade_count": 54,
+        "win_rate": 0.3333333333333333,
+        "long_count": 32,
+        "short_count": 22
+      }
+    },
+    "raw_anchor_baseline": {
+      "net_pnl_usd": -50.57883322094199,
+      "gross_pnl_usd": -35.094035226511224,
+      "total_cost_usd": 15.4847979944304,
+      "profit_factor": 0.5296946669577891,
+      "expectancy_usd": -1.8732901192941478,
+      "trade_count": 27,
+      "win_rate": 0.4074074074074074,
+      "long_count": 12,
+      "short_count": 15
+    },
+    "deployed_anchor_rc": {
+      "net_pnl_usd": 4.09420261576463,
+      "gross_pnl_usd": 6.454944610595703,
+      "total_cost_usd": 2.3607419948310113,
+      "profit_factor": 2.28556749370435,
+      "expectancy_usd": 1.0235506539411574,
+      "trade_count": 4,
+      "win_rate": 0.5,
+      "long_count": 2,
+      "short_count": 2,
+      "replay_bars": 1054,
+      "trades_per_bar": 0.003795066413662239,
+      "validation_passed": true
+    },
+    "mandatory_baseline_pass": true,
+    "raw_anchor_baseline_pass": true,
+    "same_logic_as_raw_anchor": false
+  },
+  "shadow_window_start": null,
+  "shadow_window_end": null,
+  "shadow_summary_stats": {
+    "event_count": 0,
+    "trading_days": 0,
+    "actionable_event_count": 0,
+    "evidence_sufficient": false,
+    "shadow_window_start": null,
+    "shadow_window_end": null,
+    "no_trade_reason_counts": {},
+    "directional_occupancy": {
+      "flat": 0.0,
+      "long": 0.0,
+      "short": 0.0
+    },
+    "counts": {}
+  },
+  "drift_metrics": {
+    "reference_source": "baseline_scoreboard_rc1",
+    "signal_density_ratio": null,
+    "would_open_density_ratio": null,
+    "spread_rejection_delta_pp": 0.0,
+    "session_rejection_delta_pp": 0.0,
+    "directional_occupancy_delta_pp": 44.44444444444444,
+    "normal_failures": [
+      "directional_occupancy_delta_pp"
+    ],
+    "critical_failures": [
+      "directional_occupancy_delta_pp"
+    ],
+    "critical": true,
+    "verdict": "critical",
+    "thresholds": {
+      "signal_density_ratio": {
+        "normal_range": [
+          0.75,
+          1.25
+        ],
+        "critical_range": [
+          0.6,
+          1.4
+        ]
+      },
+      "would_open_density_ratio": {
+        "normal_range": [
+          0.7,
+          1.3
+        ],
+        "critical_range": [
+          0.6,
+          1.4
+        ]
+      },
+      "spread_rejection_delta_pp": {
+        "normal_max": 10.0,
+        "critical_max": 20.0
+      },
+      "session_rejection_delta_pp": {
+        "normal_max": 10.0,
+        "critical_max": 20.0
+      },
+      "directional_occupancy_delta_pp": {
+        "normal_max": 15.0,
+        "critical_max": 20.0
+      }
+    }
+  },
+  "restart_status": {
+    "present": false,
+    "ok": false,
+    "path": "models\\restart_drill_gbpusd.json"
+  },
+  "ops_attestation_status": {
+    "present": false,
+    "ok": false,
+    "path": "models\\ops_attestation_gbpusd.json"
+  },
+  "preflight_status": {
+    "present": false,
+    "ok": false,
+    "path": "models\\live_preflight_gbpusd.json"
+  },
+  "historical_replay_status": {
+    "present": true,
+    "ok": false,
+    "path": "models\\rc1\\gbpusd_10k_v1_mr_rc1\\mt5_historical_replay_report.json",
+    "overall_verdict": "DRIFT_CRITICAL",
+    "blockers": [
+      "overall_verdict=DRIFT_CRITICAL"
+    ],
+    "payload": {
+      "symbol": "GBPUSD",
+      "days": 30,
+      "bars_processed": 162,
+      "window_start_utc": "2026-03-25T18:27:01.288000+00:00",
+      "window_end_utc": "2026-04-14T02:45:55.738000+00:00",
+      "would_open_count": 0,
+      "would_close_count": 0,
+      "would_hold_count": 0,
+      "would_flat_count": 162,
+      "would_open_pct": 0.0,
+      "would_close_pct": 0.0,
+      "would_hold_pct": 0.0,
+      "would_flat_pct": 100.0,
+      "long_open_count": 0,
+      "short_open_count": 0,
+      "live_trades_per_bar": 0.0,
+      "replay_trades_per_bar": 0.003795066413662239,
+      "replay_trade_count": 4,
+      "replay_bars": 1054,
+      "signal_density_ratio": 0.0,
+      "live_avg_spread_pips": 0.8176351851851851,
+      "backtest_spread_pips": 0.5,
+      "spread_ratio": 1.6352703703703702,
+      "long_short_ratio": 0.0,
+      "reason_counts": {
+        "spread": 0,
+        "session": 25,
+        "no_signal": 128
+      },
+      "session_opens": {},
+      "overall_verdict": "DRIFT_CRITICAL",
+      "overall_verdict_label": "DRIFT_CRITICAL - Significant live vs backtest divergence",
+      "manifest_path": "models\\rc1\\gbpusd_10k_v1_mr_rc1\\manifest.json",
+      "manifest_hash": "814777123cf53e7a58180d973352aaaff9db3a4b5f09c6b0939d1361af72ad9a",
+      "logic_hash": "e1c9bf0fb26a5124a4e774a846ff37a424a7c08d8b9d9a6eaeff740ea4a0e185",
+      "evaluator_hash": "693309d0d5a9cb1aa731272f232f17a617df45d0162a3f0d45fa61bebc7e403f",
+      "ticks_per_bar": 10000,
+      "audit_trace_path": "models\\rc1\\gbpusd_10k_v1_mr_rc1\\mt5_historical_replay_report.audit.jsonl",
+      "raw_bars_path": "models\\rc1\\gbpusd_10k_v1_mr_rc1\\mt5_historical_replay_report.bars.jsonl"
+    }
+  },
+  "final_verdict": "demoted",
+  "verdict_reason": "shadow evidence below threshold: need 20 trading days and 30 actionable events; restart drill failed or missing; preflight failed or missing; ops attestation failed or missing; historical MT5 replay shows critical drift",
+  "weekly_reviews": [],
+  "replay_reference": {
+    "reference_source": "baseline_scoreboard_rc1",
+    "signal_density": null,
+    "would_open_density": null,
+    "long_share": 0.4444444444444444
+  }
+}

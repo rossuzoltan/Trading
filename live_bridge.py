@@ -44,8 +44,10 @@ from feature_engine import FEATURE_COLS, FeatureEngine, WARMUP_BARS
 from mt5_broker_caps import describe_trade_mode, read_symbol_caps, trade_mode_allows_open
 from project_paths import resolve_dataset_path, resolve_manifest_path, validate_dataset_bar_spec
 from run_logging import configure_run_logging, set_log_context
-from runtime_common import STATE_FEATURE_COUNT, ActionSpec, ActionType, deserialize_action_map
+from runtime_common import STATE_FEATURE_COUNT, ActionSpec, ActionType, build_simple_action_map, deserialize_action_map
 from runtime_common import TRAINING_RUNTIME_OPTION_KEYS, runtime_options_from_training_payload
+from selector_manifest import load_selector_manifest, validate_paper_live_candidate_manifest
+from strategies.rule_logic import compute_rule_direction
 from symbol_utils import pip_size_for_symbol
 from trading_config import (
     ACTION_SL_MULTS,
@@ -81,8 +83,53 @@ LIVE_STATE_FLUSH_EVERY_TICKS = int(os.environ.get("LIVE_STATE_FLUSH_EVERY_TICKS"
 MAX_DRAWDOWN_FRACTION = float(os.environ.get("TRADING_MAX_DRAWDOWN_FRACTION", "0.15"))
 
 
+class ManifestRulePolicy:
+    def __init__(
+        self,
+        feature_engine: FeatureEngine,
+        action_map: list[ActionSpec] | tuple[ActionSpec, ...],
+        *,
+        rule_family: str,
+        rule_params: dict[str, Any],
+    ) -> None:
+        self.feature_engine = feature_engine
+        self.action_map = list(action_map)
+        self.rule_family = str(rule_family)
+        self.rule_params = dict(rule_params)
+        self.hold_idx = 0
+        self.close_idx = 1
+        self.long_idx = 2
+        self.short_idx = 3
+
+    def decide(self, observation, mask) -> tuple[int, ActionSpec]:
+        buffer = getattr(self.feature_engine, "_buffer", None)
+        if buffer is None or len(buffer) == 0:
+            idx = self.hold_idx if mask[self.hold_idx] else self.close_idx
+            return int(idx), self.action_map[int(idx)]
+        last_row = buffer.iloc[-1]
+        target_direction = int(compute_rule_direction(self.rule_family, last_row.to_dict(), self.rule_params))
+        current_direction = int(observation[-1, -4]) if getattr(observation, "ndim", 1) > 1 else int(observation[-4])
+
+        if current_direction == target_direction:
+            idx = self.hold_idx
+        elif target_direction == 0:
+            idx = self.close_idx if current_direction != 0 else self.hold_idx
+        elif current_direction == 0:
+            idx = self.long_idx if target_direction > 0 else self.short_idx
+        else:
+            idx = self.close_idx
+
+        if not mask[idx]:
+            idx = self.hold_idx if mask[self.hold_idx] else self.close_idx
+        return int(idx), self.action_map[int(idx)]
+
+
 def _resolve_execution_cost_profile(manifest) -> dict[str, float]:
-    profile = dict(getattr(manifest, "execution_cost_profile", None) or {})
+    # Preferred source is the selector manifest's cost_model.
+    # Keep backward-compatible fallback to legacy execution_cost_profile if present.
+    cost_model = dict(getattr(manifest, "cost_model", None) or {})
+    legacy_profile = dict(getattr(manifest, "execution_cost_profile", None) or {})
+    profile = cost_model or legacy_profile
     return {
         "commission_per_lot": float(profile.get("commission_per_lot", 7.0)),
         "slippage_pips": float(profile.get("slippage_pips", 0.25)),
@@ -104,6 +151,14 @@ def _resolve_reward_profile(manifest) -> dict[str, float]:
 def _load_training_runtime_options(diagnostics_path: Path | None, *, default_window_size: int = 1) -> dict[str, Any]:
     payload = load_json_report(diagnostics_path) if diagnostics_path is not None and diagnostics_path.exists() else {}
     return runtime_options_from_training_payload(payload, default_window_size=default_window_size)
+
+
+def _selector_action_map(manifest: Any) -> tuple[ActionSpec, ...]:
+    rule_params = dict(getattr(manifest, "rule_params", {}) or {})
+    return build_simple_action_map(
+        sl_value=float(rule_params.get("sl_value", 1.5)),
+        tp_value=float(rule_params.get("tp_value", 3.0)),
+    )
 
 
 DAILY_LOSS_FRACTION = float(os.environ.get("TRADING_DAILY_LOSS_FRACTION", "0.05"))
@@ -444,31 +499,62 @@ class LiveMt5Broker(BaseBroker):
         request: dict[str, Any],
         result: SubmitResult,
         symbol_info: Any,
+        tick_info: Any | None = None,
     ) -> None:
         point = float(_safe_mt5_attr(symbol_info, "point", 0.0) or 0.0)
         requested_price = float(intent.requested_price or 0.0)
+        sent_price = float(request.get("price", 0.0) or 0.0)
         fill_price = float(result.fill_price or 0.0)
-        fill_delta_price = fill_price - requested_price if fill_price else 0.0
+        fill_delta_price_requested = fill_price - requested_price if fill_price else 0.0
+        fill_delta_price_sent = fill_price - sent_price if fill_price else 0.0
+        # Prefer measuring drift vs the transmitted price (sent_price). requested_price may be a
+        # higher-level intent (or a legacy placeholder) and can inflate drift metrics.
+        drift_basis = "sent_price" if sent_price else "requested_price"
+        fill_delta_price = fill_delta_price_sent if sent_price else fill_delta_price_requested
         pip_size = pip_size_for_symbol(intent.symbol)
         fill_delta_pips = fill_delta_price / pip_size if pip_size else 0.0
+        fill_delta_pips_requested = fill_delta_price_requested / pip_size if pip_size else 0.0
+        fill_delta_pips_sent = fill_delta_price_sent / pip_size if pip_size else 0.0
+        bid = _safe_mt5_attr(tick_info, "bid", None) if tick_info is not None else None
+        ask = _safe_mt5_attr(tick_info, "ask", None) if tick_info is not None else None
+        spread_price = None
+        spread_pips = None
+        if bid is not None and ask is not None:
+            spread_price = float(ask) - float(bid)
+            spread_pips = float(spread_price / pip_size) if pip_size else 0.0
         payload = {
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
             "symbol": intent.symbol,
             "action": intent.action.action_type.value,
             "direction": intent.action.direction,
             "requested_price": requested_price,
-            "sent_price": float(request.get("price", 0.0) or 0.0),
+            "sent_price": sent_price,
             "fill_price": fill_price,
+            "fill_delta_basis": drift_basis,
             "fill_delta_price": fill_delta_price,
             "fill_delta_pips": fill_delta_pips,
+            "fill_delta_price_requested": fill_delta_price_requested,
+            "fill_delta_pips_requested": fill_delta_pips_requested,
+            "fill_delta_price_sent": fill_delta_price_sent,
+            "fill_delta_pips_sent": fill_delta_pips_sent,
             "volume": float(request.get("volume", 0.0) or 0.0),
             "sl_price": request.get("sl"),
             "tp_price": request.get("tp"),
+            "broker_ticket": intent.broker_ticket,
             "retcode": result.retcode,
             "accepted": bool(result.accepted),
             "error": result.error,
             "shadow_mode": bool(LIVE_SHADOW_MODE),
             "order_id": result.order_id,
+            "request_magic": request.get("magic"),
+            "request_comment": request.get("comment"),
+            "request_deviation_points": request.get("deviation"),
+            "request_type_filling": request.get("type_filling"),
+            "request_type_time": request.get("type_time"),
+            "tick_bid": bid,
+            "tick_ask": ask,
+            "tick_spread_price": spread_price,
+            "tick_spread_pips": spread_pips,
             "broker_point": point,
             "broker_tick_size": _safe_mt5_attr(symbol_info, "trade_tick_size"),
             "broker_tick_value": _safe_mt5_attr(symbol_info, "trade_tick_value"),
@@ -485,6 +571,12 @@ class LiveMt5Broker(BaseBroker):
         request: dict[str, Any],
         symbol_info: Any,
     ) -> SubmitResult:
+        tick_info = None
+        if hasattr(self.mt5, "symbol_info_tick"):
+            try:
+                tick_info = self.mt5.symbol_info_tick(intent.symbol)
+            except Exception:
+                tick_info = None
         if LIVE_SHADOW_MODE:
             result = SubmitResult(
                 accepted=True,
@@ -492,7 +584,7 @@ class LiveMt5Broker(BaseBroker):
                 retcode=0,
                 fill_price=float(request.get("price", 0.0) or 0.0),
             )
-            self._audit_order(intent=intent, request=request, result=result, symbol_info=symbol_info)
+            self._audit_order(intent=intent, request=request, result=result, symbol_info=symbol_info, tick_info=tick_info)
             return result
 
         result = self.mt5.order_send(request)
@@ -504,7 +596,7 @@ class LiveMt5Broker(BaseBroker):
             result = self.mt5.order_send(request)
         if result is None:
             submit_result = SubmitResult(accepted=False, error="order_send returned None")
-            self._audit_order(intent=intent, request=request, result=submit_result, symbol_info=symbol_info)
+            self._audit_order(intent=intent, request=request, result=submit_result, symbol_info=symbol_info, tick_info=tick_info)
             return submit_result
         if result.retcode != self.mt5.TRADE_RETCODE_DONE:
             submit_result = SubmitResult(
@@ -513,7 +605,7 @@ class LiveMt5Broker(BaseBroker):
                 retcode=int(result.retcode),
                 fill_price=float(getattr(result, "price", 0.0) or 0.0),
             )
-            self._audit_order(intent=intent, request=request, result=submit_result, symbol_info=symbol_info)
+            self._audit_order(intent=intent, request=request, result=submit_result, symbol_info=symbol_info, tick_info=tick_info)
             return submit_result
         submit_result = SubmitResult(
             accepted=True,
@@ -521,7 +613,7 @@ class LiveMt5Broker(BaseBroker):
             retcode=int(getattr(result, "retcode", 0) or 0),
             fill_price=float(getattr(result, "price", 0.0) or 0.0),
         )
-        self._audit_order(intent=intent, request=request, result=submit_result, symbol_info=symbol_info)
+        self._audit_order(intent=intent, request=request, result=submit_result, symbol_info=symbol_info, tick_info=tick_info)
         return submit_result
 
     def submit_order(self, intent: OrderIntent) -> SubmitResult:
@@ -662,20 +754,44 @@ def bootstrap_live_runtime(
     symbol: str = SYMBOL,
     state_path: str = STATE_PATH,
     ticks_per_bar: int = TICKS_PER_BAR,
+    manifest_path: str | Path | None = None,
     mt5_module: Any | None = None,
 ) -> tuple[RuntimeEngine, VolumeBarBuilder, JsonStateStore, Mt5CursorTickSource]:
     symbol = symbol.upper()
+    if manifest_path is not None:
+        selector_manifest = load_selector_manifest(
+            manifest_path,
+            verify_manifest_hash=True,
+            strict_manifest_hash=True,
+            require_component_hashes=True,
+        )
+        if selector_manifest.engine_type == "RULE":
+            validate_paper_live_candidate_manifest(selector_manifest)
+            return _bootstrap_rule_live_runtime(
+                manifest=selector_manifest,
+                manifest_path=Path(manifest_path),
+                symbol=symbol,
+                state_path=state_path,
+                ticks_per_bar=ticks_per_bar,
+                mt5_module=mt5_module,
+            )
+
     dataset_path = resolve_dataset_path()
-    manifest_path = resolve_manifest_path(symbol=symbol)
-    manifest = load_manifest(manifest_path)
+    resolved_manifest_path = resolve_manifest_path(symbol=symbol, preferred=manifest_path)
+    manifest = load_manifest(resolved_manifest_path)
     execution_cost_profile = _resolve_execution_cost_profile(manifest)
     reward_profile = _resolve_reward_profile(manifest)
     manifest_ticks = manifest.bar_construction_ticks_per_bar or manifest.ticks_per_bar
-    if manifest_ticks is not None:
+    if manifest_ticks is not None and Path(dataset_path).exists():
         validate_dataset_bar_spec(
             dataset_path=dataset_path,
             expected_ticks_per_bar=int(manifest_ticks),
             metadata_required=True,
+        )
+    elif manifest_ticks is not None:
+        log.warning(
+            "Dataset path %s does not exist during bootstrap; skipping dataset bar-spec validation.",
+            dataset_path,
         )
     if manifest_ticks is not None and int(manifest_ticks) != int(ticks_per_bar) and not LIVE_ALLOW_BAR_SPEC_MISMATCH:
         raise RuntimeError(
@@ -792,7 +908,106 @@ def bootstrap_live_runtime(
     )
     runtime.startup_reconcile()
     source = Mt5CursorTickSource(broker_module)
-    log.info(f"Live runtime ready using manifest {manifest_path}")
+    log.info(f"Live runtime ready using manifest {resolved_manifest_path}")
+    return runtime, builder, state_store, source
+
+
+def _bootstrap_rule_live_runtime(
+    *,
+    manifest: Any,
+    manifest_path: Path,
+    symbol: str,
+    state_path: str,
+    ticks_per_bar: int,
+    mt5_module: Any | None,
+) -> tuple[RuntimeEngine, VolumeBarBuilder, JsonStateStore, Mt5CursorTickSource]:
+    resolved_symbol = str(getattr(manifest, "strategy_symbol", symbol)).upper()
+    if resolved_symbol != symbol.upper():
+        raise RuntimeError(f"Selector manifest symbol mismatch: manifest={resolved_symbol} runtime={symbol.upper()}.")
+
+    execution_cost_profile = _resolve_execution_cost_profile(manifest)
+    reward_profile = _resolve_reward_profile(manifest)
+    manifest_ticks = manifest.bar_construction_ticks_per_bar or manifest.ticks_per_bar
+    if manifest_ticks is not None and int(manifest_ticks) != int(ticks_per_bar) and not LIVE_ALLOW_BAR_SPEC_MISMATCH:
+        raise RuntimeError(
+            f"Selector manifest bar_construction_ticks_per_bar={manifest_ticks} does not match live bar_construction_ticks_per_bar={ticks_per_bar}. "
+            "Align the runtime bar spec or set LIVE_ALLOW_BAR_SPEC_MISMATCH=1 for an explicit override."
+        )
+
+    feature_engine = FeatureEngine()
+    feature_engine.warm_up(_load_warmup_bars(resolved_symbol, ticks_per_bar))
+    action_map = list(_selector_action_map(manifest))
+    policy = ManifestRulePolicy(
+        feature_engine,
+        action_map,
+        rule_family=str(manifest.rule_family or ""),
+        rule_params=dict(getattr(manifest, "rule_params", {}) or {}),
+    )
+    runtime_options = runtime_options_from_training_payload({}, default_window_size=1)
+
+    if not MT5_AVAILABLE and mt5_module is None:
+        raise RuntimeError("MetaTrader5 is not available in this environment.")
+    broker_module = mt5_module or mt5
+    _connect_mt5(broker_module)
+    broker = LiveMt5Broker(
+        broker_module,
+        symbol=resolved_symbol,
+        commission_per_lot=execution_cost_profile["commission_per_lot"],
+        slippage_pips=execution_cost_profile["slippage_pips"],
+        partial_fill_ratio=execution_cost_profile["partial_fill_ratio"],
+    )
+    account_info = broker_module.account_info()
+    if account_info is None:
+        raise RuntimeError("MT5 account_info() returned None during selector live bootstrap.")
+    if _account_uses_hedging(broker_module, account_info):
+        raise RuntimeError(
+            "MT5 account is in hedging mode. Deployment requires a netting account; "
+            "hedging accounts are not a supported live runtime target."
+        )
+    initial_equity = float(getattr(account_info, "equity", 0.0) or 0.0)
+
+    state_store = JsonStateStore(state_path, ticks_per_bar=ticks_per_bar)
+    snapshot = state_store.load()
+    blockers = _live_readiness_blockers(resolved_symbol)
+    isolation_blocker = broker.isolation_blocker(resolved_symbol)
+    if isolation_blocker is not None:
+        blockers.append(isolation_blocker)
+    if blockers:
+        snapshot.safe_mode_active = True
+        log.critical("Live readiness blockers present for %s. Starting in safe mode.", resolved_symbol)
+        for blocker in blockers:
+            log.critical("LIVE BLOCKER: %s", blocker)
+    if snapshot.bar_builder.ticks_per_bar == 0:
+        snapshot.bar_builder.ticks_per_bar = ticks_per_bar
+    builder = VolumeBarBuilder(ticks_per_bar=ticks_per_bar, state=snapshot.bar_builder)
+    risk_engine = RiskEngine(_build_risk_limits(), snapshot=snapshot, initial_equity=initial_equity)
+    runtime = RuntimeEngine(
+        symbol=resolved_symbol,
+        feature_engine=feature_engine,
+        policy=policy,
+        broker=broker,
+        action_map=action_map,
+        risk_engine=risk_engine,
+        state_store=state_store,
+        snapshot=snapshot,
+        reward_scale=reward_profile["reward_scale"],
+        reward_drawdown_penalty=reward_profile["drawdown_penalty"],
+        reward_transaction_penalty=reward_profile["transaction_penalty"],
+        reward_clip_low=reward_profile["reward_clip_low"],
+        reward_clip_high=reward_profile["reward_clip_high"],
+        window_size=int(runtime_options.get("window_size", 1)),
+        churn_min_hold_bars=int(runtime_options.get("churn_min_hold_bars", 0)),
+        churn_action_cooldown=int(runtime_options.get("churn_action_cooldown", 0)),
+        entry_spread_z_limit=float(runtime_options.get("entry_spread_z_limit", 1.5)),
+    )
+    runtime.policy_mode = "RULE"
+    runtime.startup_reconcile()
+    source = Mt5CursorTickSource(broker_module)
+    log.info(
+        "Selector live runtime ready using manifest %s (manifest_hash=%s)",
+        manifest_path,
+        getattr(manifest, "manifest_hash", ""),
+    )
     return runtime, builder, state_store, source
 
 

@@ -391,7 +391,18 @@ class RuntimeEngine:
 
     def startup_reconcile(self) -> None:
         pos_snapshot = self.broker.current_position(self.symbol)
+        # Startup reconciliation should not advance time-in-trade; that should
+        # only move forward on actual bar processing.
+        previous_time_in_trade = int(self.confirmed_position.time_in_trade_bars)
+        previous_ticket = self.confirmed_position.broker_ticket
+        previous_direction = int(self.confirmed_position.direction)
         sync_confirmed_position(self.confirmed_position, pos_snapshot, last_reward=0.0)
+        if (
+            previous_ticket is not None
+            and previous_ticket == pos_snapshot.broker_ticket
+            and previous_direction == int(pos_snapshot.direction)
+        ):
+            self.confirmed_position.time_in_trade_bars = previous_time_in_trade
         self.last_equity = float(self.broker.current_equity(self.symbol))
         self.snapshot.last_equity = self.last_equity
 

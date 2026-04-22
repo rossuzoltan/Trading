@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
 from edge_research import run_edge_baseline_research
 from evaluate_oos import (
     _best_model_name as _shared_best_model_name,
+    _build_action_index_provider as _shared_build_action_index_provider,
     _build_runtime_parity_verdict as _shared_build_runtime_parity_verdict,
     _evaluate_policy as _shared_evaluate_policy,
     _evaluate_runtime_baselines as _shared_evaluate_runtime_baselines,
@@ -90,8 +91,12 @@ def _mean_reversion_provider(
     )
 
 
-def _evaluate_policy(*, replay_context, action_index_provider):
-    return _shared_evaluate_policy(replay_context=replay_context, action_index_provider=action_index_provider)
+def _evaluate_policy(*, replay_context, action_index_provider, disable_alpha_gate: bool = False):
+    return _shared_evaluate_policy(
+        replay_context=replay_context,
+        action_index_provider=action_index_provider,
+        disable_alpha_gate=disable_alpha_gate,
+    )
 
 
 def _evaluate_runtime_baselines(*, replay_context) -> dict[str, dict[str, Any]]:
@@ -147,10 +152,12 @@ def build_baseline_comparison(
     replay_report_path = Path("models") / f"replay_report_{symbol.lower()}.json"
     replay_report = load_json_report(replay_report_path) if replay_report_path.exists() else None
     if replay_report is None:
+        action_index_provider = _shared_build_action_index_provider(replay_context)
         replay_report = {
             "replay_metrics": _evaluate_policy(
                 replay_context=replay_context,
-                action_index_provider=None,
+                action_index_provider=action_index_provider,
+                disable_alpha_gate=bool(action_index_provider is not None),
             )["metrics"]
         }
     replay_metrics = dict((replay_report or {}).get("replay_metrics", {}) or {})

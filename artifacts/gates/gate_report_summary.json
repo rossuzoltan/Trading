@@ -1,0 +1,134 @@
+{
+  "gate_count": 7,
+  "verdict_counts": {
+    "demoted": 7
+  },
+  "symbol_counts": {
+    "EURUSD": 3,
+    "GBPUSD": 4
+  },
+  "symbol_verdict_counts": {
+    "EURUSD": {
+      "demoted": 3
+    },
+    "GBPUSD": {
+      "demoted": 4
+    }
+  },
+  "markdown_mismatch_count": 0,
+  "markdown_mismatches": [],
+  "entries": [
+    {
+      "symbol": "EURUSD",
+      "manifest_hash": "76c1b061b2306d70ff66504bc27297a56ff41ef37ac4a4c3852bce6efbea49b2",
+      "anchor_status": "demoted",
+      "final_verdict": "demoted",
+      "verdict_reason": "shadow evidence below threshold: need 20 trading days and 30 actionable events; restart drill failed or missing; preflight failed or missing; ops attestation failed or missing; historical MT5 replay shows critical drift",
+      "drift_verdict": "critical",
+      "trading_days": 0,
+      "actionable_events": 0,
+      "json_path": "C:\\dev\\trading\\artifacts\\gates\\EURUSD\\76c1b061b2306d70ff66504bc27297a56ff41ef37ac4a4c3852bce6efbea49b2\\paper_live_gate.json",
+      "markdown_path": "C:\\dev\\trading\\artifacts\\gates\\EURUSD\\76c1b061b2306d70ff66504bc27297a56ff41ef37ac4a4c3852bce6efbea49b2\\paper_live_gate.md",
+      "markdown_present": true,
+      "markdown_verdict": "demoted",
+      "markdown_anchor_status": "demoted",
+      "markdown_matches_json": true
+    },
+    {
+      "symbol": "EURUSD",
+      "manifest_hash": "a1ceb43cbaafe196e991742ac33c7d9d593dd496371d2583b423c27463e2d2d1",
+      "anchor_status": "demoted",
+      "final_verdict": "demoted",
+      "verdict_reason": "shadow evidence below threshold: need 20 trading days and 30 actionable events; restart drill failed or missing; preflight failed or missing; ops attestation failed or missing",
+      "drift_verdict": "critical",
+      "trading_days": 1,
+      "actionable_events": 0,
+      "json_path": "C:\\dev\\trading\\artifacts\\gates\\EURUSD\\a1ceb43cbaafe196e991742ac33c7d9d593dd496371d2583b423c27463e2d2d1\\paper_live_gate.json",
+      "markdown_path": "C:\\dev\\trading\\artifacts\\gates\\EURUSD\\a1ceb43cbaafe196e991742ac33c7d9d593dd496371d2583b423c27463e2d2d1\\paper_live_gate.md",
+      "markdown_present": true,
+      "markdown_verdict": "demoted",
+      "markdown_anchor_status": "demoted",
+      "markdown_matches_json": true
+    },
+    {
+      "symbol": "EURUSD",
+      "manifest_hash": "f6a5df096e3d81e914b0196ec5e0b8fd76eebd0f79d40c9ff351c63891cf77de",
+      "anchor_status": "demoted",
+      "final_verdict": "demoted",
+      "verdict_reason": "deployed anchor underperformed a mandatory baseline; deployed anchor underperformed the raw anchor baseline on PF or expectancy; shadow evidence below threshold: need 20 trading days and 30 actionable events; restart drill failed or missing; preflight failed or missing; ops attestation failed or missing; historical MT5 replay shows critical drift",
+      "drift_verdict": "critical",
+      "trading_days": 0,
+      "actionable_events": 0,
+      "json_path": "C:\\dev\\trading\\artifacts\\gates\\EURUSD\\f6a5df096e3d81e914b0196ec5e0b8fd76eebd0f79d40c9ff351c63891cf77de\\paper_live_gate.json",
+      "markdown_path": "C:\\dev\\trading\\artifacts\\gates\\EURUSD\\f6a5df096e3d81e914b0196ec5e0b8fd76eebd0f79d40c9ff351c63891cf77de\\paper_live_gate.md",
+      "markdown_present": true,
+      "markdown_verdict": "demoted",
+      "markdown_anchor_status": "demoted",
+      "markdown_matches_json": true
+    },
+    {
+      "symbol": "GBPUSD",
+      "manifest_hash": "3977c249d3fc587967ffe726ca47d21b0f02271eeb8997d280ba031692d74d00",
+      "anchor_status": "demoted",
+      "final_verdict": "demoted",
+      "verdict_reason": "shadow evidence below threshold: need 20 trading days and 30 actionable events; restart drill failed or missing; preflight failed or missing; ops attestation failed or missing; historical MT5 replay shows critical drift",
+      "drift_verdict": "aligned",
+      "trading_days": 0,
+      "actionable_events": 0,
+      "json_path": "C:\\dev\\trading\\artifacts\\gates\\GBPUSD\\3977c249d3fc587967ffe726ca47d21b0f02271eeb8997d280ba031692d74d00\\paper_live_gate.json",
+      "markdown_path": "C:\\dev\\trading\\artifacts\\gates\\GBPUSD\\3977c249d3fc587967ffe726ca47d21b0f02271eeb8997d280ba031692d74d00\\paper_live_gate.md",
+      "markdown_present": true,
+      "markdown_verdict": "demoted",
+      "markdown_anchor_status": "demoted",
+      "markdown_matches_json": true
+    },
+    {
+      "symbol": "GBPUSD",
+      "manifest_hash": "6d3c5cca560df1672707be70a397c971fc6c7496ae934cbbe7dc6cf6870f5a24",
+      "anchor_status": "demoted",
+      "final_verdict": "demoted",
+      "verdict_reason": "shadow evidence below threshold: need 20 trading days and 30 actionable events; restart drill failed or missing; preflight failed or missing; ops attestation failed or missing; historical MT5 replay shows critical drift",
+      "drift_verdict": "critical",
+      "trading_days": 0,
+      "actionable_events": 0,
+      "json_path": "C:\\dev\\trading\\artifacts\\gates\\GBPUSD\\6d3c5cca560df1672707be70a397c971fc6c7496ae934cbbe7dc6cf6870f5a24\\paper_live_gate.json",
+      "markdown_path": "C:\\dev\\trading\\artifacts\\gates\\GBPUSD\\6d3c5cca560df1672707be70a397c971fc6c7496ae934cbbe7dc6cf6870f5a24\\paper_live_gate.md",
+      "markdown_present": true,
+      "markdown_verdict": "demoted",
+      "markdown_anchor_status": "demoted",
+      "markdown_matches_json": true
+    },
+    {
+      "symbol": "GBPUSD",
+      "manifest_hash": "814777123cf53e7a58180d973352aaaff9db3a4b5f09c6b0939d1361af72ad9a",
+      "anchor_status": "demoted",
+      "final_verdict": "demoted",
+      "verdict_reason": "shadow evidence below threshold: need 20 trading days and 30 actionable events; restart drill failed or missing; preflight failed or missing; ops attestation failed or missing; historical MT5 replay shows critical drift",
+      "drift_verdict": "critical",
+      "trading_days": 0,
+      "actionable_events": 0,
+      "json_path": "C:\\dev\\trading\\artifacts\\gates\\GBPUSD\\814777123cf53e7a58180d973352aaaff9db3a4b5f09c6b0939d1361af72ad9a\\paper_live_gate.json",
+      "markdown_path": "C:\\dev\\trading\\artifacts\\gates\\GBPUSD\\814777123cf53e7a58180d973352aaaff9db3a4b5f09c6b0939d1361af72ad9a\\paper_live_gate.md",
+      "markdown_present": true,
+      "markdown_verdict": "demoted",
+      "markdown_anchor_status": "demoted",
+      "markdown_matches_json": true
+    },
+    {
+      "symbol": "GBPUSD",
+      "manifest_hash": "b8eed582dd825f5ac763f205a69a7868a0143e624cdae67f69273f6c1c65fe02",
+      "anchor_status": "demoted",
+      "final_verdict": "demoted",
+      "verdict_reason": "deployed anchor underperformed a mandatory baseline; deployed anchor underperformed the raw anchor baseline on PF or expectancy; shadow evidence below threshold: need 20 trading days and 30 actionable events; restart drill failed or missing; preflight failed or missing; ops attestation failed or missing; historical MT5 replay shows critical drift",
+      "drift_verdict": "aligned",
+      "trading_days": 0,
+      "actionable_events": 0,
+      "json_path": "C:\\dev\\trading\\artifacts\\gates\\GBPUSD\\b8eed582dd825f5ac763f205a69a7868a0143e624cdae67f69273f6c1c65fe02\\paper_live_gate.json",
+      "markdown_path": "C:\\dev\\trading\\artifacts\\gates\\GBPUSD\\b8eed582dd825f5ac763f205a69a7868a0143e624cdae67f69273f6c1c65fe02\\paper_live_gate.md",
+      "markdown_present": true,
+      "markdown_verdict": "demoted",
+      "markdown_anchor_status": "demoted",
+      "markdown_matches_json": true
+    }
+  ]
+}

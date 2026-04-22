@@ -1,11 +1,23 @@
 # Trading Project
 
-This repo is a Python-based Forex reinforcement-learning pipeline with four main pieces:
+This repo is a Rule-First Forex Trading System with AlphaGate meta-labeling. It focuses on deterministic rule candidates certified against exact-runtime parity, with optional ML filters to improve precision.
 
-- `download_dukascopy.py` downloads raw tick data and can build initial volume-bar datasets.
-- `build_volume_bars.py` consolidates per-pair tick data into the training dataset.
-- `train_agent.py` trains a `MaskablePPO` agent on engineered Forex features.
-- `evaluate_oos.py` and `live_bridge.py` handle out-of-sample validation and live or simulated execution.
+- `tools/optimize_rules.py` generates and validates rule candidates over historical data.
+- `rule_selector.py` is the manifest-driven runtime loop for signals and execution.
+- `runtime/shadow_broker.py` provides pure shadow-mode operation for certification.
+- `evaluate_oos.py` provides authoritative out-of-sample validation.
+- `train_agent.py` (Legacy) remains available for research-only RL exploration.
+
+## Current Status
+
+As of `2026-04-10`:
+
+- RC packs were regenerated and now pass strict manifest-hash verification.
+- `tools/verify_v1_rc.py` currently certifies structurally, but both anchors still fail the new fail-fast pre-test gate.
+- `EURUSD` RC replay is positive but too thin for testing: `6` trades, net `+$1.89`.
+- `GBPUSD` RC replay is also too thin: `4` trades, net `+$5.14`.
+- Both anchors are blocked by stale historical replay evidence plus critical replay/live drift from the last MT5 replay artifacts.
+- Exact-runtime EURUSD bakeoff currently says the best holdout result is still `rule_only`; `xgboost_pair` is the strongest refit challenger, but it does not beat the ungated rule on current holdout.
 
 ## Documentation
 
@@ -18,37 +30,46 @@ This repo is a Python-based Forex reinforcement-learning pipeline with four main
 
 ## Current Architecture
 
-- Supported training environment: `RuntimeGymEnv` on volume bars
-- Compatibility fallback: legacy `trading_env.py` path for older experiments only
-- Features: engineered in `feature_engine.py`
-- Model: `sb3-contrib` `MaskablePPO`
-- Primary data format: volume bars, with compatibility fallback to `FOREX_MULTI_SET.csv`
+- Primary signal engine: deterministic rule families in `strategies/rule_logic.py`
+- Optional veto layer: `BaselineAlphaGate` (`logistic_pair`, `xgboost_pair`, `lightgbm_pair`, `ridge_signed_target`)
+- Runtime contract: manifest-driven `rule_selector.py` with exact-runtime replay parity checks
+- Safety path: `runtime/shadow_broker.py` + `tools/paper_live_gate.py` before any live-money discussion
+- Legacy RL remains available for research continuity only (`train_agent.py`, `RuntimeGymEnv`)
 
 ## Quick Start
 
-1. Activate the repo virtualenv or call it explicitly: `.\.venv\Scripts\python.exe`
-2. Run `.\.venv\Scripts\python.exe .\tools\project_healthcheck.py`
-   - Missing model/scaler artifacts are expected before the first training run; use `--strict-runtime-assets` only when you expect a fully trained workspace.
-3. If needed, repair or recreate `.venv`
-4. Install anything missing from `Requirements.txt` and `requirements.project.txt`
-5. Download data with `.\.venv\Scripts\python.exe .\download_dukascopy.py`
-6. Build the combined dataset with `.\.venv\Scripts\python.exe .\build_volume_bars.py`
-7. Train with `.\.venv\Scripts\python.exe .\train_agent.py`
-8. Evaluate with `.\.venv\Scripts\python.exe .\evaluate_oos.py`
-9. Compare the RL replay against simpler baselines with `.\.venv\Scripts\python.exe .\compare_oos_baselines.py --symbol EURUSD`
+1. Activate the repo virtualenv: `.\.venv\Scripts\python.exe`
+2. Run project healthcheck: `.\.venv\Scripts\python.exe .\tools\project_healthcheck.py --mode rc1`
+3. Generate rule candidates: `.\.venv\Scripts\python.exe .\tools\optimize_rules.py --symbol GBPUSD`
+4. Evaluate candidates OOS: `.\.venv\Scripts\python.exe .\evaluate_oos.py --symbol GBPUSD`
+5. Certify an RC pack: `.\.venv\Scripts\python.exe .\tools\generate_v1_rc.py`
+6. Re-run strict certification: `.\.venv\Scripts\python.exe .\tools\verify_v1_rc.py`
+7. Run fail-fast pre-test gate: `.\.venv\Scripts\python.exe .\tools\pre_test_gate.py --manifest-path .\models\rc1\eurusd_5k_v1_mr_rc1\manifest.json`
+8. Compare AlphaGate challengers exact-runtime: `.\.venv\Scripts\python.exe .\tools\alpha_gate_bakeoff.py --manifest-path .\models\rc1\eurusd_5k_v1_mr_rc1\manifest.json`
+9. Run shadow certification only after pre-test passes: `.\tools\run_shadow_simulator.ps1 -ManifestPath models/rc1/gbpusd_10k_v1_mr_rc1/manifest.json`
 
-Core entrypoints (`train_agent.py`, `evaluate_oos.py`, `live_bridge.py`) now re-exec into the
-project `.venv` automatically when launched from the wrong interpreter, but explicit `.venv`
-usage is still the least ambiguous path.
+## Optimization and Certification
 
-## Training Defaults And Guardrails
+The primary research workflow is manifest-driven using `tools/optimize_rules.py`. Rule families are defined in `strategies/rule_logic.py`, and the optimizer performs an exact-runtime sweep to identify candidates that satisfy strict Profit Factor (PF > 1.15) and stability constraints.
 
-- `train_agent.py` now defaults to `TRAIN_ENV_MODE=runtime`. The supported stack is `MaskablePPO + RuntimeGymEnv + volume bars`.
-- `TRAIN_NUM_ENVS=1` and `TRAIN_FORCE_DUMMY_VEC=1` are treated as debug or profiling settings and emit warnings during training.
-- Training now fails closed when a symbol cannot satisfy the minimum train, validation, and holdout bar requirements. Defaults:
-  - `TRAIN_MIN_TRAIN_BARS=5000`
-  - `TRAIN_MIN_VAL_BARS=200`
-  - `TRAIN_MIN_HOLDOUT_BARS=500`
+Certified RC (Release Candidate) packs are built and verified using:
+- `.\.venv\Scripts\python.exe .\tools\generate_v1_rc.py`
+- `.\.venv\Scripts\python.exe .\tools\verify_v1_rc.py`
+- `.\.venv\Scripts\python.exe .\tools\pre_test_gate.py --manifest-path .\models\rc1\eurusd_5k_v1_mr_rc1\manifest.json`
+
+Exact-runtime AlphaGate challenger bakeoff:
+- `.\.venv\Scripts\python.exe .\tools\alpha_gate_bakeoff.py --manifest-path .\models\rc1\eurusd_5k_v1_mr_rc1\manifest.json`
+
+Optional hybrid sweeps:
+- `.\.venv\Scripts\python.exe .\tools\optimize_rules.py --symbol EURUSD --use-alpha-gate --alpha-gate-model logistic_pair`
+- `.\.venv\Scripts\python.exe .\tools\optimize_rules.py --symbol EURUSD --use-alpha-gate --alpha-gate-model xgboost_pair`
+- `.\.venv\Scripts\python.exe .\tools\optimize_rules.py --symbol EURUSD --use-alpha-gate --alpha-gate-model lightgbm_pair`
+- Add `--enable-regime-guard-sweep` to evaluate optional low-volatility/news-spike filters.
+
+## Legacy RL Pipeline
+
+The previous reinforcement learning pipeline (`train_agent.py` and `MaskablePPO`) is still available for research purposes but is no longer the primary path for production signals.
+- To monitor legacy training: `.\.venv\Scripts\python.exe .\tools\training_status.py --symbol EURUSD`
 
 ## Bar Spec
 
