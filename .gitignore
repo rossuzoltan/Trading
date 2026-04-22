@@ -45,3 +45,4 @@ run_error.txt
 # Shadow / gate evidence artifacts (operator-local, regenerated often)
 artifacts/shadow/
 artifacts/gates/
+artifacts/openclaw/

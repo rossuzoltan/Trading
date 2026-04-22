@@ -18,15 +18,56 @@ def main() -> int:
         print(json.dumps({'ok': False, 'reason': f'missing manifest: {manifest_path}'}))
         return 1
     manifest = load_selector_manifest(manifest_path, verify_manifest_hash=True, strict_manifest_hash=True)
+    manifest_cost_model = dict(getattr(manifest, 'cost_model', None) or {})
     payload = {
         'manifest_path': str(manifest_path),
         'manifest_hash': manifest.manifest_hash,
-        'manifest_cost_model': dict(getattr(manifest, 'cost_model', None) or {}),
+        'manifest_cost_model': manifest_cost_model,
         'resolved_runtime_cost_profile': _resolve_execution_cost_profile(manifest),
         'threshold_policy': dict(getattr(manifest, 'threshold_policy', None) or {}),
         'alpha_gate': dict(getattr(manifest, 'alpha_gate', None) or {}),
     }
-    payload['ok'] = payload['manifest_cost_model'] == payload['resolved_runtime_cost_profile']
+
+    resolved = dict(payload['resolved_runtime_cost_profile'] or {})
+    missing_keys = sorted([k for k in resolved.keys() if k not in manifest_cost_model])
+    extra_keys = sorted([k for k in manifest_cost_model.keys() if k not in resolved])
+    mismatched_keys: list[str] = []
+    for k, v in manifest_cost_model.items():
+        if k not in resolved:
+            continue
+        try:
+            if float(v) != float(resolved[k]):
+                mismatched_keys.append(k)
+        except Exception:
+            if v != resolved[k]:
+                mismatched_keys.append(k)
+
+    implicit_default_expected = {
+        'commission_per_lot': 7.0,
+        'slippage_pips': 0.25,
+        'partial_fill_ratio': 1.0,
+    }
+    implicit_defaults_ok = all(
+        (k in implicit_default_expected and float(resolved.get(k)) == float(implicit_default_expected[k]))
+        for k in missing_keys
+    )
+
+    payload['implicit_defaults'] = {
+        'missing_keys': missing_keys,
+        'extra_keys': extra_keys,
+        'mismatched_keys': sorted(mismatched_keys),
+        'expected_defaults': implicit_default_expected,
+        'implicit_defaults_ok': bool(implicit_defaults_ok),
+    }
+
+    payload['ok'] = (len(mismatched_keys) == 0) and (len(extra_keys) == 0) and implicit_defaults_ok
+    payload['severity'] = 'OK' if payload['ok'] else 'FAIL'
+    if payload['ok'] and missing_keys:
+        payload['severity'] = 'WARN'
+        payload['warning'] = (
+            'Manifest cost_model omits keys that are defaulted at runtime. '
+            'This is not strategy-behavior drift, but it is an audit/reporting default.'
+        )
     print(json.dumps(payload, indent=2))
     return 0 if payload['ok'] else 2
 

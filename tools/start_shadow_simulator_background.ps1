@@ -33,6 +33,22 @@ if ([string]::IsNullOrWhiteSpace($ManifestPath)) {
 if (-not (Test-Path $ManifestPath)) {
     throw "Manifest not found: $ManifestPath"
 }
+$ManifestPath = (Resolve-Path $ManifestPath).Path
+
+# Refuse to start duplicate shadow brokers for the same manifest, since multiple
+# processes can corrupt evidence and make drift/debugging non-actionable.
+$existing = Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
+    Where-Object {
+        ($_.CommandLine -like "*runtime.shadow_broker*" -or $_.CommandLine -like "*shadow_broker.py*") -and
+        $_.CommandLine -like "*$ManifestPath*"
+    } |
+    Select-Object ProcessId
+if ($existing) {
+    $pids = ($existing | ForEach-Object { $_.ProcessId }) -join ", "
+    Write-Output "Shadow simulator already running for this manifest. PIDs: $pids"
+    Write-Output "Stop with: Stop-Process -Id $pids"
+    exit 0
+}
 
 $python = Join-Path $root ".venv/Scripts/python.exe"
 if (-not (Test-Path $python)) {
@@ -42,15 +58,15 @@ if (-not (Test-Path $python)) {
 if ([string]::IsNullOrWhiteSpace($StdoutPath) -or [string]::IsNullOrWhiteSpace($StderrPath)) {
     $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
     if ([string]::IsNullOrWhiteSpace($StdoutPath)) {
-        $StdoutPath = Join-Path $root "models/shadow_simulator_${stamp}_stdout.log"
+        $StdoutPath = Join-Path $root "logs/shadow_simulator_${stamp}_stdout.log"
     }
     if ([string]::IsNullOrWhiteSpace($StderrPath)) {
-        $StderrPath = Join-Path $root "models/shadow_simulator_${stamp}_stderr.log"
+        $StderrPath = Join-Path $root "logs/shadow_simulator_${stamp}_stderr.log"
     }
 }
 
 $args = @(
-    "-m", "runtime.shadow_broker",
+    "runtime/shadow_broker.py",
     "--manifest", $ManifestPath,
     "--poll-interval-ms", "$PollIntervalMs"
 )
@@ -71,6 +87,10 @@ Write-Output "Starting shadow simulator in background with manifest: $ManifestPa
 Write-Output "Stdout: $StdoutPath"
 Write-Output "Stderr: $StderrPath"
 
+$logDir = Split-Path -Parent $StdoutPath
+if (-not [string]::IsNullOrWhiteSpace($logDir)) {
+    New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+}
 $proc = Start-Process -FilePath $python -ArgumentList $args -NoNewWindow -PassThru -RedirectStandardOutput $StdoutPath -RedirectStandardError $StderrPath
 Write-Output "PID: $($proc.Id)"
 Write-Output "Stop with: Stop-Process -Id $($proc.Id)"

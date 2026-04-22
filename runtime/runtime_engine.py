@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import shutil
 import time
 from dataclasses import asdict, dataclass, field
@@ -120,9 +121,10 @@ class VolumeBarBuilder:
         return bar
 
 
-def _as_tick_event(record: Any) -> TickEvent:
+def _as_tick_event(record: Any, *, server_offset_msc: int = 0) -> TickEvent:
     if hasattr(record, "__getitem__") and not hasattr(record, "bid"):
         time_val = record["time_msc"] if "time_msc" in getattr(getattr(record, "dtype", None), "names", []) or "time_msc" in record else record["time"] * 1000
+        time_val = int(time_val) - int(server_offset_msc)
         try:
             vol = record["volume_real"]
         except (KeyError, IndexError, ValueError):
@@ -133,6 +135,7 @@ def _as_tick_event(record: Any) -> TickEvent:
         return TickEvent(time_msc=int(time_val), bid=float(record["bid"]), ask=float(record["ask"]), volume=float(vol))
     
     time_msc = int(getattr(record, "time_msc", getattr(record, "time", 0) * 1000))
+    time_msc = int(time_msc) - int(server_offset_msc)
     return TickEvent(
         time_msc=time_msc,
         bid=float(getattr(record, "bid")),
@@ -172,19 +175,53 @@ class Mt5CursorTickSource:
         *,
         batch_size: int = 10_000,
         initial_lookback_seconds: int = 10,
+        server_utc_offset_hours: int | None = None,
     ) -> None:
         self.mt5 = mt5_module
         self.batch_size = int(batch_size)
         self.initial_lookback_seconds = int(initial_lookback_seconds)
+        self.server_utc_offset_hours = int(server_utc_offset_hours) if server_utc_offset_hours is not None else self._resolve_server_utc_offset_hours()
+        self.server_utc_offset_msc = int(self.server_utc_offset_hours) * 3600 * 1000
+
+    def _resolve_server_utc_offset_hours(self) -> int:
+        """
+        MT5 tick timestamps are often in broker server time (UTC+2/UTC+3), not UTC.
+        Shadow evidence and context gating require true UTC.
+
+        Operator override: MT5_SERVER_UTC_OFFSET_HOURS (integer hours).
+        Fallback: auto-detect from the latest tick vs now_utc (rounded to hour).
+        """
+        raw = str(os.environ.get("MT5_SERVER_UTC_OFFSET_HOURS", "") or "").strip()
+        if raw:
+            try:
+                return int(raw)
+            except Exception:
+                return 0
+        try:
+            tick = self.mt5.symbol_info_tick("EURUSD")
+            if tick is None:
+                return 0
+            now_utc = datetime.now(timezone.utc)
+            tick_dt_assumed_utc = datetime.fromtimestamp(int(getattr(tick, "time", 0) or 0), tz=timezone.utc)
+            delta_hours = (tick_dt_assumed_utc - now_utc).total_seconds() / 3600.0
+            detected = int(round(delta_hours))
+            if -12 <= detected <= 12:
+                return detected
+        except Exception:
+            return 0
+        return 0
 
     def fetch(self, symbol: str, cursor: TickCursor) -> tuple[list[TickEvent], TickCursor]:
         all_ticks: list[TickEvent] = []
         working_cursor = TickCursor(time_msc=cursor.time_msc, offset=cursor.offset)
         epoch = datetime.fromtimestamp(0, tz=timezone.utc)
         if working_cursor.time_msc > 0:
-            start_dt = epoch + timedelta(milliseconds=working_cursor.time_msc)
+            start_dt_utc = epoch + timedelta(milliseconds=working_cursor.time_msc)
         else:
-            start_dt = datetime.now(timezone.utc) - timedelta(seconds=self.initial_lookback_seconds)
+            start_dt_utc = datetime.now(timezone.utc) - timedelta(seconds=self.initial_lookback_seconds)
+
+        # MT5 API uses broker server timestamps; shift the UTC cursor forward.
+        start_dt = start_dt_utc + timedelta(hours=int(self.server_utc_offset_hours))
 
         while True:
             request_count = self.batch_size + max(working_cursor.offset, 0)
@@ -194,12 +231,16 @@ class Mt5CursorTickSource:
             if len(raw) == 0:
                 break
 
-            converted = sorted((_as_tick_event(record) for record in raw), key=lambda item: item.time_msc)
+            converted = sorted(
+                (_as_tick_event(record, server_offset_msc=self.server_utc_offset_msc) for record in raw),
+                key=lambda item: item.time_msc,
+            )
             new_ticks = _filter_ticks_by_cursor(converted, working_cursor)
             if new_ticks:
                 all_ticks.extend(new_ticks)
                 working_cursor = advance_cursor(working_cursor, new_ticks)
-                start_dt = epoch + timedelta(milliseconds=working_cursor.time_msc)
+                start_dt_utc = epoch + timedelta(milliseconds=working_cursor.time_msc)
+                start_dt = start_dt_utc + timedelta(hours=int(self.server_utc_offset_hours))
 
             if len(raw) < request_count or not new_ticks:
                 break

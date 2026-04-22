@@ -27,6 +27,10 @@ claims.
 - The best-checkpoint snapshot now records PPO diagnostics at the moment a new
   best eval is saved, so best-eval economics are not mixed with end-of-training
   PPO metrics.
+- Runtime cost assumptions must be operator-auditable. In particular, the live
+  runtime defaults `partial_fill_ratio` to `1.0` when omitted in the selector
+  manifest `cost_model`; treat this as a reporting/defaulting concern, not a
+  strategy semantics change.
 - `tools/training_status.py` falls back to the latest checkpoint diagnostics
   when promoted `models/training_diagnostics_<symbol>.json` is absent.
 - `evaluate_oos.py` now writes an authoritative `runtime_parity_verdict`
