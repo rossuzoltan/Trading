@@ -7,7 +7,7 @@ import logging
 import os
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +29,29 @@ from selector_manifest import load_selector_manifest
 from symbol_utils import price_to_pips
 
 log = logging.getLogger("shadow_broker")
+
+
+def _acquire_shadow_lock(lock_path: Path) -> Any:
+    """
+    Best-effort single-instance lock to prevent multiple shadow brokers writing
+    into the same evidence directory.
+
+    Windows-first: uses msvcrt byte-range locking. If the platform does not
+    support it, we still proceed (operators must ensure single-instance).
+    """
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = lock_path.open("a+", encoding="utf-8")
+    try:
+        import msvcrt  # type: ignore
+
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+    except ImportError:  # pragma: no cover
+        return handle
+    except OSError as exc:
+        handle.close()
+        raise RuntimeError(f"Shadow lock already held: {lock_path}") from exc
+    return handle
 
 
 def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
@@ -337,6 +360,7 @@ def run_mt5_shadow_loop(
         base_dir=audit_dir,
     )
     shadow_paths.root_dir.mkdir(parents=True, exist_ok=True)
+    _shadow_lock_handle = _acquire_shadow_lock(shadow_paths.root_dir / "shadow.lock")
 
     feature_engine = FeatureEngine()
     warmup_frame = _load_warmup_bars(resolved_symbol, resolved_ticks_per_bar)
@@ -352,11 +376,12 @@ def run_mt5_shadow_loop(
     )
     
     bar_builder = VolumeBarBuilder(resolved_ticks_per_bar)
-    tick_source = Mt5CursorTickSource(mt5)
     cursor = TickCursor()
     processed_bars = 0
     
     _connect_mt5(mt5)
+    tick_source = Mt5CursorTickSource(mt5)
+    log.info("MT5 server UTC offset hours=%s", getattr(tick_source, "server_utc_offset_hours", None))
     log.info(
         "Starting shadow simulator symbol=%s ticks_per_bar=%s audit_dir=%s",
         resolved_symbol,
@@ -366,6 +391,9 @@ def run_mt5_shadow_loop(
     
     consecutive_errors = 0
     max_backoff_s = 60.0
+    heartbeat_seconds = 60.0
+    last_heartbeat = time.monotonic()
+    last_tick_time_msc: int | None = None
 
     try:
         while True:
@@ -384,8 +412,27 @@ def run_mt5_shadow_loop(
                 continue
                 
             if not ticks:
+                now_mono = time.monotonic()
+                if now_mono - last_heartbeat >= heartbeat_seconds:
+                    ticks_in_bar = int(getattr(bar_builder.state, "tick_count", 0) or 0)
+                    log.info(
+                        "shadow heartbeat ticks_fetched=0 ticks_in_bar=%s/%s last_tick_utc=%s",
+                        ticks_in_bar,
+                        resolved_ticks_per_bar,
+                        (
+                            datetime.fromtimestamp(last_tick_time_msc / 1000.0, tz=timezone.utc).isoformat()
+                            if last_tick_time_msc
+                            else None
+                        ),
+                    )
+                    last_heartbeat = now_mono
                 time.sleep(max(float(poll_interval_ms), 1.0) / 1000.0)
                 continue
+
+            try:
+                last_tick_time_msc = int(getattr(ticks[-1], "time_msc", 0) or 0) or last_tick_time_msc
+            except Exception:
+                last_tick_time_msc = last_tick_time_msc
                 
             for tick in ticks:
                 bar = bar_builder.push_tick(tick)
@@ -420,6 +467,22 @@ def run_mt5_shadow_loop(
                 )
                 if max_bars is not None and processed_bars >= max_bars:
                     return processed_bars
+
+            now_mono = time.monotonic()
+            if now_mono - last_heartbeat >= heartbeat_seconds:
+                ticks_in_bar = int(getattr(bar_builder.state, "tick_count", 0) or 0)
+                log.info(
+                    "shadow heartbeat ticks_fetched=%s ticks_in_bar=%s/%s last_tick_utc=%s",
+                    len(ticks),
+                    ticks_in_bar,
+                    resolved_ticks_per_bar,
+                    (
+                        datetime.fromtimestamp(last_tick_time_msc / 1000.0, tz=timezone.utc).isoformat()
+                        if last_tick_time_msc
+                        else None
+                    ),
+                )
+                last_heartbeat = now_mono
             time.sleep(max(float(poll_interval_ms), 1.0) / 1000.0)
     finally:
         mt5.shutdown()

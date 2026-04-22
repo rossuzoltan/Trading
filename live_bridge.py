@@ -137,6 +137,33 @@ def _resolve_execution_cost_profile(manifest) -> dict[str, float]:
     }
 
 
+def _describe_execution_cost_profile(manifest) -> tuple[dict[str, float], dict[str, str]]:
+    cost_model = dict(getattr(manifest, "cost_model", None) or {})
+    legacy_profile = dict(getattr(manifest, "execution_cost_profile", None) or {})
+    profile = cost_model or legacy_profile
+    source_label = "manifest.cost_model" if cost_model else ("manifest.execution_cost_profile" if legacy_profile else "default")
+
+    def _source_for(key: str, default_source: str) -> str:
+        if key in cost_model:
+            return "manifest.cost_model"
+        if key in legacy_profile:
+            return "manifest.execution_cost_profile"
+        return default_source
+
+    resolved = {
+        "commission_per_lot": float(profile.get("commission_per_lot", 7.0)),
+        "slippage_pips": float(profile.get("slippage_pips", 0.25)),
+        "partial_fill_ratio": float(profile.get("partial_fill_ratio", 1.0)),
+    }
+    sources = {
+        "commission_per_lot": _source_for("commission_per_lot", "default(7.0)"),
+        "slippage_pips": _source_for("slippage_pips", "default(0.25)"),
+        "partial_fill_ratio": _source_for("partial_fill_ratio", "default(1.0)"),
+        "_profile_selected": source_label,
+    }
+    return resolved, sources
+
+
 def _resolve_reward_profile(manifest) -> dict[str, float]:
     profile = dict(getattr(manifest, "reward_profile", None) or {})
     return {
@@ -779,8 +806,13 @@ def bootstrap_live_runtime(
     dataset_path = resolve_dataset_path()
     resolved_manifest_path = resolve_manifest_path(symbol=symbol, preferred=manifest_path)
     manifest = load_manifest(resolved_manifest_path)
-    execution_cost_profile = _resolve_execution_cost_profile(manifest)
+    execution_cost_profile, execution_cost_sources = _describe_execution_cost_profile(manifest)
     reward_profile = _resolve_reward_profile(manifest)
+    log.info(
+        "Runtime cost profile resolved=%s sources=%s",
+        execution_cost_profile,
+        execution_cost_sources,
+    )
     manifest_ticks = manifest.bar_construction_ticks_per_bar or manifest.ticks_per_bar
     if manifest_ticks is not None and Path(dataset_path).exists():
         validate_dataset_bar_spec(
@@ -925,8 +957,13 @@ def _bootstrap_rule_live_runtime(
     if resolved_symbol != symbol.upper():
         raise RuntimeError(f"Selector manifest symbol mismatch: manifest={resolved_symbol} runtime={symbol.upper()}.")
 
-    execution_cost_profile = _resolve_execution_cost_profile(manifest)
+    execution_cost_profile, execution_cost_sources = _describe_execution_cost_profile(manifest)
     reward_profile = _resolve_reward_profile(manifest)
+    log.info(
+        "Runtime cost profile resolved=%s sources=%s",
+        execution_cost_profile,
+        execution_cost_sources,
+    )
     manifest_ticks = manifest.bar_construction_ticks_per_bar or manifest.ticks_per_bar
     if manifest_ticks is not None and int(manifest_ticks) != int(ticks_per_bar) and not LIVE_ALLOW_BAR_SPEC_MISMATCH:
         raise RuntimeError(
