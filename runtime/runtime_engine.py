@@ -276,12 +276,16 @@ class Mt5CursorTickSource:
                         start_dt = start_dt_utc + timedelta(hours=int(self.server_utc_offset_hours))
                         stale_resync_attempts += 1
                         continue
-                    raise RuntimeError(
-                        "MT5 returned a stale tick batch at-or-before the persisted cursor "
-                        f"(cursor={working_cursor.time_msc}/{working_cursor.offset}, "
-                        f"batch_end={latest_batch_time}/{latest_batch_offset}, "
-                        f"live_tick={live_tick.time_msc})."
+                    logger.warning(
+                        "MT5 stale tick batch after resync; waiting for fresher ticks. "
+                        "cursor=%s/%s batch_end=%s/%s live_tick=%s",
+                        working_cursor.time_msc,
+                        working_cursor.offset,
+                        latest_batch_time,
+                        latest_batch_offset,
+                        live_tick.time_msc,
                     )
+                    break
 
             if len(raw) < request_count or not new_ticks:
                 break

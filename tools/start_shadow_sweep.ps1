@@ -2,7 +2,7 @@ param(
     [string]$ManifestPath = "models/rc1/eurusd_5k_v1_mr_rc1/manifest.json",
     [string]$AuditDir = "artifacts/shadow_sweep",
     [int]$PollIntervalMs = 250,
-    [string]$ProfileSet = "gate_sweep_v1"
+    [string]$ProfileSet = "evidence_ladder_v1"
 )
 
 $ErrorActionPreference = "Stop"

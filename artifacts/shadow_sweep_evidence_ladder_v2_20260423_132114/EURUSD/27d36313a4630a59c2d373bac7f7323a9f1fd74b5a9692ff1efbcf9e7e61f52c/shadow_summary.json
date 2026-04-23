@@ -4,14 +4,14 @@
   "manifest_hash": "27d36313a4630a59c2d373bac7f7323a9f1fd74b5a9692ff1efbcf9e7e61f52c",
   "logic_hash": "e1c9bf0fb26a5124a4e774a846ff37a424a7c08d8b9d9a6eaeff740ea4a0e185",
   "evaluator_hash": "e8509a738e4536f762b7377604fb1374fab54a761e095da127d29f2edc497a73",
-  "event_count": 7423,
+  "event_count": 7450,
   "trading_days": 1,
   "trading_day_list": [
     "2026-04-23"
   ],
   "actionable_event_count": 186,
   "shadow_window_start": "2026-04-23T11:21:14.135000+00:00",
-  "shadow_window_end": "2026-04-23T18:09:15.008000+00:00",
+  "shadow_window_end": "2026-04-23T17:35:43.077000+00:00",
   "counts": {
     "signal_count": 808,
     "would_open_count": 93,
@@ -30,8 +30,8 @@
     "context_close_only_reversal_count": 0
   },
   "rates": {
-    "signal_density": 0.10885086892092145,
-    "would_open_density": 0.012528627239660514,
+    "signal_density": 0.10845637583892617,
+    "would_open_density": 0.012483221476510067,
     "spread_rejection_pct": 0.0,
     "session_rejection_pct": 0.0,
     "risk_rejection_pct": 0.0,
@@ -39,12 +39,12 @@
     "context_blackout_pct": 0.0
   },
   "directional_occupancy": {
-    "flat": 0.8911491310790786,
-    "long": 0.07988683820557727,
-    "short": 0.0289640307153442
+    "flat": 0.8915436241610738,
+    "long": 0.07959731543624161,
+    "short": 0.028859060402684565
   },
   "no_trade_reason_counts": {
-    "no signal": 6525,
+    "no signal": 6552,
     "authorized": 805,
     "authorized_exit": 93
   },
@@ -52,13 +52,13 @@
     "spread_z_limit": 3282,
     "ma50_slope_limit": 1,
     "price_z_threshold": 2167,
-    "time_delta_z_limit": 1075
+    "time_delta_z_limit": 1102
   },
   "rule_block_reason_counts": {
     "spread_z_limit": 3300,
     "ma50_slope_limit": 1,
     "price_z_threshold": 2236,
-    "time_delta_z_limit": 1078
+    "time_delta_z_limit": 1105
   },
   "runtime_gate_block_reason_counts": {},
   "rule_diagnostics": {

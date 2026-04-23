@@ -1,13 +1,13 @@
 # Shadow Summary - EURUSD
 
 * Manifest hash: `27d36313a4630a59c2d373bac7f7323a9f1fd74b5a9692ff1efbcf9e7e61f52c`
-* Window: `2026-04-23T11:21:14.135000+00:00` -> `2026-04-23T18:09:15.008000+00:00`
+* Window: `2026-04-23T11:21:14.135000+00:00` -> `2026-04-23T17:35:43.077000+00:00`
 * Trading days: `1`
 * Actionable events: `186`
 * Evidence status: `TOO_SMALL` (need `20` days + `30` actionable; remaining `19` days / `0` actionable)
 
 ## Counts
-* Events: `7423`
+* Events: `7450`
 * Signals: `808`
 * Opens: `93`
 * Closes: `93`
@@ -23,19 +23,19 @@
 * Close-only reversals: `0`
 
 ## Rates
-* Signal density: `0.1089`
+* Signal density: `0.1085`
 * Would-open density: `0.0125`
 * Spread rejection pct: `0.00`
 * Session rejection pct: `0.00`
 * Long open share: `72.04%`
 
 ## Occupancy
-* Flat: `89.11%`
-* Long: `7.99%`
-* Short: `2.90%`
+* Flat: `89.15%`
+* Long: `7.96%`
+* Short: `2.89%`
 
 ## No-Trade Reasons
-* `no signal`: `6525`
+* `no signal`: `6552`
 * `authorized`: `805`
 * `authorized_exit`: `93`
 
@@ -47,5 +47,5 @@
 ## Rule Blocks
 * `spread_z_limit`: `3300`
 * `price_z_threshold`: `2236`
-* `time_delta_z_limit`: `1078`
+* `time_delta_z_limit`: `1105`
 * `ma50_slope_limit`: `1`

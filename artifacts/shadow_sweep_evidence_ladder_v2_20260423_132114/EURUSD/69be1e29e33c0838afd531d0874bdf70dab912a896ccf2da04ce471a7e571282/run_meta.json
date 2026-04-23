@@ -2,7 +2,7 @@
   "audit_schema_version": 2,
   "run_id": "shadow-sweep-b87861312c4d44b1bc1befbcdc46f98a",
   "run_started_at_utc": "2026-04-23T11:21:18.883338+00:00",
-  "updated_at_utc": "2026-04-23T16:47:38.110364+00:00",
+  "updated_at_utc": "2026-04-23T16:49:26.920426+00:00",
   "symbol": "EURUSD",
   "ticks_per_bar": 5000,
   "profile_name": "shadow_p08_exploratory_ceiling",
@@ -139,10 +139,10 @@
     "hostname": "zolcs-pc",
     "platform": "Windows-11-10.0.26200-SP0"
   },
-  "records_written": 7423,
+  "records_written": 7449,
   "current_position_direction": 0,
   "current_position_state": "flat",
-  "last_event_ts_utc": "2026-04-23T18:09:15.008000+00:00",
+  "last_event_ts_utc": "2026-04-23T16:57:53.676000+00:00",
   "last_action_state": "flat",
   "last_block_reason": "time_delta_z_limit",
   "runtime_context": {

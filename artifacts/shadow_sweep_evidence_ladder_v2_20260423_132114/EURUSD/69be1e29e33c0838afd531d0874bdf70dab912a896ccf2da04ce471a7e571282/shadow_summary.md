@@ -1,13 +1,13 @@
 # Shadow Summary - EURUSD
 
 * Manifest hash: `69be1e29e33c0838afd531d0874bdf70dab912a896ccf2da04ce471a7e571282`
-* Window: `2026-04-23T11:21:14.135000+00:00` -> `2026-04-23T18:09:15.008000+00:00`
+* Window: `2026-04-23T11:21:14.135000+00:00` -> `2026-04-23T16:57:53.676000+00:00`
 * Trading days: `1`
 * Actionable events: `230`
 * Evidence status: `TOO_SMALL` (need `20` days + `30` actionable; remaining `19` days / `0` actionable)
 
 ## Counts
-* Events: `7423`
+* Events: `7449`
 * Signals: `1194`
 * Opens: `115`
 * Closes: `115`
@@ -23,19 +23,19 @@
 * Close-only reversals: `0`
 
 ## Rates
-* Signal density: `0.1609`
-* Would-open density: `0.0155`
+* Signal density: `0.1603`
+* Would-open density: `0.0154`
 * Spread rejection pct: `0.00`
 * Session rejection pct: `0.00`
 * Long open share: `71.30%`
 
 ## Occupancy
-* Flat: `83.91%`
-* Long: `9.16%`
-* Short: `6.92%`
+* Flat: `83.97%`
+* Long: `9.13%`
+* Short: `6.90%`
 
 ## No-Trade Reasons
-* `no signal`: `6118`
+* `no signal`: `6144`
 * `authorized`: `1190`
 * `authorized_exit`: `115`
 
@@ -47,6 +47,6 @@
 ## Rule Blocks
 * `price_z_threshold`: `2929`
 * `spread_z_limit`: `2058`
-* `time_delta_z_limit`: `1237`
+* `time_delta_z_limit`: `1263`
 * `ma50_slope_limit`: `4`
 * `ma20_slope_limit`: `1`
