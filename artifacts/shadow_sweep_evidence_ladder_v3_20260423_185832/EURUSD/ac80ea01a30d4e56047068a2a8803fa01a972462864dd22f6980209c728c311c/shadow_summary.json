@@ -1,0 +1,78 @@
+{
+  "symbol": "EURUSD",
+  "ticks_per_bar": 5000,
+  "manifest_hash": "ac80ea01a30d4e56047068a2a8803fa01a972462864dd22f6980209c728c311c",
+  "logic_hash": "e1c9bf0fb26a5124a4e774a846ff37a424a7c08d8b9d9a6eaeff740ea4a0e185",
+  "evaluator_hash": "e8509a738e4536f762b7377604fb1374fab54a761e095da127d29f2edc497a73",
+  "event_count": 1,
+  "trading_days": 1,
+  "trading_day_list": [
+    "2026-04-23"
+  ],
+  "actionable_event_count": 1,
+  "shadow_window_start": "2026-04-23T16:58:29.147000+00:00",
+  "shadow_window_end": "2026-04-23T16:58:29.147000+00:00",
+  "counts": {
+    "signal_count": 1,
+    "would_open_count": 1,
+    "would_close_count": 0,
+    "would_hold_count": 0,
+    "long_signal_count": 0,
+    "short_signal_count": 1,
+    "long_open_count": 0,
+    "short_open_count": 1,
+    "spread_rejection_count": 0,
+    "session_rejection_count": 0,
+    "risk_rejection_count": 0,
+    "context_macro_day_count": 0,
+    "context_blackout_count": 0,
+    "context_block_entry_count": 0,
+    "context_close_only_reversal_count": 0
+  },
+  "rates": {
+    "signal_density": 1.0,
+    "would_open_density": 1.0,
+    "spread_rejection_pct": 0.0,
+    "session_rejection_pct": 0.0,
+    "risk_rejection_pct": 0.0,
+    "long_open_share": 0.0,
+    "context_blackout_pct": 0.0
+  },
+  "directional_occupancy": {
+    "flat": 1.0,
+    "long": 0.0,
+    "short": 0.0
+  },
+  "no_trade_reason_counts": {
+    "authorized": 1
+  },
+  "block_reason_counts": {},
+  "rule_block_reason_counts": {},
+  "runtime_gate_block_reason_counts": {},
+  "rule_diagnostics": {
+    "raw_price_signal_count": 1,
+    "guard_blocked_price_signal_count": 0,
+    "guard_failure_counts": {}
+  },
+  "trade_realism": {
+    "trade_count": 0,
+    "close_event_count": 0,
+    "entry_event_count": 1,
+    "realized_trade_coverage": 1.0,
+    "min_realized_trade_coverage": 0.8,
+    "sample_ok": true,
+    "pricing_mode": "event_snapshots",
+    "issues": []
+  },
+  "evidence_sufficient": false,
+  "evidence_requirements": {
+    "min_trading_days": 20,
+    "min_actionable_events": 30,
+    "min_realized_trade_coverage": 0.8
+  },
+  "evidence_shortfall": {
+    "trading_days_remaining": 19,
+    "actionable_events_remaining": 29,
+    "realized_trade_coverage_remaining": 0.0
+  }
+}

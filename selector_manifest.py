@@ -13,6 +13,11 @@ from feature_engine import FEATURE_COLS
 
 MANIFEST_VERSION = "4"
 DEFAULT_MANIFEST_NAME = "selector_artifact_manifest.json"
+DEFAULT_EXECUTION_COST_PROFILE = {
+    "commission_per_lot": 7.0,
+    "slippage_pips": 0.25,
+    "partial_fill_ratio": 1.0,
+}
 
 EngineType = Literal["ML", "RULE"]
 ReleaseStage = Literal["research", "paper_live_candidate", "production"]
@@ -30,6 +35,7 @@ class LabelDefinition:
 class CostModel:
     commission_per_lot: float
     slippage_pips: float
+    partial_fill_ratio: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -165,6 +171,88 @@ def manifest_to_payload(manifest: SelectorManifest | dict[str, Any], *, include_
     if not include_manifest_hash:
         normalized["manifest_hash"] = ""
     return normalized
+
+
+def _cost_profile_sources(source: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+    if isinstance(source, dict):
+        if any(key in source for key in DEFAULT_EXECUTION_COST_PROFILE):
+            return dict(source), {}
+        return dict(source.get("cost_model") or {}), dict(source.get("execution_cost_profile") or {})
+    return (
+        dict(getattr(source, "cost_model", None) or {}),
+        dict(getattr(source, "execution_cost_profile", None) or {}),
+    )
+
+
+def resolve_execution_cost_profile(source: Any) -> dict[str, float]:
+    cost_model, legacy_profile = _cost_profile_sources(source)
+    profile = cost_model or legacy_profile
+    return {
+        "commission_per_lot": float(
+            profile.get("commission_per_lot", DEFAULT_EXECUTION_COST_PROFILE["commission_per_lot"])
+        ),
+        "slippage_pips": float(profile.get("slippage_pips", DEFAULT_EXECUTION_COST_PROFILE["slippage_pips"])),
+        "partial_fill_ratio": float(
+            profile.get("partial_fill_ratio", DEFAULT_EXECUTION_COST_PROFILE["partial_fill_ratio"])
+        ),
+    }
+
+
+def describe_execution_cost_profile(source: Any) -> tuple[dict[str, float], dict[str, str]]:
+    cost_model, legacy_profile = _cost_profile_sources(source)
+    source_label = (
+        "manifest.cost_model"
+        if cost_model
+        else ("manifest.execution_cost_profile" if legacy_profile else "default")
+    )
+
+    def _source_for(key: str, default_source: str) -> str:
+        if key in cost_model:
+            return "manifest.cost_model"
+        if key in legacy_profile:
+            return "manifest.execution_cost_profile"
+        return default_source
+
+    resolved = resolve_execution_cost_profile(source)
+    sources = {
+        "commission_per_lot": _source_for("commission_per_lot", "default(7.0)"),
+        "slippage_pips": _source_for("slippage_pips", "default(0.25)"),
+        "partial_fill_ratio": _source_for("partial_fill_ratio", "default(1.0)"),
+        "_profile_selected": source_label,
+    }
+    return resolved, sources
+
+
+def compute_execution_cost_profile_hash(source: Any) -> str:
+    return _content_hash(resolve_execution_cost_profile(source))
+
+
+def assert_execution_cost_profile_parity(
+    expected_source: Any,
+    observed_source: Any,
+    *,
+    observed_hash: str | None = None,
+    context_label: str = "execution cost profile",
+) -> dict[str, Any]:
+    expected = resolve_execution_cost_profile(expected_source)
+    observed = resolve_execution_cost_profile(observed_source)
+    expected_hash = compute_execution_cost_profile_hash(expected)
+    resolved_observed_hash = str(observed_hash or compute_execution_cost_profile_hash(observed)).strip()
+    if expected_hash != resolved_observed_hash:
+        raise RuntimeError(
+            f"{context_label} mismatch: expected_hash={expected_hash} observed_hash={resolved_observed_hash}"
+        )
+    for key, expected_value in expected.items():
+        observed_value = float(observed[key])
+        if float(expected_value) != observed_value:
+            raise RuntimeError(
+                f"{context_label} mismatch for {key}: expected={float(expected_value)} observed={observed_value}"
+            )
+    return {
+        "resolved_profile": expected,
+        "expected_hash": expected_hash,
+        "observed_hash": resolved_observed_hash,
+    }
 
 
 def compute_selector_manifest_hash(manifest: SelectorManifest | dict[str, Any]) -> str:

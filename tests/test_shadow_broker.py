@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
+from domain.models import VolumeBar
 from runtime.shadow_broker import ShadowBroker
 from selector_manifest import (
     CostModel,
@@ -50,13 +52,29 @@ class ShadowBrokerTests(unittest.TestCase):
 
             open_record = broker.evaluate(
                 bar_ts="2026-04-08T10:00:00+00:00",
-                features={"price_z": -1.6, "spread_z": 0.1, "ma20_slope": 0.05, "ma50_slope": 0.02},
+                features={
+                    "price_z": -1.6,
+                    "spread_z": 0.1,
+                    "ma20_slope": 0.05,
+                    "ma50_slope": 0.02,
+                    "Close": 1.1005,
+                    "avg_spread": 0.0001,
+                    "time_delta_s": 300.0,
+                },
                 current_spread_pips=0.7,
                 is_session_open=True,
             )
             reverse_record = broker.evaluate(
                 bar_ts="2026-04-08T10:05:00+00:00",
-                features={"price_z": 1.8, "spread_z": 0.1, "ma20_slope": -0.04, "ma50_slope": -0.02},
+                features={
+                    "price_z": 1.8,
+                    "spread_z": 0.1,
+                    "ma20_slope": -0.04,
+                    "ma50_slope": -0.02,
+                    "Close": 1.1010,
+                    "avg_spread": 0.0001,
+                    "time_delta_s": 300.0,
+                },
                 current_spread_pips=0.8,
                 is_session_open=True,
             )
@@ -76,7 +94,15 @@ class ShadowBrokerTests(unittest.TestCase):
             ]
             self.assertEqual(2, len(audit_rows))
             self.assertEqual("authorized", audit_rows[0]["reason"])
+            self.assertEqual("reverse", audit_rows[1]["action_state"])
             self.assertEqual(-1, audit_rows[1]["position_after"])
+            self.assertEqual(1, audit_rows[1]["exit_snapshot"]["transition_sequence"])
+            self.assertEqual(2, audit_rows[1]["entry_snapshot"]["transition_sequence"])
+            self.assertEqual("sell", audit_rows[1]["exit_snapshot"]["fill_side"])
+            self.assertEqual("sell", audit_rows[1]["entry_snapshot"]["fill_side"])
+            self.assertIsNotNone(audit_rows[1]["exit_snapshot"]["fill_price"])
+            self.assertIsNotNone(audit_rows[1]["entry_snapshot"]["fill_price"])
+            self.assertTrue((audit_path.parent / "run_meta.json").exists())
 
     def test_shadow_broker_logs_session_block_without_execution(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -96,6 +122,60 @@ class ShadowBrokerTests(unittest.TestCase):
             self.assertFalse(record.would_open)
             self.assertFalse(record.would_close)
             self.assertEqual("session blocked", record.reason)
+            self.assertEqual("runtime_gate", record.block_stage)
+            self.assertEqual("session", record.runtime_gate_block_reason)
+
+    def test_shadow_broker_writes_run_meta_and_rich_event_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            manifest_path = self._build_manifest(tmp_path)
+            audit_path = tmp_path / "shadow_audit.jsonl"
+            broker = ShadowBroker(manifest_path, audit_path=audit_path, profile_name="test_profile")
+
+            bar = VolumeBar(
+                timestamp=datetime(2026, 4, 8, 10, 0, tzinfo=timezone.utc),
+                open=1.1000,
+                high=1.1010,
+                low=1.0990,
+                close=1.1005,
+                volume=5000.0,
+                avg_spread=0.00008,
+                time_delta_s=320.0,
+                start_time_msc=int(datetime(2026, 4, 8, 10, 0, tzinfo=timezone.utc).timestamp() * 1000),
+                end_time_msc=int(datetime(2026, 4, 8, 10, 5, tzinfo=timezone.utc).timestamp() * 1000),
+            )
+            record = broker.evaluate(
+                bar_ts=bar.timestamp,
+                bar=bar,
+                features={
+                    "price_z": 0.3,
+                    "price_roll_std": 0.00042,
+                    "spread_z": 0.1,
+                    "time_delta_z": 0.0,
+                    "ma20": 1.1001,
+                    "ma50": 1.0998,
+                    "ma20_slope": 0.01,
+                    "ma50_slope": 0.01,
+                },
+                current_spread_pips=0.8,
+                is_session_open=True,
+            )
+
+            meta_payload = json.loads((audit_path.parent / "run_meta.json").read_text(encoding="utf-8"))
+            event_payload = json.loads(audit_path.read_text(encoding="utf-8").splitlines()[0])
+
+            self.assertEqual("rule", record.block_stage)
+            self.assertEqual("price_z_threshold", record.rule_block_reason)
+            self.assertEqual(1.1005, event_payload["bar_close"])
+            self.assertEqual(0.00042, event_payload["price_roll_std"])
+            self.assertEqual("test_profile", event_payload["profile_name"])
+            self.assertEqual("test_profile", meta_payload["profile_name"])
+            self.assertTrue(meta_payload["run_id"])
+            self.assertEqual(meta_payload["run_id"], event_payload["run_id"])
+            self.assertIn("python_executable", meta_payload["process"])
+            self.assertEqual(1.0, meta_payload["resolved_execution_cost_profile"]["partial_fill_ratio"])
+            self.assertTrue(meta_payload["resolved_execution_cost_profile_hash"])
+            self.assertEqual(meta_payload["resolved_execution_cost_profile_hash"], event_payload["execution_cost_profile_hash"])
 
 
 if __name__ == "__main__":

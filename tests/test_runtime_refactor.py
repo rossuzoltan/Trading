@@ -112,6 +112,26 @@ class FakeMt5:
         return rows[:count]
 
 
+class ResyncingFakeMt5(FakeMt5):
+    def __init__(self, *, stale_ticks, fresh_ticks, latest_tick_time_msc):
+        super().__init__(ticks=[])
+        self._stale_ticks = list(stale_ticks)
+        self._fresh_ticks = list(fresh_ticks)
+        self._latest_tick_time_msc = int(latest_tick_time_msc)
+        self.start_calls: list[int] = []
+        self._call_count = 0
+
+    def copy_ticks_from(self, symbol, start_dt, count, flags):
+        start_ms = int(round(start_dt.timestamp() * 1000))
+        self.start_calls.append(start_ms)
+        self._call_count += 1
+        rows = self._stale_ticks if self._call_count == 1 else self._fresh_ticks
+        return rows[:count]
+
+    def symbol_info_tick(self, symbol):
+        return SimpleNamespace(time_msc=self._latest_tick_time_msc, bid=1.1000, ask=1.1001)
+
+
 class StubFeatureEngine:
     def __init__(self):
         self.next_spread_z = 0.0
@@ -394,6 +414,69 @@ class RuntimeRefactorTests(unittest.TestCase):
         self.assertEqual([tick.time_msc for tick in all_ticks], [1000, 1000, 1000, 1001, 1001, 1002])
         self.assertEqual(cursor.time_msc, 1002)
         self.assertEqual(cursor.offset, 1)
+
+    def test_tick_source_normalizes_server_offset_to_utc(self):
+        utc_time_msc = 1_710_000_000_000
+        server_offset_msc = 3 * 3600 * 1000
+        ticks = [
+            {"time_msc": utc_time_msc + server_offset_msc, "bid": 1.1000, "ask": 1.1001},
+        ]
+        source = Mt5CursorTickSource(
+            FakeMt5(ticks),
+            batch_size=10,
+            initial_lookback_seconds=999999,
+            server_utc_offset_hours=3,
+        )
+
+        batch, cursor = source.fetch("EURUSD", TickCursor(time_msc=utc_time_msc - 1, offset=0))
+
+        self.assertEqual([tick.time_msc for tick in batch], [utc_time_msc])
+        self.assertEqual(cursor.time_msc, utc_time_msc)
+        self.assertEqual(cursor.offset, 1)
+
+    def test_tick_source_resume_from_persisted_cursor_avoids_duplicates_after_restart(self):
+        ticks = [
+            {"time_msc": 1000, "bid": 1.0, "ask": 1.0001},
+            {"time_msc": 1000, "bid": 1.0001, "ask": 1.0002},
+            {"time_msc": 1001, "bid": 1.0002, "ask": 1.0003},
+            {"time_msc": 1002, "bid": 1.0003, "ask": 1.0004},
+        ]
+        first_source = Mt5CursorTickSource(FakeMt5(ticks), batch_size=2, initial_lookback_seconds=999999)
+        first_batch, persisted_cursor = first_source.fetch("EURUSD", TickCursor(time_msc=999, offset=0))
+
+        second_source = Mt5CursorTickSource(FakeMt5(ticks), batch_size=2, initial_lookback_seconds=999999)
+        second_batch, cursor = second_source.fetch("EURUSD", persisted_cursor)
+
+        self.assertEqual([tick.time_msc for tick in first_batch + second_batch], [1000, 1000, 1001, 1002])
+        self.assertEqual(cursor.time_msc, 1002)
+        self.assertEqual(cursor.offset, 1)
+
+    def test_tick_source_resyncs_after_stale_batch(self):
+        stale_ticks = [
+            {"time_msc": 2000, "bid": 1.1000, "ask": 1.1001},
+        ]
+        fresh_ticks = [
+            {"time_msc": 2000, "bid": 1.1000, "ask": 1.1001},
+            {"time_msc": 2001, "bid": 1.1001, "ask": 1.1002},
+            {"time_msc": 2500, "bid": 1.1002, "ask": 1.1003},
+        ]
+        source = Mt5CursorTickSource(
+            ResyncingFakeMt5(
+                stale_ticks=stale_ticks,
+                fresh_ticks=fresh_ticks,
+                latest_tick_time_msc=2500,
+            ),
+            batch_size=4,
+            initial_lookback_seconds=1,
+            server_utc_offset_hours=0,
+        )
+
+        batch, cursor = source.fetch("EURUSD", TickCursor(time_msc=2000, offset=1))
+
+        self.assertEqual([tick.time_msc for tick in batch], [2001, 2500])
+        self.assertEqual(cursor.time_msc, 2500)
+        self.assertEqual(cursor.offset, 1)
+        self.assertGreaterEqual(len(source.mt5.start_calls), 2)
 
     def test_broker_fill_failure_does_not_desync_state(self):
         runtime = make_runtime(RejectingBroker(), SequencePolicy([2]))

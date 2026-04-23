@@ -1,0 +1,761 @@
+{
+  "audit_root": "C:\\dev\\trading\\artifacts\\shadow_sweep_evidence_ladder_v2_20260423_132114",
+  "symbol": "EURUSD",
+  "window_start_utc": "2026-04-23T11:21:14.135000+00:00",
+  "window_end_utc": "2026-04-23T18:11:44.512000+00:00",
+  "profile_count": 8,
+  "profiles": {
+    "p01_guarded_core": {
+      "manifest_hash": "b3356f616b4784716d25e46837b06cba15e6967ce701bab8da14fa17c1e8cfa5",
+      "event_count": 6973,
+      "trading_days": 1,
+      "actionable_events": 163,
+      "opens": 82,
+      "closes": 82,
+      "holds": 492,
+      "flat": 6318,
+      "signals": 574,
+      "rule_candidate_signals": 574,
+      "raw_price_signals": 2228,
+      "guard_blocked_price_signals": 1654,
+      "guard_failure_counts": {
+        "spread_z_limit": 1169,
+        "time_delta_z_limit": 779
+      },
+      "rule_block_counts": {
+        "spread_z_limit": 3738,
+        "price_z_threshold": 1762,
+        "time_delta_z_limit": 818
+      },
+      "runtime_gate_block_counts": {},
+      "no_trade_reason_counts": {
+        "no signal": 6318,
+        "authorized": 573,
+        "authorized_exit": 82
+      },
+      "est_trade_count": 21,
+      "est_net_pips": 44.849999999994814
+    },
+    "p02_guarded_plus": {
+      "manifest_hash": "27d36313a4630a59c2d373bac7f7323a9f1fd74b5a9692ff1efbcf9e7e61f52c",
+      "event_count": 6973,
+      "trading_days": 1,
+      "actionable_events": 181,
+      "opens": 92,
+      "closes": 92,
+      "holds": 624,
+      "flat": 6168,
+      "signals": 716,
+      "rule_candidate_signals": 716,
+      "raw_price_signals": 2228,
+      "guard_blocked_price_signals": 1512,
+      "guard_failure_counts": {
+        "spread_z_limit": 958,
+        "time_delta_z_limit": 779
+      },
+      "rule_block_counts": {
+        "spread_z_limit": 3219,
+        "price_z_threshold": 2043,
+        "time_delta_z_limit": 905,
+        "ma50_slope_limit": 1
+      },
+      "runtime_gate_block_counts": {},
+      "no_trade_reason_counts": {
+        "no signal": 6168,
+        "authorized_exit": 92,
+        "authorized": 713
+      },
+      "est_trade_count": 21,
+      "est_net_pips": 22.050000000000907
+    },
+    "p03_centerline": {
+      "manifest_hash": "7c22706a8294a62d09322976461489e8470e0565127ecee32a1cdce989baca38",
+      "event_count": 6973,
+      "trading_days": 1,
+      "actionable_events": 190,
+      "opens": 97,
+      "closes": 97,
+      "holds": 815,
+      "flat": 5968,
+      "signals": 912,
+      "rule_candidate_signals": 912,
+      "raw_price_signals": 2228,
+      "guard_blocked_price_signals": 1316,
+      "guard_failure_counts": {
+        "spread_z_limit": 738,
+        "time_delta_z_limit": 779
+      },
+      "rule_block_counts": {
+        "spread_z_limit": 2771,
+        "price_z_threshold": 2250,
+        "time_delta_z_limit": 929,
+        "ma50_slope_limit": 14,
+        "ma20_slope_limit": 4
+      },
+      "runtime_gate_block_counts": {},
+      "no_trade_reason_counts": {
+        "no signal": 5968,
+        "authorized_exit": 97,
+        "authorized": 908
+      },
+      "est_trade_count": 26,
+      "est_net_pips": 15.200000000006437
+    },
+    "p04_spread_step": {
+      "manifest_hash": "5716e4b363b40be005bb5148d5f720346f6c3d7408c9b9edbf4e640dca35d4ba",
+      "event_count": 6973,
+      "trading_days": 1,
+      "actionable_events": 202,
+      "opens": 103,
+      "closes": 103,
+      "holds": 859,
+      "flat": 5912,
+      "signals": 962,
+      "rule_candidate_signals": 962,
+      "raw_price_signals": 2228,
+      "guard_blocked_price_signals": 1266,
+      "guard_failure_counts": {
+        "time_delta_z_limit": 779,
+        "spread_z_limit": 683
+      },
+      "rule_block_counts": {
+        "price_z_threshold": 2344,
+        "time_delta_z_limit": 1040,
+        "ma50_slope_limit": 24,
+        "spread_z_limit": 2498,
+        "ma20_slope_limit": 6
+      },
+      "runtime_gate_block_counts": {},
+      "no_trade_reason_counts": {
+        "authorized": 958,
+        "authorized_exit": 103,
+        "no signal": 5912
+      },
+      "est_trade_count": 27,
+      "est_net_pips": 5.100000000001429
+    },
+    "p05_slope_step": {
+      "manifest_hash": "ffc4269b0cb5ec35db41cc9a3938c9090b430d8a4e0001f451cd1c130a342a3f",
+      "event_count": 6973,
+      "trading_days": 1,
+      "actionable_events": 159,
+      "opens": 80,
+      "closes": 80,
+      "holds": 520,
+      "flat": 6294,
+      "signals": 600,
+      "rule_candidate_signals": 600,
+      "raw_price_signals": 2228,
+      "guard_blocked_price_signals": 1628,
+      "guard_failure_counts": {
+        "spread_z_limit": 1114,
+        "time_delta_z_limit": 779
+      },
+      "rule_block_counts": {
+        "spread_z_limit": 3639,
+        "price_z_threshold": 1808,
+        "time_delta_z_limit": 847
+      },
+      "runtime_gate_block_counts": {},
+      "no_trade_reason_counts": {
+        "no signal": 6294,
+        "authorized": 599,
+        "authorized_exit": 80
+      },
+      "est_trade_count": 19,
+      "est_net_pips": 31.499999999996028
+    },
+    "p06_balanced_relaxed": {
+      "manifest_hash": "668388af1efcd06f2cfb1b10028f89a62b222aac8fde0c2c94d3c8106dd7ea5f",
+      "event_count": 6973,
+      "trading_days": 1,
+      "actionable_events": 190,
+      "opens": 97,
+      "closes": 97,
+      "holds": 815,
+      "flat": 5968,
+      "signals": 912,
+      "rule_candidate_signals": 912,
+      "raw_price_signals": 2228,
+      "guard_blocked_price_signals": 1316,
+      "guard_failure_counts": {
+        "spread_z_limit": 738,
+        "time_delta_z_limit": 779
+      },
+      "rule_block_counts": {
+        "spread_z_limit": 2771,
+        "price_z_threshold": 2254,
+        "time_delta_z_limit": 929,
+        "ma50_slope_limit": 10,
+        "ma20_slope_limit": 4
+      },
+      "runtime_gate_block_counts": {},
+      "no_trade_reason_counts": {
+        "no signal": 5968,
+        "authorized_exit": 97,
+        "authorized": 908
+      },
+      "est_trade_count": 26,
+      "est_net_pips": 15.200000000006437
+    },
+    "p07_upper_guardrail": {
+      "manifest_hash": "ac80ea01a30d4e56047068a2a8803fa01a972462864dd22f6980209c728c311c",
+      "event_count": 6973,
+      "trading_days": 1,
+      "actionable_events": 210,
+      "opens": 107,
+      "closes": 107,
+      "holds": 867,
+      "flat": 5896,
+      "signals": 974,
+      "rule_candidate_signals": 974,
+      "raw_price_signals": 2228,
+      "guard_blocked_price_signals": 1254,
+      "guard_failure_counts": {
+        "time_delta_z_limit": 779,
+        "spread_z_limit": 653
+      },
+      "rule_block_counts": {
+        "price_z_threshold": 2446,
+        "time_delta_z_limit": 1061,
+        "ma50_slope_limit": 13,
+        "spread_z_limit": 2371,
+        "ma20_slope_limit": 5
+      },
+      "runtime_gate_block_counts": {},
+      "no_trade_reason_counts": {
+        "authorized": 970,
+        "authorized_exit": 107,
+        "no signal": 5896
+      },
+      "est_trade_count": 27,
+      "est_net_pips": 11.15000000000332
+    },
+    "p08_exploratory_ceiling": {
+      "manifest_hash": "69be1e29e33c0838afd531d0874bdf70dab912a896ccf2da04ce471a7e571282",
+      "event_count": 6973,
+      "trading_days": 1,
+      "actionable_events": 224,
+      "opens": 114,
+      "closes": 114,
+      "holds": 988,
+      "flat": 5761,
+      "signals": 1102,
+      "rule_candidate_signals": 1102,
+      "raw_price_signals": 2228,
+      "guard_blocked_price_signals": 1126,
+      "guard_failure_counts": {
+        "time_delta_z_limit": 779,
+        "spread_z_limit": 525
+      },
+      "rule_block_counts": {
+        "price_z_threshold": 2701,
+        "time_delta_z_limit": 1064,
+        "spread_z_limit": 1991,
+        "ma50_slope_limit": 4,
+        "ma20_slope_limit": 1
+      },
+      "runtime_gate_block_counts": {},
+      "no_trade_reason_counts": {
+        "authorized": 1098,
+        "authorized_exit": 114,
+        "no signal": 5761
+      },
+      "est_trade_count": 32,
+      "est_net_pips": 12.450000000006732
+    }
+  },
+  "divergence_bars": [
+    {
+      "bar_ts": "2026-04-23T14:55:16.225000+00:00",
+      "clusters": [
+        {
+          "signature": "sig=0 allow=0 act=flat reason=no signal",
+          "profiles": [
+            "p01_guarded_core",
+            "p02_guarded_plus",
+            "p03_centerline",
+            "p04_spread_step",
+            "p05_slope_step",
+            "p06_balanced_relaxed"
+          ]
+        },
+        {
+          "signature": "sig=1 allow=1 act=open reason=authorized",
+          "profiles": [
+            "p07_upper_guardrail",
+            "p08_exploratory_ceiling"
+          ]
+        }
+      ],
+      "cluster_count": 2
+    },
+    {
+      "bar_ts": "2026-04-23T14:55:22.177000+00:00",
+      "clusters": [
+        {
+          "signature": "sig=0 allow=0 act=flat reason=no signal",
+          "profiles": [
+            "p01_guarded_core",
+            "p02_guarded_plus",
+            "p05_slope_step"
+          ]
+        },
+        {
+          "signature": "sig=0 allow=1 act=close reason=authorized_exit",
+          "profiles": [
+            "p03_centerline",
+            "p04_spread_step",
+            "p06_balanced_relaxed",
+            "p07_upper_guardrail",
+            "p08_exploratory_ceiling"
+          ]
+        }
+      ],
+      "cluster_count": 2
+    },
+    {
+      "bar_ts": "2026-04-23T14:55:37.287000+00:00",
+      "clusters": [
+        {
+          "signature": "sig=0 allow=0 act=flat reason=no signal",
+          "profiles": [
+            "p01_guarded_core",
+            "p02_guarded_plus",
+            "p03_centerline",
+            "p04_spread_step",
+            "p05_slope_step",
+            "p06_balanced_relaxed",
+            "p07_upper_guardrail"
+          ]
+        },
+        {
+          "signature": "sig=1 allow=1 act=open reason=authorized",
+          "profiles": [
+            "p08_exploratory_ceiling"
+          ]
+        }
+      ],
+      "cluster_count": 2
+    },
+    {
+      "bar_ts": "2026-04-23T14:56:54.154000+00:00",
+      "clusters": [
+        {
+          "signature": "sig=0 allow=0 act=flat reason=no signal",
+          "profiles": [
+            "p01_guarded_core",
+            "p02_guarded_plus",
+            "p03_centerline",
+            "p04_spread_step",
+            "p05_slope_step",
+            "p06_balanced_relaxed",
+            "p07_upper_guardrail"
+          ]
+        },
+        {
+          "signature": "sig=1 allow=1 act=open reason=authorized",
+          "profiles": [
+            "p08_exploratory_ceiling"
+          ]
+        }
+      ],
+      "cluster_count": 2
+    },
+    {
+      "bar_ts": "2026-04-23T14:56:56.148000+00:00",
+      "clusters": [
+        {
+          "signature": "sig=0 allow=0 act=flat reason=no signal",
+          "profiles": [
+            "p01_guarded_core",
+            "p02_guarded_plus",
+            "p05_slope_step"
+          ]
+        },
+        {
+          "signature": "sig=-1 allow=1 act=hold reason=authorized",
+          "profiles": [
+            "p03_centerline",
+            "p04_spread_step",
+            "p06_balanced_relaxed",
+            "p07_upper_guardrail",
+            "p08_exploratory_ceiling"
+          ]
+        }
+      ],
+      "cluster_count": 2
+    },
+    {
+      "bar_ts": "2026-04-23T14:58:02.093000+00:00",
+      "clusters": [
+        {
+          "signature": "sig=0 allow=0 act=flat reason=no signal",
+          "profiles": [
+            "p01_guarded_core",
+            "p02_guarded_plus",
+            "p03_centerline",
+            "p05_slope_step",
+            "p06_balanced_relaxed"
+          ]
+        },
+        {
+          "signature": "sig=1 allow=1 act=open reason=authorized",
+          "profiles": [
+            "p04_spread_step",
+            "p07_upper_guardrail",
+            "p08_exploratory_ceiling"
+          ]
+        }
+      ],
+      "cluster_count": 2
+    },
+    {
+      "bar_ts": "2026-04-23T14:58:03.904000+00:00",
+      "clusters": [
+        {
+          "signature": "sig=0 allow=0 act=flat reason=no signal",
+          "profiles": [
+            "p01_guarded_core",
+            "p02_guarded_plus",
+            "p05_slope_step"
+          ]
+        },
+        {
+          "signature": "sig=-1 allow=1 act=open reason=authorized",
+          "profiles": [
+            "p03_centerline",
+            "p06_balanced_relaxed"
+          ]
+        },
+        {
+          "signature": "sig=-1 allow=1 act=hold reason=authorized",
+          "profiles": [
+            "p04_spread_step",
+            "p07_upper_guardrail",
+            "p08_exploratory_ceiling"
+          ]
+        }
+      ],
+      "cluster_count": 3
+    },
+    {
+      "bar_ts": "2026-04-23T14:58:09.949000+00:00",
+      "clusters": [
+        {
+          "signature": "sig=0 allow=0 act=flat reason=no signal",
+          "profiles": [
+            "p01_guarded_core",
+            "p02_guarded_plus",
+            "p03_centerline",
+            "p04_spread_step",
+            "p05_slope_step",
+            "p06_balanced_relaxed",
+            "p07_upper_guardrail"
+          ]
+        },
+        {
+          "signature": "sig=-1 allow=1 act=hold reason=authorized",
+          "profiles": [
+            "p08_exploratory_ceiling"
+          ]
+        }
+      ],
+      "cluster_count": 2
+    },
+    {
+      "bar_ts": "2026-04-23T14:58:20.126000+00:00",
+      "clusters": [
+        {
+          "signature": "sig=0 allow=0 act=flat reason=no signal",
+          "profiles": [
+            "p01_guarded_core",
+            "p02_guarded_plus",
+            "p03_centerline",
+            "p04_spread_step",
+            "p05_slope_step",
+            "p06_balanced_relaxed",
+            "p07_upper_guardrail"
+          ]
+        },
+        {
+          "signature": "sig=-1 allow=1 act=hold reason=authorized",
+          "profiles": [
+            "p08_exploratory_ceiling"
+          ]
+        }
+      ],
+      "cluster_count": 2
+    },
+    {
+      "bar_ts": "2026-04-23T14:59:30.376000+00:00",
+      "clusters": [
+        {
+          "signature": "sig=0 allow=0 act=flat reason=no signal",
+          "profiles": [
+            "p01_guarded_core",
+            "p02_guarded_plus",
+            "p03_centerline",
+            "p04_spread_step",
+            "p05_slope_step",
+            "p06_balanced_relaxed",
+            "p07_upper_guardrail"
+          ]
+        },
+        {
+          "signature": "sig=1 allow=1 act=open reason=authorized",
+          "profiles": [
+            "p08_exploratory_ceiling"
+          ]
+        }
+      ],
+      "cluster_count": 2
+    },
+    {
+      "bar_ts": "2026-04-23T15:00:38.829000+00:00",
+      "clusters": [
+        {
+          "signature": "sig=0 allow=0 act=flat reason=no signal",
+          "profiles": [
+            "p01_guarded_core",
+            "p02_guarded_plus",
+            "p03_centerline",
+            "p04_spread_step",
+            "p05_slope_step",
+            "p06_balanced_relaxed",
+            "p07_upper_guardrail"
+          ]
+        },
+        {
+          "signature": "sig=-1 allow=1 act=open reason=authorized",
+          "profiles": [
+            "p08_exploratory_ceiling"
+          ]
+        }
+      ],
+      "cluster_count": 2
+    },
+    {
+      "bar_ts": "2026-04-23T15:01:43.674000+00:00",
+      "clusters": [
+        {
+          "signature": "sig=0 allow=0 act=flat reason=no signal",
+          "profiles": [
+            "p01_guarded_core",
+            "p02_guarded_plus",
+            "p03_centerline",
+            "p04_spread_step",
+            "p05_slope_step",
+            "p06_balanced_relaxed"
+          ]
+        },
+        {
+          "signature": "sig=-1 allow=1 act=open reason=authorized",
+          "profiles": [
+            "p07_upper_guardrail"
+          ]
+        },
+        {
+          "signature": "sig=-1 allow=1 act=hold reason=authorized",
+          "profiles": [
+            "p08_exploratory_ceiling"
+          ]
+        }
+      ],
+      "cluster_count": 3
+    },
+    {
+      "bar_ts": "2026-04-23T15:03:06.644000+00:00",
+      "clusters": [
+        {
+          "signature": "sig=0 allow=0 act=flat reason=no signal",
+          "profiles": [
+            "p01_guarded_core",
+            "p02_guarded_plus",
+            "p03_centerline",
+            "p04_spread_step",
+            "p05_slope_step",
+            "p06_balanced_relaxed",
+            "p07_upper_guardrail"
+          ]
+        },
+        {
+          "signature": "sig=0 allow=1 act=close reason=authorized_exit",
+          "profiles": [
+            "p08_exploratory_ceiling"
+          ]
+        }
+      ],
+      "cluster_count": 2
+    },
+    {
+      "bar_ts": "2026-04-23T15:03:50.653000+00:00",
+      "clusters": [
+        {
+          "signature": "sig=0 allow=0 act=flat reason=no signal",
+          "profiles": [
+            "p01_guarded_core",
+            "p02_guarded_plus",
+            "p05_slope_step"
+          ]
+        },
+        {
+          "signature": "sig=-1 allow=1 act=open reason=authorized",
+          "profiles": [
+            "p03_centerline",
+            "p04_spread_step",
+            "p06_balanced_relaxed",
+            "p07_upper_guardrail",
+            "p08_exploratory_ceiling"
+          ]
+        }
+      ],
+      "cluster_count": 2
+    },
+    {
+      "bar_ts": "2026-04-23T15:06:15.098000+00:00",
+      "clusters": [
+        {
+          "signature": "sig=0 allow=0 act=flat reason=no signal",
+          "profiles": [
+            "p01_guarded_core",
+            "p02_guarded_plus",
+            "p03_centerline",
+            "p04_spread_step",
+            "p05_slope_step",
+            "p06_balanced_relaxed"
+          ]
+        },
+        {
+          "signature": "sig=1 allow=1 act=open reason=authorized",
+          "profiles": [
+            "p07_upper_guardrail",
+            "p08_exploratory_ceiling"
+          ]
+        }
+      ],
+      "cluster_count": 2
+    },
+    {
+      "bar_ts": "2026-04-23T15:06:15.121000+00:00",
+      "clusters": [
+        {
+          "signature": "sig=0 allow=0 act=flat reason=no signal",
+          "profiles": [
+            "p01_guarded_core",
+            "p05_slope_step"
+          ]
+        },
+        {
+          "signature": "sig=-1 allow=1 act=open reason=authorized",
+          "profiles": [
+            "p02_guarded_plus",
+            "p03_centerline",
+            "p04_spread_step",
+            "p06_balanced_relaxed",
+            "p07_upper_guardrail",
+            "p08_exploratory_ceiling"
+          ]
+        }
+      ],
+      "cluster_count": 2
+    },
+    {
+      "bar_ts": "2026-04-23T15:18:22.345000+00:00",
+      "clusters": [
+        {
+          "signature": "sig=0 allow=0 act=flat reason=no signal",
+          "profiles": [
+            "p01_guarded_core"
+          ]
+        },
+        {
+          "signature": "sig=0 allow=1 act=close reason=authorized_exit",
+          "profiles": [
+            "p02_guarded_plus",
+            "p03_centerline",
+            "p04_spread_step",
+            "p05_slope_step",
+            "p06_balanced_relaxed",
+            "p07_upper_guardrail",
+            "p08_exploratory_ceiling"
+          ]
+        }
+      ],
+      "cluster_count": 2
+    },
+    {
+      "bar_ts": "2026-04-23T15:41:34.801000+00:00",
+      "clusters": [
+        {
+          "signature": "sig=0 allow=0 act=flat reason=no signal",
+          "profiles": [
+            "p01_guarded_core",
+            "p02_guarded_plus",
+            "p03_centerline",
+            "p04_spread_step",
+            "p05_slope_step",
+            "p06_balanced_relaxed",
+            "p07_upper_guardrail"
+          ]
+        },
+        {
+          "signature": "sig=-1 allow=1 act=open reason=authorized",
+          "profiles": [
+            "p08_exploratory_ceiling"
+          ]
+        }
+      ],
+      "cluster_count": 2
+    },
+    {
+      "bar_ts": "2026-04-23T15:50:41.488000+00:00",
+      "clusters": [
+        {
+          "signature": "sig=0 allow=0 act=flat reason=no signal",
+          "profiles": [
+            "p01_guarded_core",
+            "p02_guarded_plus",
+            "p03_centerline",
+            "p04_spread_step",
+            "p05_slope_step",
+            "p06_balanced_relaxed",
+            "p07_upper_guardrail"
+          ]
+        },
+        {
+          "signature": "sig=1 allow=1 act=open reason=authorized",
+          "profiles": [
+            "p08_exploratory_ceiling"
+          ]
+        }
+      ],
+      "cluster_count": 2
+    },
+    {
+      "bar_ts": "2026-04-23T16:46:38.196000+00:00",
+      "clusters": [
+        {
+          "signature": "sig=0 allow=0 act=flat reason=no signal",
+          "profiles": [
+            "p01_guarded_core"
+          ]
+        },
+        {
+          "signature": "sig=1 allow=1 act=open reason=authorized",
+          "profiles": [
+            "p02_guarded_plus",
+            "p03_centerline",
+            "p04_spread_step",
+            "p05_slope_step",
+            "p06_balanced_relaxed",
+            "p07_upper_guardrail",
+            "p08_exploratory_ceiling"
+          ]
+        }
+      ],
+      "cluster_count": 2
+    }
+  ],
+  "generated_at_utc": "2026-04-23T16:20:12.819884+00:00"
+}

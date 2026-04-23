@@ -9,12 +9,15 @@ from typing import Any
 import pandas as pd
 
 from project_paths import gate_artifact_dir, shadow_artifact_dir
+from shadow_trade_accounting import summarize_shadow_trade_accounting
 
 
 MIN_PROMOTION_TRADING_DAYS = 20
 MIN_PROMOTION_ACTIONABLE_EVENTS = 30
+MIN_PROMOTION_REALIZED_TRADE_COVERAGE = 0.80
 MIN_WEEKLY_REVIEW_TRADING_DAYS = 5
 MIN_WEEKLY_REVIEW_ACTIONABLE_EVENTS = 10
+MIN_WEEKLY_REVIEW_REALIZED_TRADE_COVERAGE = 0.50
 MIN_DRIFT_EVENT_COUNT = 50
 
 NORMAL_SIGNAL_DENSITY_RATIO_RANGE = (0.75, 1.25)
@@ -34,6 +37,7 @@ class ShadowEvidencePaths:
     events_path: Path
     summary_json_path: Path
     summary_markdown_path: Path
+    run_meta_path: Path
 
 
 @dataclass(frozen=True)
@@ -55,6 +59,7 @@ def resolve_shadow_evidence_paths(
         events_path=root_dir / "events.jsonl",
         summary_json_path=root_dir / "shadow_summary.json",
         summary_markdown_path=root_dir / "shadow_summary.md",
+        run_meta_path=root_dir / "run_meta.json",
     )
 
 
@@ -143,6 +148,23 @@ def _normalize_event(row: dict[str, Any]) -> dict[str, Any]:
     context_aggressiveness_mode = row.get("context_aggressiveness_mode")
     context_block_policy = row.get("context_block_policy")
     context_reason_codes = row.get("context_reason_codes")
+    block_reason = row.get("block_reason")
+    block_stage = row.get("block_stage")
+    rule_block_reason = row.get("rule_block_reason")
+    runtime_gate_block_reason = row.get("runtime_gate_block_reason")
+    rule_candidate_signal = _safe_int(row.get("rule_candidate_signal", 0))
+    rule_diagnostics = row.get("rule_diagnostics") if isinstance(row.get("rule_diagnostics"), dict) else {}
+    raw_price_signal = _safe_int(
+        row.get(
+            "raw_price_signal",
+            rule_diagnostics.get("raw_price_signal") if isinstance(rule_diagnostics, dict) else 0,
+        )
+    )
+    failed_checks = (
+        rule_diagnostics.get("failed_checks") if isinstance(rule_diagnostics, dict) else None
+    )
+    entry_snapshot = row.get("entry_snapshot") if isinstance(row.get("entry_snapshot"), dict) else None
+    exit_snapshot = row.get("exit_snapshot") if isinstance(row.get("exit_snapshot"), dict) else None
     return {
         "timestamp_utc": timestamp.isoformat(),
         "timestamp": timestamp,
@@ -157,7 +179,6 @@ def _normalize_event(row: dict[str, Any]) -> dict[str, Any]:
         "would_open": would_open,
         "would_close": would_close,
         "would_hold": would_hold,
-        "would_hold": _safe_bool(row.get("would_hold", row.get("would_hold_position"))),
         "no_trade_reason": no_trade_reason,
         "spread_pips": _safe_float(row.get("spread_pips", row.get("spread", 0.0))),
         "session_filter_pass": _safe_bool(row.get("session_filter_pass", row.get("session_ok"))),
@@ -172,6 +193,18 @@ def _normalize_event(row: dict[str, Any]) -> dict[str, Any]:
         "context_aggressiveness_mode": str(context_aggressiveness_mode) if context_aggressiveness_mode is not None else None,
         "context_block_policy": str(context_block_policy) if context_block_policy is not None else None,
         "context_reason_codes": list(context_reason_codes) if isinstance(context_reason_codes, list) else None,
+        "block_reason": str(block_reason) if block_reason is not None else None,
+        "block_stage": str(block_stage) if block_stage is not None else None,
+        "rule_block_reason": str(rule_block_reason) if rule_block_reason is not None else None,
+        "runtime_gate_block_reason": (
+            str(runtime_gate_block_reason) if runtime_gate_block_reason is not None else None
+        ),
+        "rule_candidate_signal": rule_candidate_signal,
+        "raw_price_signal": raw_price_signal,
+        "failed_checks": list(failed_checks) if isinstance(failed_checks, list) else None,
+        "event_index": _safe_int(row.get("event_index"), 0),
+        "entry_snapshot": dict(entry_snapshot) if entry_snapshot is not None else None,
+        "exit_snapshot": dict(exit_snapshot) if exit_snapshot is not None else None,
     }
 
 
@@ -180,6 +213,7 @@ def summarize_shadow_events(
     *,
     min_trading_days: int = MIN_PROMOTION_TRADING_DAYS,
     min_actionable_events: int = MIN_PROMOTION_ACTIONABLE_EVENTS,
+    min_realized_trade_coverage: float = MIN_PROMOTION_REALIZED_TRADE_COVERAGE,
 ) -> dict[str, Any]:
     normalized = [_normalize_event(row) for row in events]
     if not normalized:
@@ -192,6 +226,11 @@ def summarize_shadow_events(
             "shadow_window_end": None,
             "no_trade_reason_counts": {},
             "directional_occupancy": {"flat": 0.0, "long": 0.0, "short": 0.0},
+            "trade_realism": {
+                "trade_count": 0,
+                "realized_trade_coverage": 0.0,
+                "min_realized_trade_coverage": float(min_realized_trade_coverage),
+            },
             "counts": {},
         }
 
@@ -218,11 +257,40 @@ def summarize_shadow_events(
     )
 
     no_trade_reason_counts: dict[str, int] = {}
+    block_reason_counts: dict[str, int] = {}
+    rule_block_reason_counts: dict[str, int] = {}
+    runtime_gate_block_reason_counts: dict[str, int] = {}
+    guard_failure_counts: dict[str, int] = {}
+    raw_price_signal_count = 0
+    guard_blocked_price_signal_count = 0
     occupancy_counts = {"flat": 0, "long": 0, "short": 0}
     for row in normalized:
         reason = row["no_trade_reason"].strip().lower()
         if reason:
             no_trade_reason_counts[reason] = no_trade_reason_counts.get(reason, 0) + 1
+        block_reason = str(row.get("block_reason") or "").strip().lower()
+        if block_reason:
+            block_reason_counts[block_reason] = block_reason_counts.get(block_reason, 0) + 1
+        rule_block_reason = str(row.get("rule_block_reason") or "").strip().lower()
+        if rule_block_reason:
+            rule_block_reason_counts[rule_block_reason] = rule_block_reason_counts.get(rule_block_reason, 0) + 1
+        runtime_gate_block_reason = str(row.get("runtime_gate_block_reason") or "").strip().lower()
+        if runtime_gate_block_reason:
+            runtime_gate_block_reason_counts[runtime_gate_block_reason] = (
+                runtime_gate_block_reason_counts.get(runtime_gate_block_reason, 0) + 1
+            )
+        raw_price_signal = _safe_int(row.get("raw_price_signal", 0))
+        rule_candidate_signal = _safe_int(row.get("rule_candidate_signal", 0))
+        failed_checks = row.get("failed_checks")
+        if raw_price_signal != 0:
+            raw_price_signal_count += 1
+        if raw_price_signal != 0 and rule_candidate_signal == 0:
+            guard_blocked_price_signal_count += 1
+            if isinstance(failed_checks, list):
+                for item in failed_checks:
+                    key = str(item or "").strip().lower()
+                    if key:
+                        guard_failure_counts[key] = guard_failure_counts.get(key, 0) + 1
         occupancy_state = row["position_state"] if row["position_state"] in occupancy_counts else "flat"
         occupancy_counts[occupancy_state] += 1
 
@@ -231,6 +299,14 @@ def summarize_shadow_events(
         state: float(count / event_count) if event_count else 0.0
         for state, count in occupancy_counts.items()
     }
+    trade_realism = summarize_shadow_trade_accounting(
+        events=normalized,
+        symbol=normalized[-1]["symbol"],
+        commission_per_lot=0.0,
+        slippage_pips=0.0,
+    )
+    realized_trade_coverage = float(trade_realism.get("realized_trade_coverage", 0.0) or 0.0)
+    realized_trade_sample_ok = realized_trade_coverage >= float(min_realized_trade_coverage)
 
     summary = {
         "symbol": normalized[-1]["symbol"],
@@ -272,14 +348,38 @@ def summarize_shadow_events(
         },
         "directional_occupancy": occupancy,
         "no_trade_reason_counts": no_trade_reason_counts,
-        "evidence_sufficient": len(trading_days) >= int(min_trading_days) and actionable_event_count >= int(min_actionable_events),
+        "block_reason_counts": block_reason_counts,
+        "rule_block_reason_counts": rule_block_reason_counts,
+        "runtime_gate_block_reason_counts": runtime_gate_block_reason_counts,
+        "rule_diagnostics": {
+            "raw_price_signal_count": raw_price_signal_count,
+            "guard_blocked_price_signal_count": guard_blocked_price_signal_count,
+            "guard_failure_counts": guard_failure_counts,
+        },
+        "trade_realism": {
+            "trade_count": int(trade_realism.get("trade_count", 0) or 0),
+            "close_event_count": int(trade_realism.get("close_event_count", 0) or 0),
+            "entry_event_count": int(trade_realism.get("entry_event_count", 0) or 0),
+            "realized_trade_coverage": realized_trade_coverage,
+            "min_realized_trade_coverage": float(min_realized_trade_coverage),
+            "sample_ok": realized_trade_sample_ok,
+            "pricing_mode": str(trade_realism.get("pricing_mode") or "unknown"),
+            "issues": list(trade_realism.get("issues", []) or []),
+        },
+        "evidence_sufficient": (
+            len(trading_days) >= int(min_trading_days)
+            and actionable_event_count >= int(min_actionable_events)
+            and realized_trade_sample_ok
+        ),
         "evidence_requirements": {
             "min_trading_days": int(min_trading_days),
             "min_actionable_events": int(min_actionable_events),
+            "min_realized_trade_coverage": float(min_realized_trade_coverage),
         },
         "evidence_shortfall": {
             "trading_days_remaining": int(max(int(min_trading_days) - len(trading_days), 0)),
             "actionable_events_remaining": int(max(int(min_actionable_events) - actionable_event_count, 0)),
+            "realized_trade_coverage_remaining": float(max(float(min_realized_trade_coverage) - realized_trade_coverage, 0.0)),
         },
     }
     return summary
@@ -419,6 +519,7 @@ def weekly_shadow_reviews(
             rows,
             min_trading_days=MIN_WEEKLY_REVIEW_TRADING_DAYS,
             min_actionable_events=MIN_WEEKLY_REVIEW_ACTIONABLE_EVENTS,
+            min_realized_trade_coverage=MIN_WEEKLY_REVIEW_REALIZED_TRADE_COVERAGE,
         )
         drift = compute_drift_metrics(summary, replay_reference=replay_reference)
         eligible = bool(summary.get("evidence_sufficient", False))
@@ -453,15 +554,27 @@ def render_shadow_summary_markdown(summary: dict[str, Any]) -> str:
     occupancy = dict(summary.get("directional_occupancy", {}) or {})
     requirements = dict(summary.get("evidence_requirements", {}) or {})
     shortfall = dict(summary.get("evidence_shortfall", {}) or {})
+    trade_realism = dict(summary.get("trade_realism", {}) or {})
 
     min_days = int(requirements.get("min_trading_days", MIN_PROMOTION_TRADING_DAYS) or MIN_PROMOTION_TRADING_DAYS)
     min_actionable = int(
         requirements.get("min_actionable_events", MIN_PROMOTION_ACTIONABLE_EVENTS) or MIN_PROMOTION_ACTIONABLE_EVENTS
     )
+    min_trade_coverage = float(
+        requirements.get("min_realized_trade_coverage", MIN_PROMOTION_REALIZED_TRADE_COVERAGE)
+        or MIN_PROMOTION_REALIZED_TRADE_COVERAGE
+    )
     have_days = int(summary.get("trading_days", 0) or 0)
     have_actionable = int(summary.get("actionable_event_count", 0) or 0)
     remaining_days = int(shortfall.get("trading_days_remaining", max(min_days - have_days, 0)) or 0)
     remaining_actionable = int(shortfall.get("actionable_events_remaining", max(min_actionable - have_actionable, 0)) or 0)
+    remaining_trade_coverage = float(
+        shortfall.get(
+            "realized_trade_coverage_remaining",
+            max(min_trade_coverage - float(trade_realism.get("realized_trade_coverage", 0.0) or 0.0), 0.0),
+        )
+        or 0.0
+    )
 
     evidence_sufficient = bool(summary.get("evidence_sufficient", False))
     evidence_label = "SUFFICIENT" if evidence_sufficient else "TOO_SMALL"
@@ -472,7 +585,11 @@ def render_shadow_summary_markdown(summary: dict[str, Any]) -> str:
         f"* Window: `{summary.get('shadow_window_start')}` -> `{summary.get('shadow_window_end')}`",
         f"* Trading days: `{summary.get('trading_days', 0)}`",
         f"* Actionable events: `{summary.get('actionable_event_count', 0)}`",
-        f"* Evidence status: `{evidence_label}` (need `{min_days}` days + `{min_actionable}` actionable; remaining `{remaining_days}` days / `{remaining_actionable}` actionable)",
+        (
+            f"* Evidence status: `{evidence_label}` "
+            f"(need `{min_days}` days + `{min_actionable}` actionable + `{min_trade_coverage:.0%}` realized coverage; "
+            f"remaining `{remaining_days}` days / `{remaining_actionable}` actionable / `{remaining_trade_coverage:.0%}` coverage)"
+        ),
         "",
         "## Counts",
         f"* Events: `{summary.get('event_count', 0)}`",
@@ -501,12 +618,45 @@ def render_shadow_summary_markdown(summary: dict[str, Any]) -> str:
         f"* Flat: `{occupancy.get('flat', 0.0):.2%}`",
         f"* Long: `{occupancy.get('long', 0.0):.2%}`",
         f"* Short: `{occupancy.get('short', 0.0):.2%}`",
+        "",
+        "## Trade Realism",
+        f"* Realized trades: `{trade_realism.get('trade_count', 0)}`",
+        f"* Close events: `{trade_realism.get('close_event_count', 0)}`",
+        f"* Realized coverage: `{float(trade_realism.get('realized_trade_coverage', 0.0) or 0.0):.2%}`",
+        f"* Sample OK: `{trade_realism.get('sample_ok')}`",
+        f"* Pricing mode: `{trade_realism.get('pricing_mode')}`",
     ]
     reason_counts = dict(summary.get("no_trade_reason_counts", {}) or {})
     if reason_counts:
         lines.extend(["", "## No-Trade Reasons"])
         for reason, count in sorted(reason_counts.items(), key=lambda item: (-int(item[1]), str(item[0]))):
             lines.append(f"* `{reason}`: `{count}`")
+    rule_diag = dict(summary.get("rule_diagnostics", {}) or {})
+    guard_counts = dict(rule_diag.get("guard_failure_counts", {}) or {})
+    if rule_diag:
+        lines.extend(["", "## Rule Diagnostics"])
+        lines.append(f"* Raw price signals: `{int(rule_diag.get('raw_price_signal_count', 0) or 0)}`")
+        lines.append(
+            f"* Guard-blocked raw signals: `{int(rule_diag.get('guard_blocked_price_signal_count', 0) or 0)}`"
+        )
+        if guard_counts:
+            top = sorted(guard_counts.items(), key=lambda item: (-int(item[1]), str(item[0])))[:10]
+            lines.append("* Guard failures (top): " + ", ".join(f"`{k}`={v}" for k, v in top))
+    rule_block_counts = dict(summary.get("rule_block_reason_counts", {}) or {})
+    if rule_block_counts:
+        lines.extend(["", "## Rule Blocks"])
+        for reason, count in sorted(rule_block_counts.items(), key=lambda item: (-int(item[1]), str(item[0]))):
+            lines.append(f"* `{reason}`: `{count}`")
+    runtime_gate_counts = dict(summary.get("runtime_gate_block_reason_counts", {}) or {})
+    if runtime_gate_counts:
+        lines.extend(["", "## Runtime Gate Blocks"])
+        for reason, count in sorted(runtime_gate_counts.items(), key=lambda item: (-int(item[1]), str(item[0]))):
+            lines.append(f"* `{reason}`: `{count}`")
+    realism_issues = list(trade_realism.get("issues", []) or [])
+    if realism_issues:
+        lines.extend(["", "## Realism Issues"])
+        for issue in realism_issues[:10]:
+            lines.append(f"* `{issue}`")
     return "\n".join(lines) + "\n"
 
 

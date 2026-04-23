@@ -329,8 +329,12 @@ def build_paper_live_gate(
     if replay_trade_count >= 10 and (replay_long_count == 0 or replay_short_count == 0):
         reasons.append("deployed anchor is one-sided on replay")
     if not shadow_summary.get("evidence_sufficient", False):
+        evidence_requirements = dict(shadow_summary.get("evidence_requirements", {}) or {})
         reasons.append(
-            f"shadow evidence below threshold: need {MIN_PROMOTION_TRADING_DAYS} trading days and {MIN_PROMOTION_ACTIONABLE_EVENTS} actionable events"
+            "shadow evidence below threshold: need "
+            f"{int(evidence_requirements.get('min_trading_days', MIN_PROMOTION_TRADING_DAYS))} trading days, "
+            f"{int(evidence_requirements.get('min_actionable_events', MIN_PROMOTION_ACTIONABLE_EVENTS))} actionable events, "
+            f"and {float(evidence_requirements.get('min_realized_trade_coverage', 0.0) or 0.0):.0%} realized trade coverage"
         )
     if sufficient_shadow_window and drift_metrics.get("critical", False):
         reasons.append("shadow window shows critical replay-vs-shadow drift")
@@ -471,6 +475,10 @@ def render_paper_live_gate_markdown(payload: dict[str, Any]) -> str:
         f"* Evidence sufficient: `{payload.get('shadow_summary_stats', {}).get('evidence_sufficient')}`",
         f"* Trading days: `{payload.get('shadow_summary_stats', {}).get('trading_days')}`",
         f"* Actionable events: `{payload.get('shadow_summary_stats', {}).get('actionable_event_count')}`",
+        (
+            f"* Realized trade coverage: "
+            f"`{float((payload.get('shadow_summary_stats', {}).get('trade_realism', {}) or {}).get('realized_trade_coverage', 0.0) or 0.0):.2%}`"
+        ),
         "",
         "## Drift",
         f"* Verdict: `{drift.get('verdict')}`",

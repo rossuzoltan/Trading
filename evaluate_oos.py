@@ -35,7 +35,12 @@ from artifact_manifest import (
     load_validated_scaler,
     load_validated_vecnormalize,
 )
-from selector_manifest import _file_sha256, load_selector_manifest, dataset_id_for_path as v3_dataset_id_for_path
+from selector_manifest import (
+    _file_sha256,
+    dataset_id_for_path as v3_dataset_id_for_path,
+    load_selector_manifest,
+    resolve_execution_cost_profile as resolve_manifest_execution_cost_profile,
+)
 from dataset_validation import validate_symbol_bar_spec
 from execution.replay_broker import ReplayBroker
 from risk.risk_engine import RiskEngine, RiskLimits
@@ -532,14 +537,7 @@ def _load_research_baseline_summary(training_diagnostics: dict[str, Any] | None)
 
 
 def _resolve_execution_cost_profile(manifest) -> dict[str, float]:
-    profile = dict(getattr(manifest, "execution_cost_profile", None) or {})
-    if not profile:
-        profile = dict(getattr(manifest, "cost_model", None) or {})
-    return {
-        "commission_per_lot": float(profile.get("commission_per_lot", 7.0)),
-        "slippage_pips": float(profile.get("slippage_pips", 0.25)),
-        "partial_fill_ratio": float(profile.get("partial_fill_ratio", 1.0)),
-    }
+    return resolve_manifest_execution_cost_profile(manifest)
 
 
 def _resolve_reward_profile(manifest) -> dict[str, Any]:

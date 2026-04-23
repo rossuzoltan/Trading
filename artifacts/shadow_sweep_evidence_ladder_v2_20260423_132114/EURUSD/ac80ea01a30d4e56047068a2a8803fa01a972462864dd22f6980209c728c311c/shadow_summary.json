@@ -1,0 +1,83 @@
+{
+  "symbol": "EURUSD",
+  "ticks_per_bar": 5000,
+  "manifest_hash": "ac80ea01a30d4e56047068a2a8803fa01a972462864dd22f6980209c728c311c",
+  "logic_hash": "e1c9bf0fb26a5124a4e774a846ff37a424a7c08d8b9d9a6eaeff740ea4a0e185",
+  "evaluator_hash": "e8509a738e4536f762b7377604fb1374fab54a761e095da127d29f2edc497a73",
+  "event_count": 7450,
+  "trading_days": 1,
+  "trading_day_list": [
+    "2026-04-23"
+  ],
+  "actionable_event_count": 216,
+  "shadow_window_start": "2026-04-23T11:21:14.135000+00:00",
+  "shadow_window_end": "2026-04-23T17:35:43.077000+00:00",
+  "counts": {
+    "signal_count": 1066,
+    "would_open_count": 108,
+    "would_close_count": 108,
+    "would_hold_count": 958,
+    "long_signal_count": 629,
+    "short_signal_count": 437,
+    "long_open_count": 75,
+    "short_open_count": 33,
+    "spread_rejection_count": 0,
+    "session_rejection_count": 0,
+    "risk_rejection_count": 0,
+    "context_macro_day_count": 0,
+    "context_blackout_count": 0,
+    "context_block_entry_count": 0,
+    "context_close_only_reversal_count": 0
+  },
+  "rates": {
+    "signal_density": 0.14308724832214764,
+    "would_open_density": 0.014496644295302013,
+    "spread_rejection_pct": 0.0,
+    "session_rejection_pct": 0.0,
+    "risk_rejection_pct": 0.0,
+    "long_open_share": 0.6944444444444444,
+    "context_blackout_pct": 0.0
+  },
+  "directional_occupancy": {
+    "flat": 0.8569127516778523,
+    "long": 0.08442953020134228,
+    "short": 0.05865771812080537
+  },
+  "no_trade_reason_counts": {
+    "authorized": 1062,
+    "authorized_exit": 108,
+    "no signal": 6280
+  },
+  "block_reason_counts": {
+    "price_z_threshold": 2570,
+    "spread_z_limit": 2434,
+    "ma20_slope_limit": 5,
+    "ma50_slope_limit": 13,
+    "time_delta_z_limit": 1258
+  },
+  "rule_block_reason_counts": {
+    "spread_z_limit": 2443,
+    "price_z_threshold": 2662,
+    "ma20_slope_limit": 5,
+    "ma50_slope_limit": 13,
+    "time_delta_z_limit": 1261
+  },
+  "runtime_gate_block_reason_counts": {},
+  "rule_diagnostics": {
+    "raw_price_signal_count": 2443,
+    "guard_blocked_price_signal_count": 1377,
+    "guard_failure_counts": {
+      "spread_z_limit": 706,
+      "time_delta_z_limit": 849
+    }
+  },
+  "evidence_sufficient": false,
+  "evidence_requirements": {
+    "min_trading_days": 20,
+    "min_actionable_events": 30
+  },
+  "evidence_shortfall": {
+    "trading_days_remaining": 19,
+    "actionable_events_remaining": 0
+  }
+}

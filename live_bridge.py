@@ -46,7 +46,12 @@ from project_paths import resolve_dataset_path, resolve_manifest_path, validate_
 from run_logging import configure_run_logging, set_log_context
 from runtime_common import STATE_FEATURE_COUNT, ActionSpec, ActionType, build_simple_action_map, deserialize_action_map
 from runtime_common import TRAINING_RUNTIME_OPTION_KEYS, runtime_options_from_training_payload
-from selector_manifest import load_selector_manifest, validate_paper_live_candidate_manifest
+from selector_manifest import (
+    describe_execution_cost_profile as describe_manifest_execution_cost_profile,
+    load_selector_manifest,
+    resolve_execution_cost_profile as resolve_manifest_execution_cost_profile,
+    validate_paper_live_candidate_manifest,
+)
 from strategies.rule_logic import compute_rule_direction
 from symbol_utils import pip_size_for_symbol
 from trading_config import (
@@ -125,43 +130,11 @@ class ManifestRulePolicy:
 
 
 def _resolve_execution_cost_profile(manifest) -> dict[str, float]:
-    # Preferred source is the selector manifest's cost_model.
-    # Keep backward-compatible fallback to legacy execution_cost_profile if present.
-    cost_model = dict(getattr(manifest, "cost_model", None) or {})
-    legacy_profile = dict(getattr(manifest, "execution_cost_profile", None) or {})
-    profile = cost_model or legacy_profile
-    return {
-        "commission_per_lot": float(profile.get("commission_per_lot", 7.0)),
-        "slippage_pips": float(profile.get("slippage_pips", 0.25)),
-        "partial_fill_ratio": float(profile.get("partial_fill_ratio", 1.0)),
-    }
+    return resolve_manifest_execution_cost_profile(manifest)
 
 
 def _describe_execution_cost_profile(manifest) -> tuple[dict[str, float], dict[str, str]]:
-    cost_model = dict(getattr(manifest, "cost_model", None) or {})
-    legacy_profile = dict(getattr(manifest, "execution_cost_profile", None) or {})
-    profile = cost_model or legacy_profile
-    source_label = "manifest.cost_model" if cost_model else ("manifest.execution_cost_profile" if legacy_profile else "default")
-
-    def _source_for(key: str, default_source: str) -> str:
-        if key in cost_model:
-            return "manifest.cost_model"
-        if key in legacy_profile:
-            return "manifest.execution_cost_profile"
-        return default_source
-
-    resolved = {
-        "commission_per_lot": float(profile.get("commission_per_lot", 7.0)),
-        "slippage_pips": float(profile.get("slippage_pips", 0.25)),
-        "partial_fill_ratio": float(profile.get("partial_fill_ratio", 1.0)),
-    }
-    sources = {
-        "commission_per_lot": _source_for("commission_per_lot", "default(7.0)"),
-        "slippage_pips": _source_for("slippage_pips", "default(0.25)"),
-        "partial_fill_ratio": _source_for("partial_fill_ratio", "default(1.0)"),
-        "_profile_selected": source_label,
-    }
-    return resolved, sources
+    return describe_manifest_execution_cost_profile(manifest)
 
 
 def _resolve_reward_profile(manifest) -> dict[str, float]:

@@ -1,0 +1,79 @@
+{
+  "symbol": "EURUSD",
+  "ticks_per_bar": 5000,
+  "manifest_hash": "ffc4269b0cb5ec35db41cc9a3938c9090b430d8a4e0001f451cd1c130a342a3f",
+  "logic_hash": "e1c9bf0fb26a5124a4e774a846ff37a424a7c08d8b9d9a6eaeff740ea4a0e185",
+  "evaluator_hash": "e8509a738e4536f762b7377604fb1374fab54a761e095da127d29f2edc497a73",
+  "event_count": 7450,
+  "trading_days": 1,
+  "trading_day_list": [
+    "2026-04-23"
+  ],
+  "actionable_event_count": 162,
+  "shadow_window_start": "2026-04-23T11:21:14.135000+00:00",
+  "shadow_window_end": "2026-04-23T17:35:43.077000+00:00",
+  "counts": {
+    "signal_count": 636,
+    "would_open_count": 81,
+    "would_close_count": 81,
+    "would_hold_count": 555,
+    "long_signal_count": 457,
+    "short_signal_count": 179,
+    "long_open_count": 60,
+    "short_open_count": 21,
+    "spread_rejection_count": 0,
+    "session_rejection_count": 0,
+    "risk_rejection_count": 0,
+    "context_macro_day_count": 0,
+    "context_blackout_count": 0,
+    "context_block_entry_count": 0,
+    "context_close_only_reversal_count": 0
+  },
+  "rates": {
+    "signal_density": 0.08536912751677853,
+    "would_open_density": 0.01087248322147651,
+    "spread_rejection_pct": 0.0,
+    "session_rejection_pct": 0.0,
+    "risk_rejection_pct": 0.0,
+    "long_open_share": 0.7407407407407407,
+    "context_blackout_pct": 0.0
+  },
+  "directional_occupancy": {
+    "flat": 0.9146308724832215,
+    "long": 0.06134228187919463,
+    "short": 0.024026845637583893
+  },
+  "no_trade_reason_counts": {
+    "no signal": 6734,
+    "authorized": 635,
+    "authorized_exit": 81
+  },
+  "block_reason_counts": {
+    "spread_z_limit": 3758,
+    "price_z_threshold": 1932,
+    "time_delta_z_limit": 1044
+  },
+  "rule_block_reason_counts": {
+    "spread_z_limit": 3778,
+    "price_z_threshold": 1990,
+    "time_delta_z_limit": 1046
+  },
+  "runtime_gate_block_reason_counts": {},
+  "rule_diagnostics": {
+    "raw_price_signal_count": 2443,
+    "guard_blocked_price_signal_count": 1807,
+    "guard_failure_counts": {
+      "spread_z_limit": 1223,
+      "time_delta_z_limit": 849
+    }
+  },
+  "evidence_sufficient": false,
+  "evidence_requirements": {
+    "min_trading_days": 20,
+    "min_actionable_events": 30
+  },
+  "evidence_shortfall": {
+    "trading_days_remaining": 19,
+    "actionable_events_remaining": 0
+  }
+}

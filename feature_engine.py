@@ -313,6 +313,7 @@ def _compute_raw(df: pd.DataFrame, *, latest_only_hurst: bool = False, fast_mode
     # (Close - MA20) / rolling_std(Close, 20): scale-free price extension measure.
     # Not in FEATURE_COLS — used as a challenger signal in rule experiments.
     price_roll_std = df["Close"].rolling(20).std().replace(0, np.nan)
+    df["price_roll_std"] = price_roll_std
     df["price_z"] = (df["Close"] - df["ma20"]) / price_roll_std
     df["price_z"] = df["price_z"].fillna(0.0)
 
