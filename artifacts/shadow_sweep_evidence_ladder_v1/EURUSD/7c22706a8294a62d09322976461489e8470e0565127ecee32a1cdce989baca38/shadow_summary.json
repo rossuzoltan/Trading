@@ -4,14 +4,15 @@
   "manifest_hash": "7c22706a8294a62d09322976461489e8470e0565127ecee32a1cdce989baca38",
   "logic_hash": "e1c9bf0fb26a5124a4e774a846ff37a424a7c08d8b9d9a6eaeff740ea4a0e185",
   "evaluator_hash": "e8509a738e4536f762b7377604fb1374fab54a761e095da127d29f2edc497a73",
-  "event_count": 8,
-  "trading_days": 1,
+  "event_count": 14,
+  "trading_days": 2,
   "trading_day_list": [
-    "2026-04-22"
+    "2026-04-22",
+    "2026-04-23"
   ],
   "actionable_event_count": 4,
   "shadow_window_start": "2026-04-22T12:04:54.776000+00:00",
-  "shadow_window_end": "2026-04-22T17:22:22.197000+00:00",
+  "shadow_window_end": "2026-04-23T03:59:08.266000+00:00",
   "counts": {
     "signal_count": 2,
     "would_open_count": 2,
@@ -22,31 +23,32 @@
     "long_open_count": 0,
     "short_open_count": 2,
     "spread_rejection_count": 0,
-    "session_rejection_count": 0,
+    "session_rejection_count": 1,
     "risk_rejection_count": 0,
     "context_macro_day_count": 0,
-    "context_blackout_count": 0,
+    "context_blackout_count": 1,
     "context_block_entry_count": 0,
     "context_close_only_reversal_count": 0
   },
   "rates": {
-    "signal_density": 0.25,
-    "would_open_density": 0.25,
+    "signal_density": 0.14285714285714285,
+    "would_open_density": 0.14285714285714285,
     "spread_rejection_pct": 0.0,
-    "session_rejection_pct": 0.0,
+    "session_rejection_pct": 7.142857142857143,
     "risk_rejection_pct": 0.0,
     "long_open_share": 0.0,
-    "context_blackout_pct": 0.0
+    "context_blackout_pct": 7.142857142857143
   },
   "directional_occupancy": {
-    "flat": 0.75,
+    "flat": 0.8571428571428571,
     "long": 0.0,
-    "short": 0.25
+    "short": 0.14285714285714285
   },
   "no_trade_reason_counts": {
-    "no signal": 4,
+    "no signal": 9,
     "authorized": 2,
-    "authorized_exit": 2
+    "authorized_exit": 2,
+    "session blocked": 1
   },
   "evidence_sufficient": false,
   "evidence_requirements": {
@@ -54,7 +56,7 @@
     "min_actionable_events": 30
   },
   "evidence_shortfall": {
-    "trading_days_remaining": 19,
+    "trading_days_remaining": 18,
     "actionable_events_remaining": 26
   }
 }
