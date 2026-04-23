@@ -1,11 +1,19 @@
 import argparse
 import json
 import os
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import MetaTrader5 as mt5
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from shadow_trade_accounting import summarize_shadow_trade_accounting
 
 
 @dataclass(frozen=True)
@@ -78,7 +86,7 @@ def _tick_at_or_before(symbol: str, bar_ts_utc: datetime, window_minutes: int) -
             chosen = tick
             break
     if chosen is None:
-        chosen = ticks[0]
+        return None
     return BarTick(time=int(chosen["time"]), bid=float(chosen["bid"]), ask=float(chosen["ask"]))
 
 
@@ -100,7 +108,6 @@ def _calc_realized_trades_pips(
     bar_ticks: Dict[str, BarTick],
     pip: float,
 ) -> List[float]:
-    # State-machine driven by position_after, because events do not include position_before.
     pos = 0
     entry_price: Optional[float] = None
 
@@ -109,21 +116,23 @@ def _calc_realized_trades_pips(
         ts = str(ev["timestamp_utc"])
         tick = bar_ticks.get(ts)
         if tick is None:
-            continue
-        new_pos = int(ev["position_after"])
+            raise RuntimeError(f"Missing at-or-before MT5 tick for event timestamp {ts}")
 
-        if pos == 0 and new_pos != 0:
-            # Approx: open at ask for long, bid for short (includes spread).
-            entry_price = tick.ask if new_pos > 0 else tick.bid
-
-        if pos != 0 and new_pos == 0 and entry_price is not None:
-            # Approx: close at bid for long, ask for short (includes spread).
+        if bool(ev.get("would_close", False)) and pos != 0 and entry_price is not None:
             exit_price = tick.bid if pos > 0 else tick.ask
             pnl_pips = (exit_price - entry_price) / pip if pos > 0 else (entry_price - exit_price) / pip
             realized.append(float(pnl_pips))
             entry_price = None
+            pos = 0
 
-        pos = new_pos
+        if bool(ev.get("would_open", False)):
+            new_direction = int(ev.get("signal_direction", ev.get("signal", 0)) or 0)
+            if new_direction == 0:
+                new_direction = int(ev.get("position_after", 0) or 0)
+            if new_direction == 0:
+                raise RuntimeError(f"Cannot infer open direction for event timestamp {ts}")
+            entry_price = tick.ask if new_direction > 0 else tick.bid
+            pos = int(new_direction)
 
     return realized
 
@@ -169,7 +178,26 @@ def main() -> int:
 
         stats: List[Tuple[str, int, float, float, int, int]] = []
         for p in profiles:
-            realized = _calc_realized_trades_pips(events=profile_events[p.profile_id], bar_ticks=bar_ticks, pip=pip)
+            events = profile_events[p.profile_id]
+            has_snapshots = any(
+                isinstance(ev.get("entry_snapshot"), dict) or isinstance(ev.get("exit_snapshot"), dict)
+                for ev in events
+            )
+            if has_snapshots:
+                accounting = summarize_shadow_trade_accounting(
+                    events=events,
+                    symbol=args.symbol,
+                    commission_per_lot=0.0,
+                    slippage_pips=0.0,
+                )
+                if float(accounting.get("realized_trade_coverage", 0.0) or 0.0) < 1.0:
+                    raise RuntimeError(
+                        f"Incomplete snapshot trade coverage for {p.profile_id}: "
+                        f"{float(accounting.get('realized_trade_coverage', 0.0) or 0.0):.2%}"
+                    )
+                realized = [float(trade["gross_pips"]) for trade in accounting["trades"]]
+            else:
+                realized = _calc_realized_trades_pips(events=events, bar_ticks=bar_ticks, pip=pip)
             net = sum(realized)
             trades = len(realized)
             wins = sum(1 for x in realized if x > 0)

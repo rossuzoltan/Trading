@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -23,7 +24,12 @@ from feature_engine import FeatureEngine
 from paper_live_metrics import resolve_shadow_evidence_paths
 from runtime.runtime_engine import Mt5CursorTickSource, TickCursor, VolumeBarBuilder
 from selector_manifest import SelectorManifest, load_selector_manifest
-from runtime.shadow_broker import ShadowBroker, _acquire_shadow_lock, _is_forex_session_open
+from runtime.shadow_broker import (
+    ShadowBroker,
+    _acquire_shadow_lock,
+    _is_forex_session_open,
+    collect_shadow_runtime_context,
+)
 from symbol_utils import price_to_pips
 
 log = logging.getLogger("shadow_sweep_broker")
@@ -80,6 +86,7 @@ def _load_targets(
         raise RuntimeError("Shadow sweep requires a positive ticks_per_bar value.")
 
     base_feature_schema_hash = loaded[0][1].feature_schema_hash
+    run_id = f"shadow-sweep-{uuid4().hex}"
     targets: list[SweepTarget] = []
     for resolved_manifest_path, manifest in loaded:
         manifest_symbol = str(manifest.strategy_symbol).upper()
@@ -110,10 +117,13 @@ def _load_targets(
         broker = ShadowBroker(
             resolved_manifest_path,
             audit_path=shadow_paths.events_path,
+            run_meta_path=shadow_paths.run_meta_path,
             manifest_fingerprint=manifest.manifest_hash,
             release_stage=manifest.release_stage,
             symbol=resolved_symbol,
             ticks_per_bar=resolved_ticks_per_bar,
+            run_id=run_id,
+            profile_name=_profile_name_for_manifest(resolved_manifest_path),
         )
         targets.append(
             SweepTarget(
@@ -161,6 +171,18 @@ def run_mt5_shadow_sweep_loop(
 
     _connect_mt5(mt5)
     tick_source = Mt5CursorTickSource(mt5)
+    common_run_context = collect_shadow_runtime_context(
+        mt5_module=mt5,
+        tick_source=tick_source,
+        mode="shadow_sweep",
+        poll_interval_ms=poll_interval_ms,
+        audit_dir=audit_dir,
+        max_bars=max_bars,
+        manifest_paths=[str(item.manifest_path) for item in targets],
+        target_count=len(targets),
+    )
+    for target in targets:
+        target.broker.update_run_context(**common_run_context)
     log.info("MT5 server UTC offset hours=%s", getattr(tick_source, "server_utc_offset_hours", None))
     log.info(
         "Starting shadow sweep symbol=%s ticks_per_bar=%s target_count=%s manifests=%s",
@@ -232,6 +254,7 @@ def run_mt5_shadow_sweep_loop(
                 for target in targets:
                     record = target.broker.evaluate(
                         bar_ts=bar.timestamp,
+                        bar=bar,
                         features=latest_features,
                         current_spread_pips=spread_pips,
                         is_session_open=is_session_open,

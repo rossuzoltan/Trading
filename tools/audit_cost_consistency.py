@@ -8,8 +8,12 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from selector_manifest import load_selector_manifest
-from live_bridge import _resolve_execution_cost_profile
+from selector_manifest import (
+    compute_execution_cost_profile_hash,
+    describe_execution_cost_profile,
+    load_selector_manifest,
+    resolve_execution_cost_profile,
+)
 
 
 def main() -> int:
@@ -19,11 +23,14 @@ def main() -> int:
         return 1
     manifest = load_selector_manifest(manifest_path, verify_manifest_hash=True, strict_manifest_hash=True)
     manifest_cost_model = dict(getattr(manifest, 'cost_model', None) or {})
+    resolved_profile, resolved_sources = describe_execution_cost_profile(manifest)
     payload = {
         'manifest_path': str(manifest_path),
         'manifest_hash': manifest.manifest_hash,
         'manifest_cost_model': manifest_cost_model,
-        'resolved_runtime_cost_profile': _resolve_execution_cost_profile(manifest),
+        'resolved_runtime_cost_profile': resolved_profile,
+        'resolved_runtime_cost_profile_hash': compute_execution_cost_profile_hash(resolved_profile),
+        'resolved_runtime_cost_sources': resolved_sources,
         'threshold_policy': dict(getattr(manifest, 'threshold_policy', None) or {}),
         'alpha_gate': dict(getattr(manifest, 'alpha_gate', None) or {}),
     }
@@ -62,12 +69,6 @@ def main() -> int:
 
     payload['ok'] = (len(mismatched_keys) == 0) and (len(extra_keys) == 0) and implicit_defaults_ok
     payload['severity'] = 'OK' if payload['ok'] else 'FAIL'
-    if payload['ok'] and missing_keys:
-        payload['severity'] = 'WARN'
-        payload['warning'] = (
-            'Manifest cost_model omits keys that are defaulted at runtime. '
-            'This is not strategy-behavior drift, but it is an audit/reporting default.'
-        )
     print(json.dumps(payload, indent=2))
     return 0 if payload['ok'] else 2
 

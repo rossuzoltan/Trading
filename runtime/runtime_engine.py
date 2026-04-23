@@ -213,10 +213,11 @@ class Mt5CursorTickSource:
 
     def fetch(self, symbol: str, cursor: TickCursor) -> tuple[list[TickEvent], TickCursor]:
         all_ticks: list[TickEvent] = []
-        working_cursor = TickCursor(time_msc=cursor.time_msc, offset=cursor.offset)
+        working_cursor = TickCursor(time_msc=max(int(cursor.time_msc or 0), 0), offset=max(int(cursor.offset or 0), 0))
         epoch = datetime.fromtimestamp(0, tz=timezone.utc)
         lookback_msc = int(self.initial_lookback_seconds) * 1000
         now_msc = int(datetime.now(timezone.utc).timestamp() * 1000)
+        stale_resync_attempts = 0
         if working_cursor.time_msc > now_msc + 1000:
             # Defensive clamp: if the cursor drifts into the future, pull it back into the recent window.
             working_cursor = TickCursor(time_msc=max(0, now_msc - lookback_msc), offset=0)
@@ -248,6 +249,39 @@ class Mt5CursorTickSource:
                 working_cursor = advance_cursor(working_cursor, new_ticks)
                 start_dt_utc = epoch + timedelta(milliseconds=working_cursor.time_msc)
                 start_dt = start_dt_utc + timedelta(hours=int(self.server_utc_offset_hours))
+                stale_resync_attempts = 0
+            elif converted:
+                latest_batch_time = int(converted[-1].time_msc)
+                latest_batch_offset = sum(1 for tick in converted if int(tick.time_msc) == latest_batch_time)
+                stale_batch = latest_batch_time < working_cursor.time_msc or (
+                    latest_batch_time == working_cursor.time_msc and latest_batch_offset <= working_cursor.offset
+                )
+                if stale_batch:
+                    latest_tick = None
+                    try:
+                        latest_tick = self.mt5.symbol_info_tick(symbol)
+                    except Exception:
+                        latest_tick = None
+                    if latest_tick is None:
+                        break
+                    live_tick = _as_tick_event(latest_tick, server_offset_msc=self.server_utc_offset_msc)
+                    if live_tick.time_msc <= working_cursor.time_msc:
+                        break
+                    if stale_resync_attempts < 1:
+                        resync_anchor_msc = max(
+                            working_cursor.time_msc,
+                            int(live_tick.time_msc) - lookback_msc,
+                        )
+                        start_dt_utc = epoch + timedelta(milliseconds=resync_anchor_msc)
+                        start_dt = start_dt_utc + timedelta(hours=int(self.server_utc_offset_hours))
+                        stale_resync_attempts += 1
+                        continue
+                    raise RuntimeError(
+                        "MT5 returned a stale tick batch at-or-before the persisted cursor "
+                        f"(cursor={working_cursor.time_msc}/{working_cursor.offset}, "
+                        f"batch_end={latest_batch_time}/{latest_batch_offset}, "
+                        f"live_tick={live_tick.time_msc})."
+                    )
 
             if len(raw) < request_count or not new_ticks:
                 break

@@ -106,6 +106,14 @@ class PaperLiveGateTests(unittest.TestCase):
                 "spread_ok": True,
                 "position_state": ("long" if signal_direction > 0 else "short") if is_actionable_open else "flat",
             }
+            if is_actionable_open:
+                record["entry_snapshot"] = {
+                    "event_index": index + 1,
+                    "bar_ts_utc": ts.isoformat(),
+                    "direction_opening": signal_direction,
+                    "bid_proxy": 1.1000 if signal_direction > 0 else 1.0999,
+                    "ask_proxy": 1.1001 if signal_direction > 0 else 1.1000,
+                }
             lines.append(json.dumps(record))
         extra_close_events = max(0, actionable_events - days)
         for index in range(extra_close_events):
@@ -131,6 +139,17 @@ class PaperLiveGateTests(unittest.TestCase):
                         "risk_filter_pass": True,
                         "spread_ok": True,
                         "position_state": "long" if prior_direction > 0 else "short",
+                        "exit_snapshot": {
+                            "event_index": days + index + 1,
+                            "direction_closing": prior_direction,
+                            "bid_proxy": 1.1010 if prior_direction > 0 else 1.1000,
+                            "ask_proxy": 1.1011 if prior_direction > 0 else 1.1001,
+                            "opened_at_event_index": index + 1,
+                            "opened_at_bar_ts_utc": (base_ts + timedelta(days=index)).isoformat(),
+                            "entry_bid_proxy": 1.1000 if prior_direction > 0 else 1.0999,
+                            "entry_ask_proxy": 1.1001 if prior_direction > 0 else 1.1000,
+                            "bars_held": 1,
+                        },
                     }
                 )
             )
@@ -168,6 +187,13 @@ class PaperLiveGateTests(unittest.TestCase):
                 "risk_filter_pass": True,
                 "spread_ok": True,
                 "position_state": "flat",
+                "entry_snapshot": {
+                    "event_index": 1,
+                    "bar_ts_utc": "2026-04-01T09:00:00+00:00",
+                    "direction_opening": -1,
+                    "bid_proxy": 1.1000,
+                    "ask_proxy": 1.1001,
+                },
             },
             {
                 "timestamp_utc": "2026-04-02T09:00:00+00:00",
@@ -179,12 +205,24 @@ class PaperLiveGateTests(unittest.TestCase):
                 "risk_filter_pass": True,
                 "spread_ok": True,
                 "position_state": "short",
+                "exit_snapshot": {
+                    "event_index": 2,
+                    "direction_closing": -1,
+                    "bid_proxy": 1.0998,
+                    "ask_proxy": 1.0999,
+                    "opened_at_event_index": 1,
+                    "opened_at_bar_ts_utc": "2026-04-01T09:00:00+00:00",
+                    "entry_bid_proxy": 1.1000,
+                    "entry_ask_proxy": 1.1001,
+                    "bars_held": 1,
+                },
             },
         ]
         summary = summarize_shadow_events(events, min_trading_days=2, min_actionable_events=2)
         self.assertEqual(2, summary["trading_days"])
         self.assertEqual(2, summary["actionable_event_count"])
         self.assertTrue(summary["evidence_sufficient"])
+        self.assertAlmostEqual(1.0, summary["trade_realism"]["realized_trade_coverage"])
 
     def test_compute_drift_metrics_flags_multiple_threshold_breaches_as_critical(self) -> None:
         summary = {
@@ -207,6 +245,42 @@ class PaperLiveGateTests(unittest.TestCase):
             },
         )
         self.assertTrue(drift["critical"])
+
+    def test_summarize_shadow_events_requires_realized_trade_coverage(self) -> None:
+        events = [
+            {
+                "timestamp_utc": "2026-04-01T09:00:00+00:00",
+                "symbol": "EURUSD",
+                "signal_direction": 1,
+                "would_open": True,
+                "would_close": False,
+                "session_filter_pass": True,
+                "risk_filter_pass": True,
+                "spread_ok": True,
+                "position_state": "flat",
+            },
+            {
+                "timestamp_utc": "2026-04-02T09:00:00+00:00",
+                "symbol": "EURUSD",
+                "signal_direction": 0,
+                "would_open": False,
+                "would_close": True,
+                "session_filter_pass": True,
+                "risk_filter_pass": True,
+                "spread_ok": True,
+                "position_state": "long",
+            },
+        ]
+
+        summary = summarize_shadow_events(
+            events,
+            min_trading_days=2,
+            min_actionable_events=2,
+            min_realized_trade_coverage=0.80,
+        )
+
+        self.assertFalse(summary["evidence_sufficient"])
+        self.assertAlmostEqual(0.0, summary["trade_realism"]["realized_trade_coverage"])
 
     def test_build_paper_live_gate_promotes_with_sufficient_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

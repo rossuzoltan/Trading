@@ -40,12 +40,8 @@ def _regime_filter_passes(features: Dict[str, Any], params: Dict[str, Any]) -> b
         return False
     return True
 
-def compute_mean_reversion_direction(features: Dict[str, Any], params: Dict[str, Any]) -> int:
-    """
-    Computes desired direction using price extension with cost/regime guards.
-    This keeps the direction tied to price dislocation while using spread and slope
-    only as authorization filters.
-    """
+
+def diagnose_mean_reversion_rule(features: Dict[str, Any], params: Dict[str, Any]) -> Dict[str, Any]:
     long_threshold = float(params.get("long_threshold", -params.get("threshold", 1.5)))
     short_threshold = float(params.get("short_threshold", params.get("threshold", 1.5)))
     max_spread_z = float(params.get("max_spread_z", 0.5))
@@ -59,23 +55,87 @@ def compute_mean_reversion_direction(features: Dict[str, Any], params: Dict[str,
     ma20_slope = _feature_value(features, "ma20_slope", 0.0)
     ma50_slope = _feature_value(features, "ma50_slope", 0.0)
 
-    if not _regime_filter_passes(features, params):
-        return 0
-
-    if spread_z > max_spread_z:
-        return 0
-    if abs(time_delta_z) > max_time_delta_z:
-        return 0
-    if abs(ma20_slope) > max_abs_ma20_slope:
-        return 0
-    if abs(ma50_slope) > max_abs_ma50_slope:
-        return 0
-
+    raw_price_signal = 0
     if price_z <= long_threshold:
-        return 1
-    if price_z >= short_threshold:
-        return -1
-    return 0
+        raw_price_signal = 1
+    elif price_z >= short_threshold:
+        raw_price_signal = -1
+
+    failed_checks: list[str] = []
+    if not _regime_filter_passes(features, params):
+        failed_checks.append("regime_filter")
+    if spread_z > max_spread_z:
+        failed_checks.append("spread_z_limit")
+    if abs(time_delta_z) > max_time_delta_z:
+        failed_checks.append("time_delta_z_limit")
+    if abs(ma20_slope) > max_abs_ma20_slope:
+        failed_checks.append("ma20_slope_limit")
+    if abs(ma50_slope) > max_abs_ma50_slope:
+        failed_checks.append("ma50_slope_limit")
+
+    block_reason = None
+    block_stage = None
+    candidate_signal = 0
+    if not _regime_filter_passes(features, params):
+        block_reason = "regime_filter"
+        block_stage = "regime"
+    elif spread_z > max_spread_z:
+        block_reason = "spread_z_limit"
+        block_stage = "spread_z"
+    elif abs(time_delta_z) > max_time_delta_z:
+        block_reason = "time_delta_z_limit"
+        block_stage = "time_delta_z"
+    elif abs(ma20_slope) > max_abs_ma20_slope:
+        block_reason = "ma20_slope_limit"
+        block_stage = "ma20_slope"
+    elif abs(ma50_slope) > max_abs_ma50_slope:
+        block_reason = "ma50_slope_limit"
+        block_stage = "ma50_slope"
+    elif price_z <= long_threshold:
+        candidate_signal = 1
+        block_stage = "threshold_pass"
+    elif price_z >= short_threshold:
+        candidate_signal = -1
+        block_stage = "threshold_pass"
+    else:
+        block_reason = "price_z_threshold"
+        block_stage = "price_z"
+
+    return {
+        "rule_family": "mean_reversion",
+        "candidate_signal": int(candidate_signal),
+        "raw_price_signal": int(raw_price_signal),
+        "failed_checks": failed_checks,
+        "block_reason": block_reason,
+        "block_stage": block_stage,
+        "thresholds": {
+            "long_threshold": long_threshold,
+            "short_threshold": short_threshold,
+            "max_spread_z": max_spread_z,
+            "max_time_delta_z": max_time_delta_z,
+            "max_abs_ma20_slope": max_abs_ma20_slope,
+            "max_abs_ma50_slope": max_abs_ma50_slope,
+        },
+        "values": {
+            "price_z": price_z,
+            "spread_z": spread_z,
+            "time_delta_z": time_delta_z,
+            "ma20_slope": ma20_slope,
+            "ma50_slope": ma50_slope,
+            "vol_norm_atr": _feature_value(features, "vol_norm_atr", 0.0),
+            "log_return": _feature_value(features, "log_return", 0.0),
+            "body_size": _feature_value(features, "body_size", 0.0),
+            "candle_range": _feature_value(features, "candle_range", 0.0),
+        },
+    }
+
+def compute_mean_reversion_direction(features: Dict[str, Any], params: Dict[str, Any]) -> int:
+    """
+    Computes desired direction using price extension with cost/regime guards.
+    This keeps the direction tied to price dislocation while using spread and slope
+    only as authorization filters.
+    """
+    return int(diagnose_mean_reversion_rule(features, params)["candidate_signal"])
 
 def compute_trend_direction(features: Dict[str, Any], params: Dict[str, Any]) -> int:
     """
@@ -301,3 +361,18 @@ def compute_rule_direction(rule_family: str, features: Dict[str, Any], params: D
     if not func:
         raise ValueError(f"Unknown rule family: {rule_family}")
     return func(features, params)
+
+
+def diagnose_rule_decision(rule_family: str, features: Dict[str, Any], params: Dict[str, Any]) -> Dict[str, Any]:
+    if rule_family == "mean_reversion":
+        return diagnose_mean_reversion_rule(features, params)
+
+    candidate_signal = compute_rule_direction(rule_family, features, params)
+    return {
+        "rule_family": rule_family,
+        "candidate_signal": int(candidate_signal),
+        "block_reason": None if candidate_signal != 0 else "rule_family_no_signal",
+        "block_stage": "threshold_pass" if candidate_signal != 0 else "rule_family",
+        "thresholds": {},
+        "values": {},
+    }
